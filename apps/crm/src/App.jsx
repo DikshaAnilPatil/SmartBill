@@ -68,6 +68,26 @@ function AppRoutes() {
   }, [location.pathname, role]);
 
   useEffect(() => {
+    // Cross-app SSO token parameter support
+    const params = new URLSearchParams(window.location.search);
+    const urlToken = params.get("token");
+    if (urlToken) {
+      localStorage.setItem("smartbill_token", urlToken);
+      const urlUser = params.get("user");
+      if (urlUser) {
+        try {
+          const parsed = JSON.parse(decodeURIComponent(urlUser));
+          localStorage.setItem("smartbill_user", JSON.stringify(parsed));
+          setUser(parsed);
+          if (parsed.role) setRole(parsed.role);
+        } catch {}
+      }
+      const cleanUrl = window.location.pathname;
+      window.history.replaceState({}, document.title, cleanUrl);
+    }
+  }, []);
+
+  useEffect(() => {
     const syncUser = () => {
       try {
         const raw = localStorage.getItem("smartbill_user");

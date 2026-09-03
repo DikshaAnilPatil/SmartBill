@@ -39,6 +39,7 @@ import {
 } from "@shared/api/customerAPI";
 import { fetchOrder } from "@shared/api/orderAPI";
 import { fetchPartySettings } from "@shared/api/partySettingsAPI";
+import { exportToCsv } from "@shared/utils/csvHelper";
 
 export default function CustomersScreen() {
   // =========================
@@ -380,6 +381,31 @@ export default function CustomersScreen() {
       showToast(error?.message || "Failed to load invoice", "error");
       setInvoiceModal(null);
     }
+  };
+
+  // =========================
+  // EXPORT CUSTOMERS
+  // =========================
+  const handleExportCustomers = () => {
+    if (customerList.length === 0) {
+      showToast("No customers available to export.", "error");
+      return;
+    }
+    const columns = [
+      { key: "name", label: "Customer Name" },
+      { key: "phone", label: "Phone Number" },
+      { key: "email", label: "Email" },
+      { key: "city", label: "City" },
+      { key: "address", label: "Billing Address" },
+      { key: "shippingAddress", label: "Shipping Address" },
+      { key: "category", label: "Category" },
+      { key: "gst", label: "GST Number" },
+      { key: "creditLimit", label: "Credit Limit (₹)" },
+      { key: "balance", label: "Balance (₹)" },
+      { key: "invoices", label: "Total Invoices" },
+    ];
+    exportToCsv("SmartBill_Customers.csv", columns, customerList);
+    showToast(`Exported ${customerList.length} customers successfully!`, "success");
   };
 
   // =========================
@@ -945,14 +971,25 @@ export default function CustomersScreen() {
           />
         </div>
 
-        <Btn
-          variant="primary"
-          size="md"
-          onClick={() => setShowModal(true)}
-          icon={<Plus className="w-4 h-4" />}
-        >
-          Add Customer
-        </Btn>
+        <div className="flex items-center gap-2">
+          <Btn
+            variant="outline"
+            size="md"
+            onClick={handleExportCustomers}
+            icon={<Download className="w-4 h-4" />}
+          >
+            Export CSV
+          </Btn>
+
+          <Btn
+            variant="primary"
+            size="md"
+            onClick={() => setShowModal(true)}
+            icon={<Plus className="w-4 h-4" />}
+          >
+            Add Customer
+          </Btn>
+        </div>
       </div>
 
       {/* =========================

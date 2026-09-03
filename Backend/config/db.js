@@ -29,6 +29,14 @@ const dropLegacyIndexes = async () => {
         console.log("[DB] Successfully dropped legacy ownerId_1 index from accountingsettings.");
       }
     }
+
+    if (names.includes("orders")) {
+      const indexes = await db.collection("orders").indexes();
+      if (indexes.some((idx) => idx.name === "invoiceNo_1")) {
+        await db.collection("orders").dropIndex("invoiceNo_1");
+        console.log("[DB] Successfully dropped legacy global invoiceNo_1 index from orders.");
+      }
+    }
   } catch (err) {
     console.warn("[DB] Index cleanup notice:", err.message);
   }

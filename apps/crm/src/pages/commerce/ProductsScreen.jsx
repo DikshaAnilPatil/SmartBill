@@ -33,6 +33,11 @@ import {
   updateProduct,
   deleteProduct,
 } from "@shared/api/productAPI";
+import {
+  exportToCsv,
+  parseCsv,
+  downloadProductTemplate,
+} from "@shared/utils/csvHelper";
 
 export default function ProductsScreen() {
   const [search, setSearch] = useState("");
@@ -59,6 +64,13 @@ export default function ProductsScreen() {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 3000);
   };
+
+  // CSV Import / Export State
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importFile, setImportFile] = useState(null);
+  const [parsedProducts, setParsedProducts] = useState([]);
+  const [importErrors, setImportErrors] = useState([]);
+  const [importing, setImporting] = useState(false);
 
   // Products are loaded from the backend API.
   const [productList, setProductList] = useState([]);
@@ -115,6 +127,129 @@ export default function ProductsScreen() {
   useEffect(() => {
     localStorage.setItem("smartbill_categories", JSON.stringify(categories));
   }, [categories]);
+
+  // =========================
+  // EXPORT PRODUCTS
+  // =========================
+  const handleExportProducts = () => {
+    if (productList.length === 0) {
+      showToast("No products available to export.", "error");
+      return;
+    }
+    const columns = [
+      { key: "name", label: "Product Name" },
+      { key: "sku", label: "SKU / Barcode" },
+      { key: "category", label: "Category" },
+      { key: "supplier", label: "Supplier" },
+      { key: "price", label: "Selling Price (₹)" },
+      { key: "cost", label: "Purchase Cost (₹)" },
+      { key: "stock", label: "Stock Quantity" },
+      { key: "minStock", label: "Min Stock Alert" },
+      { key: "unit", label: "Unit" },
+      { key: "gst", label: "GST (%)" },
+      { key: "status", label: "Status" },
+    ];
+    exportToCsv("SmartBill_Products.csv", columns, productList);
+    showToast(`Exported ${productList.length} products successfully!`, "success");
+  };
+
+  // =========================
+  // PARSE CSV FILE
+  // =========================
+  const handleFileChange = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImportFile(file);
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const text = event.target?.result;
+      const records = parseCsv(text);
+      if (!records || records.length === 0) {
+        setImportErrors(["CSV file is empty or could not be parsed."]);
+        setParsedProducts([]);
+        return;
+      }
+
+      const valid = [];
+      const errors = [];
+
+      records.forEach((r, idx) => {
+        const name = r.productname || r.name || r.title || "";
+        const rawPrice = r.sellingprice || r.price;
+        const rawCost = r.purchasecost || r.cost;
+        const rawStock = r.initialstockqty || r.stock || r.quantity;
+        const price = Number(rawPrice || 0);
+        const cost = Number(rawCost || 0);
+        const stock = Number(rawStock || 0);
+        const sku = r.skubarcode || r.sku || r.barcode || `SKU-${Date.now().toString().slice(-4)}-${idx + 1}`;
+        const category = r.category || "Electronics";
+        const minStock = Number(r.minstockalert || r.minstock || 10);
+        const unit = r.unitpiecekgbox || r.unit || "Piece";
+        const gst = Number(r.gstrate || r.gst || 0);
+
+        if (!name.trim()) {
+          errors.push(`Row ${idx + 2}: Product Name is required.`);
+        } else if (isNaN(price) || price < 0) {
+          errors.push(`Row ${idx + 2} ("${name}"): Invalid selling price.`);
+        } else {
+          valid.push({
+            name: name.trim(),
+            sku: sku.trim(),
+            category,
+            supplier: r.supplier || "",
+            cost,
+            price,
+            stock,
+            minStock,
+            unit,
+            gst,
+            status: "Active",
+          });
+        }
+      });
+
+      setParsedProducts(valid);
+      setImportErrors(errors);
+    };
+    reader.readAsText(file);
+  };
+
+  // =========================
+  // EXECUTE BULK IMPORT
+  // =========================
+  const handleExecuteImport = async () => {
+    if (parsedProducts.length === 0) {
+      showToast("No valid products to import.", "error");
+      return;
+    }
+    setImporting(true);
+    let createdCount = 0;
+    let failedCount = 0;
+
+    for (const p of parsedProducts) {
+      try {
+        await createProduct(p);
+        createdCount++;
+      } catch (err) {
+        failedCount++;
+      }
+    }
+
+    await loadProducts();
+    window.dispatchEvent(new CustomEvent("stockUpdated"));
+    window.dispatchEvent(new CustomEvent("productUpdated"));
+    setImporting(false);
+    setShowImportModal(false);
+    setImportFile(null);
+    setParsedProducts([]);
+    setImportErrors([]);
+
+    if (failedCount > 0) {
+      showToast(`Imported ${createdCount} products. ${failedCount} items had errors or duplicate SKUs.`, "warning");
+    } else {
+      showToast(`Successfully imported ${createdCount} products!`, "success");
+    }
+  };
 
   // --- DYNAMIC & PERSISTENT UNITS ---
   const [units, setUnits] = useState(() => {
@@ -817,6 +952,104 @@ export default function ProductsScreen() {
         </Modal>
       )}
 
+      {/* BULK IMPORT CSV MODAL */}
+      {showImportModal && (
+        <Modal
+          title="Bulk Import Products from CSV"
+          onClose={() => {
+            setShowImportModal(false);
+            setImportFile(null);
+            setParsedProducts([]);
+            setImportErrors([]);
+          }}
+        >
+          <div className="space-y-4">
+            <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl flex items-center justify-between">
+              <div>
+                <p className="text-sm font-semibold text-blue-900">Download CSV Template</p>
+                <p className="text-xs text-blue-700">Use our pre-formatted template with all required columns.</p>
+              </div>
+              <Btn
+                variant="outline"
+                size="sm"
+                onClick={downloadProductTemplate}
+                icon={<Download className="w-3.5 h-3.5" />}
+              >
+                Template
+              </Btn>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                Upload CSV File
+              </label>
+              <input
+                type="file"
+                accept=".csv"
+                onChange={handleFileChange}
+                className="w-full text-xs text-slate-600 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 border border-slate-200 rounded-xl p-2 cursor-pointer"
+              />
+            </div>
+
+            {importErrors.length > 0 && (
+              <div className="p-3 bg-red-50 border border-red-200 rounded-xl max-h-32 overflow-y-auto">
+                <p className="text-xs font-bold text-red-700 mb-1">CSV Warnings / Errors ({importErrors.length}):</p>
+                <ul className="text-[11px] text-red-600 space-y-0.5 list-disc pl-4">
+                  {importErrors.map((err, i) => (
+                    <li key={i}>{err}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {parsedProducts.length > 0 && (
+              <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl">
+                <p className="text-xs font-bold text-emerald-800">
+                  ✓ {parsedProducts.length} valid products ready for import.
+                </p>
+                <div className="max-h-32 overflow-y-auto mt-2 divide-y divide-emerald-100 text-xs text-slate-700">
+                  {parsedProducts.slice(0, 5).map((p, i) => (
+                    <div key={i} className="py-1 flex justify-between">
+                      <span className="font-medium">{p.name}</span>
+                      <span className="font-mono text-slate-500">₹{p.price} | Stock: {p.stock}</span>
+                    </div>
+                  ))}
+                  {parsedProducts.length > 5 && (
+                    <p className="text-[10px] text-slate-500 pt-1 text-center font-medium">
+                      + {parsedProducts.length - 5} more items...
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+
+            <div className="flex gap-3 pt-2">
+              <Btn
+                variant="outline"
+                onClick={() => {
+                  setShowImportModal(false);
+                  setImportFile(null);
+                  setParsedProducts([]);
+                  setImportErrors([]);
+                }}
+                className="flex-1 justify-center"
+              >
+                Cancel
+              </Btn>
+              <Btn
+                variant="primary"
+                disabled={importing || parsedProducts.length === 0}
+                onClick={handleExecuteImport}
+                className="flex-1 justify-center"
+                icon={<Upload className="w-4 h-4" />}
+              >
+                {importing ? "Importing..." : `Import (${parsedProducts.length})`}
+              </Btn>
+            </div>
+          </div>
+        </Modal>
+      )}
+
       {/* FILTER AND HEADER CONTROLS */}
       <div className="flex flex-col gap-3">
         <div className="flex items-center gap-3 flex-wrap">
@@ -827,6 +1060,22 @@ export default function ProductsScreen() {
               icon={<Search className="w-4 h-4" />}
             />
           </div>
+          <Btn
+            variant="outline"
+            size="md"
+            onClick={handleExportProducts}
+            icon={<Download className="w-4 h-4" />}
+          >
+            Export CSV
+          </Btn>
+          <Btn
+            variant="outline"
+            size="md"
+            onClick={() => setShowImportModal(true)}
+            icon={<Upload className="w-4 h-4" />}
+          >
+            Import CSV
+          </Btn>
           <Btn
             variant="outline"
             size="md"

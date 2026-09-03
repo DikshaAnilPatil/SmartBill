@@ -261,7 +261,7 @@ export const createPurchase = async (req, res) => {
   }
 };
 
-// ================= MARK PURCHASE AS PAID =================
+// ================= RECORD PURCHASE PAYMENT =================
 export const markPurchaseAsPaid = async (req, res) => {
   try {
     const purchase = await Purchase.findOne({
@@ -275,26 +275,65 @@ export const markPurchaseAsPaid = async (req, res) => {
       });
     }
 
-    // If already paid, no update is required
-    if (purchase.paymentStatus === "Paid") {
+    const currentRemaining = Number(purchase.remainingAmount) || 0;
+
+    // If already fully paid and remaining is 0
+    if (purchase.paymentStatus === "Paid" && currentRemaining <= 0) {
       return res.status(200).json({
-        message: "Purchase is already marked as paid.",
+        message: "This purchase has already been fully paid.",
         purchase,
       });
     }
 
-    const previousRemainingAmount = Number(purchase.remainingAmount) || 0;
+    const {
+      amount,
+      paymentMethod = "Cash",
+      paymentDate = new Date(),
+      referenceNo = "",
+      notes = "",
+    } = req.body || {};
 
-    // Update purchase payment details
-    purchase.paymentStatus = "Paid";
-    purchase.amountPaid = Number(purchase.totalAmount) || 0;
-    purchase.remainingAmount = 0;
+    // If amount is provided, use it. Otherwise, default to full remaining amount.
+    const payAmount =
+      amount !== undefined && amount !== null && amount !== ""
+        ? Number(amount)
+        : currentRemaining;
+
+    if (!Number.isFinite(payAmount) || payAmount <= 0) {
+      return res.status(400).json({
+        message: "Please enter a valid payment amount greater than 0.",
+      });
+    }
+
+    if (payAmount > currentRemaining + 0.01) {
+      return res.status(400).json({
+        message: `Payment amount (₹${payAmount}) cannot exceed the current remaining due (₹${currentRemaining}).`,
+      });
+    }
+
+    const newAmountPaid = (Number(purchase.amountPaid) || 0) + payAmount;
+    const newRemaining = Math.max(
+      0,
+      (Number(purchase.totalAmount) || 0) - newAmountPaid
+    );
+    const newStatus = newRemaining <= 0.01 ? "Paid" : "Partially Paid";
+
+    purchase.amountPaid = newAmountPaid;
+    purchase.remainingAmount = newRemaining <= 0.01 ? 0 : newRemaining;
+    purchase.paymentStatus = newStatus;
+    purchase.paymentMethod = paymentMethod;
+
+    if (notes || referenceNo) {
+      const paymentLog = `[Payment on ${new Date(paymentDate).toLocaleDateString("en-IN")}]: ₹${payAmount} via ${paymentMethod}${referenceNo ? ` (Ref: ${referenceNo})` : ""}${notes ? ` - ${notes}` : ""}`;
+      purchase.notes = purchase.notes
+        ? `${purchase.notes}\n${paymentLog}`
+        : paymentLog;
+    }
 
     await purchase.save();
 
     // Find the supplier
     let supplierDoc = null;
-
     if (purchase.supplierId) {
       supplierDoc = await Supplier.findOne({
         _id: purchase.supplierId,
@@ -309,13 +348,12 @@ export const markPurchaseAsPaid = async (req, res) => {
       });
     }
 
-    // Reduce supplier payable balance by the amount that was previously due
-    if (supplierDoc && previousRemainingAmount > 0) {
+    // Reduce supplier payable balance by the exact payment amount
+    if (supplierDoc && payAmount > 0) {
       supplierDoc.balance = Math.max(
         0,
-        (Number(supplierDoc.balance) || 0) - previousRemainingAmount
+        (Number(supplierDoc.balance) || 0) - payAmount
       );
-
       await supplierDoc.save();
     }
 
@@ -324,42 +362,36 @@ export const markPurchaseAsPaid = async (req, res) => {
       await createNotification({
         ownerId: req.user._id,
         userId: req.user.actualUserId || req.user._id,
-        title: `Purchase Paid: #${
+        title: `Payment Recorded: #${
           purchase.supplierInvoiceNo ||
           purchase.purchaseOrderNo ||
           "Bill"
         }`,
-        message: `Payment of ₹${Number(
-          purchase.totalAmount || 0
-        ).toLocaleString("en-IN")} to ${
+        message: `Payment of ₹${payAmount.toLocaleString("en-IN")} to ${
           purchase.supplierName
-        } has been marked as paid.`,
+        } recorded via ${paymentMethod} (${newStatus}).`,
         type: "success",
         category: "purchase",
         link: "purchase",
         metadata: {
           purchaseId: purchase._id,
-          totalAmount: purchase.totalAmount,
+          paidAmount: payAmount,
           supplierName: purchase.supplierName,
-          paymentStatus: "Paid",
+          paymentStatus: newStatus,
         },
       });
     } catch (notifErr) {
-      console.error(
-        "Purchase payment notification error:",
-        notifErr.message
-      );
+      console.error("Purchase payment notification error:", notifErr.message);
     }
 
     return res.status(200).json({
-      message: "Purchase marked as paid successfully.",
+      message: `Payment of ₹${payAmount.toLocaleString("en-IN")} recorded successfully (${newStatus}).`,
       purchase,
     });
   } catch (error) {
     console.error("MARK PURCHASE AS PAID ERROR:", error.message);
-
     return res.status(500).json({
-      message: error.message || "Failed to mark purchase as paid.",
+      message: error.message || "Failed to record payment.",
     });
   }
 };

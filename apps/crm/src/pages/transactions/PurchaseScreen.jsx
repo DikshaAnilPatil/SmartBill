@@ -5,6 +5,13 @@ import {
   Search,
   Trash2,
   Loader2,
+  CreditCard,
+  Calendar,
+  X,
+  CheckCircle2,
+  Receipt,
+  Building2,
+  FileText,
 } from "lucide-react";
 import {
   createPurchase,
@@ -93,6 +100,15 @@ export default function PurchaseScreen() {
   const [searchHistory, setSearchHistory] = useState("");
   const [filterMonth, setFilterMonth] = useState("");
   const [toast, setToast] = useState(null);
+
+  // Professional Record Payment Modal States
+  const [paymentModalPurchase, setPaymentModalPurchase] = useState(null);
+  const [paymentAmount, setPaymentAmount] = useState("");
+  const [paymentMode, setPaymentMode] = useState("Cash");
+  const [paymentDate, setPaymentDate] = useState(new Date().toISOString().slice(0, 10));
+  const [paymentRefNo, setPaymentRefNo] = useState("");
+  const [paymentNotes, setPaymentNotes] = useState("");
+  const [recordingPayment, setRecordingPayment] = useState(false);
 
   const showToast = (msg, type = "success") => {
     setToast({ msg, type });
@@ -302,44 +318,105 @@ export default function PurchaseScreen() {
   };
 
 
-const handleMarkAsPaid = async (purchaseId) => {
-  if (!purchaseId) return;
+  // ==========================================
+  // PROFESSIONAL RECORD PAYMENT MODAL HANDLERS
+  // ==========================================
+  const handleOpenPaymentModal = (purchase) => {
+    if (!purchase) return;
+    const remaining =
+      purchase.remainingAmount !== undefined
+        ? Number(purchase.remainingAmount)
+        : Math.max(
+            0,
+            (Number(purchase.totalAmount || purchase.total) || 0) -
+              (Number(purchase.amountPaid) || 0)
+          );
 
-  const confirmed = window.confirm(
-    "Are you sure you want to mark this purchase as paid?"
-  );
+    setPaymentModalPurchase(purchase);
+    setPaymentAmount(remaining > 0 ? String(remaining) : "0");
+    setPaymentMode(purchase.paymentMethod || "Cash");
+    setPaymentDate(new Date().toISOString().slice(0, 10));
+    setPaymentRefNo("");
+    setPaymentNotes("");
+  };
 
-  if (!confirmed) return;
+  const handleClosePaymentModal = () => {
+    setPaymentModalPurchase(null);
+    setPaymentAmount("");
+    setRecordingPayment(false);
+  };
 
-  try {
-    const response = await markPurchaseAsPaid(purchaseId);
+  const handleConfirmPayment = async (e) => {
+    if (e) e.preventDefault();
+    if (!paymentModalPurchase) return;
 
-    const updatedPurchase = response?.purchase;
+    const purchaseId =
+      paymentModalPurchase._id || paymentModalPurchase.id;
+    const currentRemaining =
+      paymentModalPurchase.remainingAmount !== undefined
+        ? Number(paymentModalPurchase.remainingAmount)
+        : Math.max(
+            0,
+            (Number(
+              paymentModalPurchase.totalAmount || paymentModalPurchase.total
+            ) || 0) -
+              (Number(paymentModalPurchase.amountPaid) || 0)
+          );
 
-    setPurchaseList((prev) =>
-      prev.map((purchase) =>
-        (purchase._id || purchase.id) === purchaseId
-          ? updatedPurchase || {
-              ...purchase,
-              paymentStatus: "Paid",
-              amountPaid: purchase.totalAmount || 0,
-              remainingAmount: 0,
-            }
-          : purchase
-      )
-    );
+    const amountNum = Number(paymentAmount);
+    if (!Number.isFinite(amountNum) || amountNum <= 0) {
+      showToast("Please enter a valid payment amount greater than 0", "error");
+      return;
+    }
 
-    showToast("Purchase marked as paid successfully!", "success");
-  } catch (err) {
-    console.error("MARK PURCHASE AS PAID ERROR:", err);
-    showToast(
-      err.response?.data?.message ||
-        err.message ||
-        "Failed to mark purchase as paid",
-      "error"
-    );
-  }
-};
+    if (amountNum > currentRemaining + 0.01) {
+      showToast(
+        `Payment amount (₹${amountNum}) cannot exceed remaining balance of ₹${currentRemaining.toLocaleString(
+          "en-IN"
+        )}`,
+        "error"
+      );
+      return;
+    }
+
+    setRecordingPayment(true);
+    try {
+      const response = await markPurchaseAsPaid(purchaseId, {
+        amount: amountNum,
+        paymentMethod: paymentMode,
+        paymentDate,
+        referenceNo: paymentRefNo,
+        notes: paymentNotes,
+      });
+
+      const updatedPurchase = response?.purchase;
+
+      setPurchaseList((prev) =>
+        prev.map((p) =>
+          (p._id || p.id) === purchaseId ? updatedPurchase || p : p
+        )
+      );
+
+      showToast(
+        `Payment of ₹${amountNum.toLocaleString(
+          "en-IN"
+        )} recorded successfully!`,
+        "success"
+      );
+      handleClosePaymentModal();
+      await loadData();
+    } catch (err) {
+      console.error("RECORD PURCHASE PAYMENT ERROR:", err);
+      showToast(
+        err.response?.data?.message ||
+          err.message ||
+          "Failed to record payment",
+        "error"
+      );
+    } finally {
+      setRecordingPayment(false);
+    }
+  };
 
 
   const handleSavePurchase = async () => {
@@ -1050,22 +1127,23 @@ const handleMarkAsPaid = async (purchaseId) => {
                           )}
                         </td>
                         <td className="px-4 py-3 text-center">
-  {purchase.paymentStatus !== "Paid" ? (
-    <button
-      type="button"
-      onClick={() => handleMarkAsPaid(purchase._id || purchase.id)}
-      className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-semibold transition-colors cursor-pointer"
-      title="Mark purchase as paid"
-    >
-      <Check className="w-3 h-3" />
-      Mark as Paid
-    </button>
-  ) : (
-    <span className="text-xs text-slate-400 dark:text-slate-500">
-      —
-    </span>
-  )}
-</td>
+                          {purchase.paymentStatus !== "Paid" && remAmt > 0 ? (
+                            <button
+                              type="button"
+                              onClick={() => handleOpenPaymentModal(purchase)}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white text-xs font-semibold shadow-sm hover:shadow transition-all cursor-pointer"
+                              title="Record payment to supplier"
+                            >
+                              <CreditCard className="w-3.5 h-3.5" />
+                              Record Payment
+                            </button>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-600 dark:text-emerald-400">
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              Cleared
+                            </span>
+                          )}
+                        </td>
                       </tr>
                     );
                   })}
@@ -1075,6 +1153,223 @@ const handleMarkAsPaid = async (purchaseId) => {
           )}
         </div>
       )}
+
+      {/* ── PROFESSIONAL RECORD SUPPLIER PAYMENT MODAL ── */}
+      {paymentModalPurchase && (() => {
+        const total = Number(paymentModalPurchase.totalAmount || paymentModalPurchase.total) || 0;
+        const paidSoFar = Number(paymentModalPurchase.amountPaid) || 0;
+        const currentDue = paymentModalPurchase.remainingAmount !== undefined
+          ? Number(paymentModalPurchase.remainingAmount)
+          : Math.max(0, total - paidSoFar);
+
+        const enteredAmount = Number(paymentAmount) || 0;
+        const remainingAfterPayment = Math.max(0, currentDue - enteredAmount);
+        const isFullPayment = enteredAmount >= currentDue && currentDue > 0;
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+            <div
+              className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden flex flex-col"
+              style={{ animation: "scaleUp 0.2s cubic-bezier(0.16, 1, 0.3, 1)" }}
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 dark:border-slate-800 bg-gradient-to-r from-blue-600 to-indigo-600 text-white">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-white/15 flex items-center justify-center">
+                    <CreditCard className="w-5 h-5 text-white" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-base text-white">Record Supplier Payment</h3>
+                    <p className="text-xs text-blue-100">
+                      Invoice #{paymentModalPurchase.supplierInvoiceNo || paymentModalPurchase.purchaseOrderNo || paymentModalPurchase._id?.slice(-6) || "Bill"}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={handleClosePaymentModal}
+                  disabled={recordingPayment}
+                  className="text-white/80 hover:text-white p-1.5 rounded-lg hover:bg-white/10 transition-colors cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Body */}
+              <form onSubmit={handleConfirmPayment} className="p-6 space-y-5">
+                {/* Supplier & Due Summary Card */}
+                <div className="bg-slate-50 dark:bg-slate-800/60 rounded-xl p-4 border border-slate-200 dark:border-slate-700">
+                  <div className="flex items-center justify-between pb-3 mb-3 border-b border-slate-200 dark:border-slate-700/60">
+                    <div className="flex items-center gap-2">
+                      <Building2 className="w-4 h-4 text-slate-500" />
+                      <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                        Supplier
+                      </span>
+                    </div>
+                    <span className="font-bold text-sm text-slate-900 dark:text-white">
+                      {paymentModalPurchase.supplierName || paymentModalPurchase.supplier || "Supplier"}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2 text-center">
+                    <div>
+                      <p className="text-[10px] uppercase font-semibold text-slate-400">Total Bill</p>
+                      <p className="text-xs font-bold text-slate-700 dark:text-slate-300 font-mono mt-0.5">
+                        {fmt(total)}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] uppercase font-semibold text-slate-400">Paid So Far</p>
+                      <p className="text-xs font-bold text-emerald-600 dark:text-emerald-400 font-mono mt-0.5">
+                        {fmt(paidSoFar)}
+                      </p>
+                    </div>
+                    <div className="bg-red-50 dark:bg-red-950/40 rounded-lg py-1 border border-red-100 dark:border-red-900/30">
+                      <p className="text-[10px] uppercase font-bold text-red-600 dark:text-red-400">Current Due</p>
+                      <p className="text-xs font-black text-red-600 dark:text-red-400 font-mono mt-0.5">
+                        {fmt(currentDue)}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Amount Input with Quick Full Pay Button */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                      Payment Amount (₹) <span className="text-red-500">*</span>
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setPaymentAmount(String(currentDue))}
+                      className="text-[11px] font-semibold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
+                    >
+                      Pay Full Due ({fmt(currentDue)})
+                    </button>
+                  </div>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-semibold text-sm">
+                      ₹
+                    </span>
+                    <input
+                      type="number"
+                      step="any"
+                      min="0.01"
+                      max={currentDue}
+                      value={paymentAmount}
+                      onChange={(e) => setPaymentAmount(e.target.value)}
+                      placeholder="0.00"
+                      required
+                      className="w-full pl-8 pr-4 py-2.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white font-mono font-bold text-base outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                    />
+                  </div>
+                  {/* Real-time remaining preview */}
+                  <div className="mt-1.5 flex items-center justify-between text-[11px]">
+                    <span className="text-slate-500">
+                      Remaining after payment:
+                    </span>
+                    <span className={`font-mono font-bold ${isFullPayment ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"}`}>
+                      {isFullPayment ? "₹0.00 (Fully Cleared ✓)" : fmt(remainingAfterPayment)}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Payment Method & Date */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                      Payment Mode
+                    </label>
+                    <select
+                      value={paymentMode}
+                      onChange={(e) => setPaymentMode(e.target.value)}
+                      className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-white outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                    >
+                      {purchasePaymentMethods.map((m) => (
+                        <option key={m} value={m}>
+                          {m}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                      Payment Date
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="date"
+                        value={paymentDate}
+                        onChange={(e) => setPaymentDate(e.target.value)}
+                        className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-white outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Transaction Ref & Notes */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                      Ref / Cheque / UPI No. <span className="text-slate-400 font-normal">(Optional)</span>
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. TXN987214"
+                      value={paymentRefNo}
+                      onChange={(e) => setPaymentRefNo(e.target.value)}
+                      className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-white placeholder-slate-400 outline-none focus:border-blue-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                      Payment Notes <span className="text-slate-400 font-normal">(Optional)</span>
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Cleared 50% advance"
+                      value={paymentNotes}
+                      onChange={(e) => setPaymentNotes(e.target.value)}
+                      className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-white placeholder-slate-400 outline-none focus:border-blue-500"
+                    />
+                  </div>
+                </div>
+
+                {/* Modal Actions */}
+                <div className="flex items-center gap-3 pt-3 border-t border-slate-100 dark:border-slate-800">
+                  <button
+                    type="button"
+                    onClick={handleClosePaymentModal}
+                    disabled={recordingPayment}
+                    className="flex-1 py-2.5 px-4 rounded-xl border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+
+                  <button
+                    type="submit"
+                    disabled={recordingPayment || enteredAmount <= 0}
+                    className="flex-1 py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 active:bg-blue-800 disabled:opacity-50 text-white text-xs font-bold shadow-lg shadow-blue-500/25 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    {recordingPayment ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Recording...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Check className="w-4 h-4" />
+                        <span>Confirm Payment ({enteredAmount > 0 ? fmt(enteredAmount) : "₹0"})</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

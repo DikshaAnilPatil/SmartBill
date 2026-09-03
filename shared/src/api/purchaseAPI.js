@@ -25,12 +25,15 @@ export const fetchPurchaseById = (id) =>
   axiosClient.get(`/purchases/${id}`).then((res) => res.data);
 
 /**
- * Mark a purchase as fully paid.
+ * Record a payment (partial or full) against a purchase.
  * @param {string} id
+ * @param {object} paymentData - { amount, paymentMethod, paymentDate, referenceNo, notes }
  * @returns {{ message: string, purchase: object }}
  */
-export const markPurchaseAsPaid = (id) =>
-  axiosClient.put(`/purchases/${id}/mark-paid`).then((res) => res.data);
+export const recordPurchasePayment = (id, paymentData = {}) =>
+  axiosClient.put(`/purchases/${id}/mark-paid`, paymentData).then((res) => res.data);
+
+export const markPurchaseAsPaid = recordPurchasePayment;
 
 
 

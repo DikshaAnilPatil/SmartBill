@@ -33,7 +33,7 @@ const orderSchema = new mongoose.Schema(
     invoiceNo: {
       type: String,
       required: true,
-      unique: true,
+      index: true,
     },
     items: {
       type: [orderItemSchema],
@@ -116,5 +116,7 @@ const orderSchema = new mongoose.Schema(
     timestamps: true,
   },
 );
+
+orderSchema.index({ invoiceNo: 1, ownerId: 1 }, { unique: true });
 
 export default mongoose.model("Order", orderSchema);

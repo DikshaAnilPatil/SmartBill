@@ -638,10 +638,8 @@ export default function POSScreen() {
       : { headerBg: '#f8fafc', headerColor: '#0f172a', border: '1px solid #e2e8f0' };
       
     const pSize = s.paperSize || "A4";
-    let cssPageSize = "A4";
-    let maxW = "680px";
-    if(pSize.includes("Thermal 58")) { cssPageSize = "58mm auto"; maxW = "300px"; }
-    else if(pSize.includes("Thermal 80")) { cssPageSize = "80mm auto"; maxW = "400px"; }
+    const isThermal = pSize.includes("Thermal") || pSize.includes("58") || pSize.includes("80");
+    const isThermal58 = pSize.includes("58");
 
     // Dynamic UPI QR generation
     const upiCfg = paymentSettings?.upiSettings || {};
@@ -649,164 +647,258 @@ export default function POSScreen() {
     const resolvedUpiId = upiCfg.upiId || bUpiId;
     const resolvedPayee = upiCfg.payeeName || bName;
     const dynamicQrUrl = showUpiQr
-      ? `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(
+      ? `https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=${encodeURIComponent(
           `upi://pay?pa=${resolvedUpiId}&pn=${resolvedPayee}&am=${invoiceTotal}&cu=INR`
-        )}&margin=4`
+        )}&margin=2`
       : "";
 
     // Bank details
     const bankCfg = paymentSettings?.bankSettings || {};
     const showBank = (bankCfg.enabled ?? true) && (bankCfg.showOnInvoice ?? true) && (bankCfg.bankName || bBankName);
 
-    const itemRows = invoiceItems
-      .map(
-        (item) => `
-      <tr style="border-bottom: 1px solid #e2e8f0;">
-        <td style="padding: 10px 8px; font-weight: 600; color: #0f172a; text-align: left;">
-          ${item.name || "Item"}
-          ${s.showDescription && item.sku ? `<div style="font-size:10px; color:#64748b; font-weight:normal;">SKU: ${item.sku}</div>` : ""}
-        </td>
-        ${s.showHSN ? `<td style="padding: 10px 8px; text-align: center; color: #475569; font-size:11px;">${item.hsn || "-"}</td>` : ""}
-        <td style="padding: 10px 8px; text-align: center; color: #475569; font-family: monospace;">${item.qty || 1}</td>
-        <td style="padding: 10px 8px; text-align: right; color: #475569; font-family: monospace;">${fmtVal(item.price || 0)}</td>
-        <td style="padding: 10px 8px; text-align: right; font-weight: 700; color: #0f172a; font-family: monospace;">${fmtVal(item.amount || (item.price || 0) * (item.qty || 1))}</td>
-      </tr>
-    `
-      )
-      .join("");
+    let printHtml = "";
 
-    const statusBg = status === "Paid" ? "#dcfce7" : status === "Partial" ? "#fef9c3" : "#fee2e2";
-    const statusColor = status === "Paid" ? "#15803d" : status === "Partial" ? "#a16207" : "#b91c1c";
+    if (isThermal) {
+      // DEDICATED THERMAL RECEIPT LAYOUT (58mm / 80mm POS Slip)
+      const thermalWidth = isThermal58 ? "58mm" : "80mm";
+      const thermalMaxW = isThermal58 ? "260px" : "340px";
 
-    const bnk = s.showBankDetails ? `
-      <div class="bank-info" style="margin-top: 20px; padding: 12px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 11px;">
-        <strong>Bank Details:</strong><br/>
-        Bank: ${s.bankName || bBankName} | A/C Name: ${s.accountHolder || bName}<br/>
-        A/C No: ${s.accountNumber || bAccNo} | IFSC: ${s.ifsc || bIfsc}
-      </div>
-    ` : "";
-    
-    const upi = s.showUPIQR ? `<div style="font-size:11px; margin-top:10px;"><strong>UPI ID:</strong> ${s.upiId || bUpiId}</div>` : "";
-
-    const terms = s.termsAndConditions ? `<div style="font-size: 10px; color: #64748b; margin-top: 10px; white-space: pre-wrap;"><strong>Terms:</strong><br/>${s.termsAndConditions}</div>` : "";
-
-    const printHtml = `
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <meta charset="utf-8" />
-          <title>Invoice - ${invoiceNo}</title>
-          <style>
-            @page { size: ${cssPageSize}; margin: 10mm; }
-            * { box-sizing: border-box; margin: 0; padding: 0; }
-            body { font-family: sans-serif; color: #0f172a; background: #ffffff; padding: 20px; font-size: 13px; }
-            .invoice-card { max-width: ${maxW}; margin: 0 auto; border: ${tpl.border}; border-radius: 12px; padding: 28px; background: #ffffff; }
-            .header-table { width: 100%; margin-bottom: 24px; padding: 16px; background-color: ${tpl.headerBg}; color: ${tpl.headerColor}; border-radius: 8px; }
-            .brand { font-size: 22px; font-weight: 800; }
-            .subtext { font-size: 12px; margin-top: 2px; opacity: 0.9; }
-            .inv-title { font-size: 20px; font-weight: 800; font-family: monospace; text-align: right; text-transform: uppercase; }
-            .status-pill { display: inline-block; padding: 3px 10px; border-radius: 9999px; font-size: 11px; font-weight: 700; margin-top: 6px; background: ${statusBg}; color: ${statusColor}; }
-            .bill-to { border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px 16px; margin-bottom: 20px; }
-            .bill-label { font-size: 10px; font-weight: 700; color: #94a3b8; text-transform: uppercase; }
-            .bill-name { font-size: 14px; font-weight: 700; color: #0f172a; margin-top: 2px; }
-            table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-            th { font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; border-bottom: 2px solid #cbd5e1; padding: 8px; text-align: right; }
-            .totals-container { display: flex; justify-content: flex-end; }
-            .totals-box { width: 260px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px; }
-            .row { display: flex; justify-content: space-between; font-size: 12px; color: #475569; margin-bottom: 6px; }
-            .row.total { border-top: 2px solid #e2e8f0; padding-top: 8px; margin-top: 8px; font-size: 15px; font-weight: 800; color: #0f172a; }
-            .row.due { border-top: 1px solid #e2e8f0; padding-top: 6px; margin-top: 6px; font-weight: 700; }
-            .footer-note { margin-top: 28px; text-align: center; border-top: 1px solid #e2e8f0; padding-top: 16px; }
-            .footer-greeting { font-size: 13px; font-weight: 700; color: #1e293b; margin-bottom: 4px; }
-          </style>
-        </head>
-        <body>
-          <div class="invoice-card">
-            <table class="header-table">
-              <tr>
-                <td style="border:none; padding:0;">
-                  <div class="brand">${activeBiz.businessName || "Your Business Name"}</div>
-                  ${activeBiz.address ? `<div class="subtext">${activeBiz.address}, ${activeBiz.city}</div>` : ""}
-                  ${activeBiz.gstin ? `<div class="subtext">GSTIN: ${activeBiz.gstin}</div>` : ""}
-                </td>
-                <td style="border:none; padding:0; text-align:right;">
-                  <div class="inv-title">${s.invoiceTitle || "Tax Invoice"}</div>
-                  <div class="subtext">${invoiceNo}</div>
-                  <div class="subtext">Date: ${dateStr}</div>
-                  <div><span class="status-pill">${status}</span></div>
-                </td>
-              </tr>
-            </table>
-
-            <div class="bill-to">
-              <div class="bill-label">Billed To</div>
-              <div class="bill-name">${s.showCustomerName ? (order?.customerName || customer) : "Customer"}</div>
-            </div>
-
-            <table>
-              <thead>
-                <tr>
-                  <th style="text-align: left;">Item</th>
-                  ${s.showHSN ? `<th style="text-align: center;">HSN</th>` : ""}
-                  <th style="text-align: center;">Qty</th>
-                  <th>Rate</th>
-                  <th>Amount</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${itemRows}
-              </tbody>
-            </table>
-
-            <div class="totals-container">
-              <div class="totals-box">
-                <div class="row">
-                  <span>Subtotal</span>
-                  <span style="font-family: monospace;">${fmtVal(invoiceSubtotal)}</span>
-                </div>
-                ${s.showTax ? `
-                <div class="row">
-                  <span>GST Tax</span>
-                  <span style="font-family: monospace; color: #16a34a;">+${fmtVal(invoiceGst)}</span>
-                </div>
-                ` : ""}
-                <div class="row total">
-                  <span>Total Amount</span>
-                  <span style="font-family: monospace; color: ${s.primaryColor || '#2563eb'};">${fmtVal(invoiceTotal)}</span>
-                </div>
-                <div class="row" style="margin-top: 4px;">
-                  <span>Amount Paid</span>
-                  <span style="font-family: monospace; color: #16a34a; font-weight: 700;">${fmtVal(invoicePaid)}</span>
-                </div>
-                ${s.showBalanceDue ? `
-                <div class="row due">
-                  <span>Balance Due</span>
-                  <span style="font-family: monospace; color: ${invoiceDue > 0 ? "#dc2626" : "#16a34a"};">${fmtVal(invoiceDue)}</span>
-                </div>
-                ` : ""}
-              </div>
-            </div>
-
-
-            <div style="display: flex; justify-content: space-between; margin-top: 20px;">
-              <div>
-                ${terms}
-              </div>
-              ${s.showSignature ? `
-              <div style="text-align: right; width: 150px; display: flex; flex-direction: column; justify-content: flex-end;">
-                ${s.signatureUrl ? `<img src="${s.signatureUrl}" style="height: 50px; object-fit: contain; margin-bottom: 5px;" />` : `<div style="height: 50px; border-bottom: 1px dashed #ccc; margin-bottom: 5px;"></div>`}
-                <div style="font-size: 10px; font-weight: 600;">Authorized Signatory</div>
-              </div>
-              ` : ""}
-            </div>
-
-            <div class="footer-note">
-              <div class="footer-greeting">${s.invoiceFooter || bFooter}</div>
-            </div>
+      const thermalItemsHtml = invoiceItems
+        .map(
+          (item) => `
+        <div style="margin-bottom: 6px;">
+          <div style="font-weight: 700; font-size: 11px;">${item.name || "Item"}</div>
+          <div style="display: flex; justify-content: space-between; font-size: 10px; color: #333;">
+            <span>${item.qty || 1} x ${fmtVal(item.price || 0)}</span>
+            <span style="font-weight: 700; font-family: monospace;">${fmtVal(item.amount || (item.price || 0) * (item.qty || 1))}</span>
           </div>
-        </body>
-      </html>
-    `;
+        </div>
+      `
+        )
+        .join("");
+
+      printHtml = `
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <meta charset="utf-8" />
+            <title>Receipt - ${invoiceNo}</title>
+            <style>
+              @page { size: ${thermalWidth} auto; margin: 2mm; }
+              * { box-sizing: border-box; margin: 0; padding: 0; }
+              body { font-family: 'Courier New', Courier, monospace, sans-serif; color: #000; background: #fff; padding: 6px; font-size: 11px; max-width: ${thermalMaxW}; margin: 0 auto; }
+              .center { text-align: center; }
+              .bold { font-weight: 700; }
+              .divider { border-top: 1px dashed #000; margin: 6px 0; }
+              .row { display: flex; justify-content: space-between; margin-bottom: 3px; font-size: 10px; }
+              .total-row { font-size: 13px; font-weight: 800; margin: 4px 0; }
+              .qr-container { text-align: center; margin-top: 8px; }
+              .qr-img { width: 110px; height: 110px; margin: 0 auto; display: block; }
+            </style>
+          </head>
+          <body>
+            <div class="center bold" style="font-size: 14px; text-transform: uppercase;">${activeBiz.businessName || "SmartBill Store"}</div>
+            ${activeBiz.address ? `<div class="center" style="font-size: 9px; margin-top: 2px;">${activeBiz.address}, ${activeBiz.city}</div>` : ""}
+            ${activeBiz.gstin ? `<div class="center" style="font-size: 9px;">GSTIN: ${activeBiz.gstin}</div>` : ""}
+            ${activeBiz.phone ? `<div class="center" style="font-size: 9px;">Tel: ${activeBiz.phone}</div>` : ""}
+
+            <div class="divider"></div>
+
+            <div class="row"><span>Receipt #:</span><span class="bold">${invoiceNo}</span></div>
+            <div class="row"><span>Date:</span><span>${dateStr}</span></div>
+            <div class="row"><span>Customer:</span><span>${s.showCustomerName ? (order?.customerName || customer) : "Walk-in"}</span></div>
+            <div class="row"><span>Status:</span><span class="bold">[${status.toUpperCase()}]</span></div>
+
+            <div class="divider"></div>
+            ${thermalItemsHtml}
+            <div class="divider"></div>
+
+            <div class="row"><span>Subtotal:</span><span>${fmtVal(invoiceSubtotal)}</span></div>
+            ${s.showTax && invoiceGst > 0 ? `<div class="row"><span>GST:</span><span>+${fmtVal(invoiceGst)}</span></div>` : ""}
+            <div class="divider"></div>
+            <div class="row total-row"><span>TOTAL:</span><span>${fmtVal(invoiceTotal)}</span></div>
+            <div class="row"><span>Paid:</span><span class="bold">${fmtVal(invoicePaid)}</span></div>
+            ${invoiceDue > 0 ? `<div class="row bold" style="color: #000;"><span>Balance Due:</span><span>${fmtVal(invoiceDue)}</span></div>` : ""}
+
+            ${showUpiQr && dynamicQrUrl ? `
+              <div class="divider"></div>
+              <div class="qr-container">
+                <p style="font-size: 9px; font-weight: bold; margin-bottom: 3px;">SCAN & PAY VIA UPI</p>
+                <img src="${dynamicQrUrl}" class="qr-img" />
+                <p style="font-size: 8px; margin-top: 2px;">UPI ID: ${resolvedUpiId}</p>
+              </div>
+            ` : ""}
+
+            <div class="divider"></div>
+            <div class="center" style="font-size: 9px; margin-top: 6px;">
+              ${s.invoiceFooter || bFooter || "Thank you for your business!"}
+            </div>
+          </body>
+        </html>
+      `;
+    } else {
+      // STANDARD CORPORATE A4 / A5 INVOICE LAYOUT
+      const itemRows = invoiceItems
+        .map(
+          (item) => `
+        <tr style="border-bottom: 1px solid #e2e8f0;">
+          <td style="padding: 10px 8px; font-weight: 600; color: #0f172a; text-align: left;">
+            ${item.name || "Item"}
+            ${s.showDescription && item.sku ? `<div style="font-size:10px; color:#64748b; font-weight:normal;">SKU: ${item.sku}</div>` : ""}
+          </td>
+          ${s.showHSN ? `<td style="padding: 10px 8px; text-align: center; color: #475569; font-size:11px;">${item.hsn || "-"}</td>` : ""}
+          <td style="padding: 10px 8px; text-align: center; color: #475569; font-family: monospace;">${item.qty || 1}</td>
+          <td style="padding: 10px 8px; text-align: right; color: #475569; font-family: monospace;">${fmtVal(item.price || 0)}</td>
+          <td style="padding: 10px 8px; text-align: right; font-weight: 700; color: #0f172a; font-family: monospace;">${fmtVal(item.amount || (item.price || 0) * (item.qty || 1))}</td>
+        </tr>
+      `
+        )
+        .join("");
+
+      const statusBg = status === "Paid" ? "#dcfce7" : status === "Partial" ? "#fef9c3" : "#fee2e2";
+      const statusColor = status === "Paid" ? "#15803d" : status === "Partial" ? "#a16207" : "#b91c1c";
+
+      const bnk = (s.showBankDetails || showBank) ? `
+        <div class="bank-info" style="margin-top: 20px; padding: 12px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 11px;">
+          <strong>Bank Account Details:</strong><br/>
+          Bank: ${s.bankName || bankCfg.bankName || bBankName || "—"} | A/C Name: ${s.accountHolder || bankCfg.accountHolder || bName || "—"}<br/>
+          A/C No: ${s.accountNumber || bankCfg.accountNumber || bAccNo || "—"} | IFSC: ${s.ifsc || bankCfg.ifsc || bIfsc || "—"}
+        </div>
+      ` : "";
+
+      const upiBlock = showUpiQr && dynamicQrUrl ? `
+        <div style="margin-top: 16px; display: inline-flex; align-items: center; gap: 12px; padding: 8px 12px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px;">
+          <img src="${dynamicQrUrl}" style="width: 70px; height: 70px; border-radius: 4px;" />
+          <div style="font-size: 10px; color: #334155;">
+            <strong style="color: #0f172a; font-size: 11px;">Scan to Pay via UPI</strong><br/>
+            UPI ID: <span style="font-family: monospace; font-weight: 600;">${resolvedUpiId}</span><br/>
+            Amount: <span style="font-weight: 700; color: #2563eb;">${fmtVal(invoiceTotal)}</span>
+          </div>
+        </div>
+      ` : "";
+
+      const terms = s.termsAndConditions ? `<div style="font-size: 10px; color: #64748b; margin-top: 14px; white-space: pre-wrap;"><strong>Terms & Conditions:</strong><br/>${s.termsAndConditions}</div>` : "";
+
+      printHtml = `
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <meta charset="utf-8" />
+            <title>Invoice - ${invoiceNo}</title>
+            <style>
+              @page { size: ${pSize === "A5" ? "A5 landscape" : "A4"}; margin: 10mm; }
+              * { box-sizing: border-box; margin: 0; padding: 0; }
+              body { font-family: sans-serif; color: #0f172a; background: #ffffff; padding: 20px; font-size: 13px; }
+              .invoice-card { max-width: 680px; margin: 0 auto; border: ${tpl.border}; border-radius: 12px; padding: 28px; background: #ffffff; }
+              .header-table { width: 100%; margin-bottom: 24px; padding: 16px; background-color: ${tpl.headerBg}; color: ${tpl.headerColor}; border-radius: 8px; }
+              .brand { font-size: 22px; font-weight: 800; }
+              .subtext { font-size: 12px; margin-top: 2px; opacity: 0.9; }
+              .inv-title { font-size: 20px; font-weight: 800; font-family: monospace; text-align: right; text-transform: uppercase; }
+              .status-pill { display: inline-block; padding: 3px 10px; border-radius: 9999px; font-size: 11px; font-weight: 700; margin-top: 6px; background: ${statusBg}; color: ${statusColor}; }
+              .bill-to { border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px 16px; margin-bottom: 20px; }
+              .bill-label { font-size: 10px; font-weight: 700; color: #94a3b8; text-transform: uppercase; }
+              .bill-name { font-size: 14px; font-weight: 700; color: #0f172a; margin-top: 2px; }
+              table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+              th { font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; border-bottom: 2px solid #cbd5e1; padding: 8px; text-align: right; }
+              .totals-container { display: flex; justify-content: flex-end; }
+              .totals-box { width: 260px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px; }
+              .row { display: flex; justify-content: space-between; font-size: 12px; color: #475569; margin-bottom: 6px; }
+              .row.total { border-top: 2px solid #e2e8f0; padding-top: 8px; margin-top: 8px; font-size: 15px; font-weight: 800; color: #0f172a; }
+              .row.due { border-top: 1px solid #e2e8f0; padding-top: 6px; margin-top: 6px; font-weight: 700; }
+              .footer-note { margin-top: 28px; text-align: center; border-top: 1px solid #e2e8f0; padding-top: 16px; }
+              .footer-greeting { font-size: 13px; font-weight: 700; color: #1e293b; margin-bottom: 4px; }
+            </style>
+          </head>
+          <body>
+            <div class="invoice-card">
+              <table class="header-table">
+                <tr>
+                  <td style="border:none; padding:0;">
+                    <div class="brand">${activeBiz.businessName || "Your Business Name"}</div>
+                    ${activeBiz.address ? `<div class="subtext">${activeBiz.address}, ${activeBiz.city}</div>` : ""}
+                    ${activeBiz.gstin ? `<div class="subtext">GSTIN: ${activeBiz.gstin}</div>` : ""}
+                  </td>
+                  <td style="border:none; padding:0; text-align:right;">
+                    <div class="inv-title">${s.invoiceTitle || "Tax Invoice"}</div>
+                    <div class="subtext">${invoiceNo}</div>
+                    <div class="subtext">Date: ${dateStr}</div>
+                    <div><span class="status-pill">${status}</span></div>
+                  </td>
+                </tr>
+              </table>
+
+              <div class="bill-to">
+                <div class="bill-label">Billed To</div>
+                <div class="bill-name">${s.showCustomerName ? (order?.customerName || customer) : "Customer"}</div>
+              </div>
+
+              <table>
+                <thead>
+                  <tr>
+                    <th style="text-align: left;">Item</th>
+                    ${s.showHSN ? `<th style="text-align: center;">HSN</th>` : ""}
+                    <th style="text-align: center;">Qty</th>
+                    <th>Rate</th>
+                    <th>Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${itemRows}
+                </tbody>
+              </table>
+
+              <div class="totals-container">
+                <div class="totals-box">
+                  <div class="row">
+                    <span>Subtotal</span>
+                    <span style="font-family: monospace;">${fmtVal(invoiceSubtotal)}</span>
+                  </div>
+                  ${s.showTax ? `
+                  <div class="row">
+                    <span>GST Tax</span>
+                    <span style="font-family: monospace; color: #16a34a;">+${fmtVal(invoiceGst)}</span>
+                  </div>
+                  ` : ""}
+                  <div class="row total">
+                    <span>Total Amount</span>
+                    <span style="font-family: monospace; color: ${s.primaryColor || '#2563eb'};">${fmtVal(invoiceTotal)}</span>
+                  </div>
+                  <div class="row" style="margin-top: 4px;">
+                    <span>Amount Paid</span>
+                    <span style="font-family: monospace; color: #16a34a; font-weight: 700;">${fmtVal(invoicePaid)}</span>
+                  </div>
+                  ${s.showBalanceDue ? `
+                  <div class="row due">
+                    <span>Balance Due</span>
+                    <span style="font-family: monospace; color: ${invoiceDue > 0 ? "#dc2626" : "#16a34a"};">${fmtVal(invoiceDue)}</span>
+                  </div>
+                  ` : ""}
+                </div>
+              </div>
+
+              ${bnk}
+              ${upiBlock}
+
+              <div style="display: flex; justify-content: space-between; margin-top: 20px;">
+                <div>
+                  ${terms}
+                </div>
+                ${s.showSignature ? `
+                <div style="text-align: right; width: 150px; display: flex; flex-direction: column; justify-content: flex-end;">
+                  ${s.signatureUrl ? `<img src="${s.signatureUrl}" style="height: 50px; object-fit: contain; margin-bottom: 5px;" />` : `<div style="height: 50px; border-bottom: 1px dashed #ccc; margin-bottom: 5px;"></div>`}
+                  <div style="font-size: 10px; font-weight: 600;">Authorized Signatory</div>
+                </div>
+                ` : ""}
+              </div>
+
+              <div class="footer-note">
+                <div class="footer-greeting">${s.invoiceFooter || bFooter || "Thank you for your business!"}</div>
+              </div>
+            </div>
+          </body>
+        </html>
+      `;
+    }
 
     let printWin = null;
     try {

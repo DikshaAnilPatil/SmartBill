@@ -27,8 +27,18 @@ import subscriptionPlanRoutes from "./routes/subscriptionPlanRoutes.js";
 import inventorySettingsRoutes from "./routes/inventorySettingsRoutes.js";
 import subscriptionPublicRoutes from "./routes/subscriptionPublicRoutes.js";
 
+import {
+  securityHeaders,
+  authLimiter,
+  apiLimiter,
+  configuredCors,
+} from "./middleware/security.js";
+
 const app = express();
 const port = process.env.PORT || 5000;
+
+// Trust reverse proxy (needed for accurate IP rate limiting on Render / Railway / Cloudflare)
+app.set("trust proxy", 1);
 
 // Use reliable public DNS servers for Node's resolver.
 // Workaround: Node's c-ares auto-detection can pick a dead/unreachable DNS
@@ -49,26 +59,23 @@ await seedAdmin();
 // Migrate existing user accounts to 14-day trial status (idempotent)
 await migrateExistingUserTrials();
 
-// CORS - allow all localhost origins, 127.0.0.1, and client origins
-app.use(
-  "/api/subscription-plans",
-  subscriptionPublicRoutes
-);
+// 1. Apply Helmet Security Headers
+app.use(securityHeaders);
 
-app.use(
-  cors({
-    origin: true, // Seamlessly accept all local dev origins (5173, 5174, 127.0.0.1, localhost)
-    credentials: true,
-    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
-  })
-);
+// 2. Apply Production / Dev CORS
+app.use(configuredCors());
+
+// 3. Apply Global API Rate Limiter
+app.use("/api", apiLimiter);
+
+// Public routes
+app.use("/api/subscription-plans", subscriptionPublicRoutes);
 
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 
-// Routes
-app.use("/api/auth", authRoutes);
+// Routes (with dedicated Auth Limiter for login/register protection)
+app.use("/api/auth", authLimiter, authRoutes);
 app.use("/api/customers", customerRoutes);
 app.use("/api/orders", orderRoutes);
 app.use("/api/expenses", expenseRoutes);
