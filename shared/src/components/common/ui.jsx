@@ -445,7 +445,7 @@ export function Modal({ title, onClose, children, className = "max-w-lg" }) {
   );
 }
 
-export function ConfirmDialog({ message, onConfirm, onCancel }) {
+export function ConfirmDialog({ message, onConfirm, onCancel, confirmText = "Delete", cancelText = "Cancel" }) {
   return (
     <div
       onClick={(e) => {
@@ -461,14 +461,14 @@ export function ConfirmDialog({ message, onConfirm, onCancel }) {
         <p className="text-xs text-slate-500 dark:text-slate-400 mb-5 leading-relaxed">{message}</p>
         <div className="flex gap-3">
           <Btn variant="outline" onClick={onCancel} className="flex-1">
-            Cancel
+            {cancelText}
           </Btn>
           <Btn
             variant="danger"
             onClick={onConfirm}
             className="flex-1 bg-red-600 text-white hover:bg-red-700 border-0 shadow-sm"
           >
-            Delete
+            {confirmText}
           </Btn>
         </div>
       </div>

@@ -2081,25 +2081,6 @@ export default function POSScreen() {
                   <label className="text-[10px] font-bold text-slate-400 dark:text-slate-400 uppercase tracking-wider">
                     Amount Paid
                   </label>
-                  <div className="flex gap-1">
-                    <button
-                      type="button"
-                      onClick={() => setAmountPaid(String(roundedTotal))}
-                      className="text-[10px] font-bold bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800/60 px-2 py-0.5 rounded-md hover:bg-blue-100 transition-all cursor-pointer"
-                    >
-                      Exact
-                    </button>
-                    {[500, 1000, 2000].map((amt) => (
-                      <button
-                        key={amt}
-                        type="button"
-                        onClick={() => setAmountPaid(String(amt))}
-                        className="text-[10px] font-bold bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 px-2 py-0.5 rounded-md hover:bg-slate-100 transition-all font-mono cursor-pointer"
-                      >
-                        ₹{amt}
-                      </button>
-                    ))}
-                  </div>
                 </div>
                 <div className="relative">
                   <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-mono font-extrabold text-slate-400">
@@ -2109,6 +2090,7 @@ export default function POSScreen() {
                     type="number"
                     min={0}
                     value={amountPaid}
+                    placeholder={roundedTotal}
                     onChange={(e) => setAmountPaid(e.target.value)}
                     className="w-full border border-slate-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-900 text-xs font-mono font-bold text-slate-900 dark:text-white pl-7 pr-3 py-2 outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [appearance:textfield]"
                   />

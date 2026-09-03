@@ -14,7 +14,8 @@ router.use(protect);
 // GET /api/settings/business
 router.get("/", getBusinessSettings);
 
-// PUT /api/settings/business
+// PUT & POST /api/settings/business
 router.put("/", updateBusinessSettings);
+router.post("/", updateBusinessSettings);
 
 export default router;

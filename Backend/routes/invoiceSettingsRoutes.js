@@ -6,6 +6,6 @@ const router = express.Router();
 
 router.use(protect);
 
-router.route("/").get(getInvoiceSettings).put(updateInvoiceSettings);
+router.route("/").get(getInvoiceSettings).put(updateInvoiceSettings).post(updateInvoiceSettings);
 
 export default router;

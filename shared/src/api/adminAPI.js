@@ -21,6 +21,16 @@ export const adminAPI = {
   },
 
   /**
+   * Grant module permissions & issue secure temporary password for a business owner
+   */
+  grantBusinessAccess: async (businessId, permissions) => {
+    const res = await axiosClient.put(`/admin/businesses/${businessId}/access`, {
+      permissions,
+    });
+    return res.data;
+  },
+
+  /**
    * Fetch SuperAdmin System Settings from MongoDB
    */
   getSystemSettings: async () => {

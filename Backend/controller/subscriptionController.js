@@ -143,19 +143,8 @@ export const createSubscriptionOrder = async (req, res) => {
         proratedCredit: isUpgrade ? (planConfig.price - chargeAmount) : 0,
       });
     } catch (rzpErr) {
-      console.warn("Razorpay API error (using test fallback order):", rzpErr.message);
-      const mockOrderId = `order_test_${Date.now()}`;
-      return res.json({
-        success: true,
-        orderId: mockOrderId,
-        amount: amountInPaise,
-        currency: "INR",
-        keyId,
-        planName: planConfig.name,
-        isMock: true,
-        isUpgrade: !!isUpgrade,
-        proratedCredit: isUpgrade ? (planConfig.price - chargeAmount) : 0,
-      });
+      console.error("Razorpay API error:", rzpErr.message);
+      return res.status(500).json({ message: "Failed to create payment order with Razorpay." });
     }
   } catch (error) {
     console.error("Error creating subscription order:", error);
@@ -179,11 +168,10 @@ export const verifySubscriptionPayment = async (req, res) => {
       isDowngrade,
     } = req.body;
 
-    const keySecret = process.env.RAZORPAY_KEY_SECRET || "rzp_test_secret_placeholder";
+    const keySecret = process.env.RAZORPAY_KEY_SECRET;
     let isValid = false;
-    const isMockOrder = razorpay_order_id && razorpay_order_id.startsWith("order_test_");
 
-    if (!isMockOrder && razorpay_signature && keySecret !== "rzp_test_secret_placeholder") {
+    if (razorpay_signature && keySecret) {
       const body = razorpay_order_id + "|" + razorpay_payment_id;
       const expectedSignature = crypto
         .createHmac("sha256", keySecret)

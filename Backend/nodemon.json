@@ -1,0 +1,21 @@
+{
+  "watch": [
+    "server.js",
+    "config",
+    "controller",
+    "middleware",
+    "models",
+    "routes",
+    "seed",
+    "services",
+    "utils"
+  ],
+  "ext": "js,mjs,json",
+  "ignore": [
+    "*.log",
+    "server-err.log",
+    "server-out.log",
+    ".env",
+    "node_modules"
+  ]
+}

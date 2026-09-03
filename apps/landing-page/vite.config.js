@@ -10,7 +10,7 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
       '@shared': path.resolve(__dirname, '../../shared/src')
     },
-    extensions: ['.mjs', '.js', '.mts', '.ts', '.jsx', '.tsx', '.json']
+    extensions: ['.mjs', '.js', '.mts', '.ts', '.jsx','.json']
   },
   server: {
     port: 5173,

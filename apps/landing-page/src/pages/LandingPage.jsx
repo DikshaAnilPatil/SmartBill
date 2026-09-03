@@ -303,35 +303,7 @@ export default function LandingPage({ onNav }) {
           }
         };
 
-      /*
-       |--------------------------------------------------------------------------
-       | Mock/Test payment fallback
-       |--------------------------------------------------------------------------
-       |
-       | This keeps your previous development behavior.
-       |
-       */
 
-      if (
-        res.isMock ||
-        res.orderId?.startsWith("order_test_") ||
-        typeof window.Razorpay === "undefined"
-      ) {
-        console.warn(
-          "Using mock/test payment verification."
-        );
-
-        await executePaymentVerification({
-          razorpay_order_id: res.orderId,
-          razorpay_payment_id:
-            `pay_test_${Date.now()}`,
-          razorpay_signature:
-            "mock_signature",
-          planName: plan.name,
-        });
-
-        return;
-      }
 
       /*
        |--------------------------------------------------------------------------
@@ -413,22 +385,12 @@ export default function LandingPage({ onNav }) {
 
         rzp.open();
       } catch (razorpayError) {
-        console.warn(
-          "Razorpay SDK modal error. Falling back to test mode:",
+        console.error(
+          "Razorpay SDK modal error:",
           razorpayError
         );
-
-        await executePaymentVerification({
-          razorpay_order_id: res.orderId,
-
-          razorpay_payment_id:
-            `pay_test_${Date.now()}`,
-
-          razorpay_signature:
-            "mock_signature",
-
-          planName: plan.name,
-        });
+        alert("Failed to open Razorpay payment window. Please try again.");
+        setLoadingPlan(null);
       }
     } catch (error) {
       console.error(

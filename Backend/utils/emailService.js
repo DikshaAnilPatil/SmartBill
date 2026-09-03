@@ -38,37 +38,60 @@ export const replacePlaceholders = (text = "", variables = {}) => {
 };
 
 /**
- * Construct an SMTP transporter from environment variables.
+ * Construct an SMTP transporter — queries dynamic MongoDB SystemSettings first,
+ * falling back to process.env environment variables if DB settings are empty.
  */
 const getTransporter = async () => {
-  const host = process.env.SMTP_HOST || process.env.EMAIL_HOST;
-  const port = Number(process.env.SMTP_PORT || process.env.EMAIL_PORT || 587);
-  const user = process.env.SMTP_USER || process.env.EMAIL_USER;
-  const pass = process.env.SMTP_PASS || process.env.EMAIL_PASS;
+  let dbSettings = null;
+  try {
+    dbSettings = await SystemSettings.findOne({ key: "global_system_settings" }).lean();
+  } catch (err) {
+    console.warn("Could not fetch SystemSettings for SMTP config:", err.message);
+  }
 
-  if (user && pass) {
-    if (host) {
-      return {
-        transporter: nodemailer.createTransport({
-          host,
-          port,
-          secure: port === 465,
-          auth: { user, pass },
-        }),
-        isTest: false,
-      };
-    }
+  // 1. Try DB dynamic SMTP configuration
+  const dbUser = dbSettings?.smtpUser ? String(dbSettings.smtpUser).trim() : "";
+  const dbPass = dbSettings?.smtpPass ? String(dbSettings.smtpPass).trim() : "";
+  const dbHost = dbSettings?.smtpHost ? String(dbSettings.smtpHost).trim() : "";
+  const dbPort = Number(dbSettings?.smtpPort || 587);
 
+  if (dbUser && dbPass) {
+    const host = dbHost || "smtp.gmail.com";
+    console.log(`[SMTP] Using dynamic DB SMTP settings (${dbUser} via ${host}:${dbPort})`);
     return {
       transporter: nodemailer.createTransport({
-        service: "gmail",
-        auth: { user, pass },
+        host,
+        port: dbPort,
+        secure: dbPort === 465,
+        auth: { user: dbUser, pass: dbPass },
       }),
+      fromAddress: dbSettings?.smtpFrom || `"Smart Bill System" <${dbUser}>`,
       isTest: false,
     };
   }
 
-  // Automatic Ethereal test account fallback if real credentials missing
+  // 2. Fall back to process.env environment variables
+  const envHost = process.env.SMTP_HOST || process.env.EMAIL_HOST;
+  const envPort = Number(process.env.SMTP_PORT || process.env.EMAIL_PORT || 587);
+  const envUser = process.env.SMTP_USER || process.env.EMAIL_USER;
+  const envPass = process.env.SMTP_PASS || process.env.EMAIL_PASS;
+
+  if (envUser && envPass && !envUser.includes("your_email")) {
+    const host = envHost || "smtp.gmail.com";
+    console.log(`[SMTP] Using environment process.env SMTP settings (${envUser} via ${host}:${envPort})`);
+    return {
+      transporter: nodemailer.createTransport({
+        host,
+        port: envPort,
+        secure: envPort === 465,
+        auth: { user: envUser, pass: envPass },
+      }),
+      fromAddress: process.env.SMTP_FROM || `"Smart Bill System" <${envUser}>`,
+      isTest: false,
+    };
+  }
+
+  // 3. Automatic Ethereal test account fallback if real credentials missing
   try {
     const testAccount = await nodemailer.createTestAccount();
     return {
@@ -81,11 +104,12 @@ const getTransporter = async () => {
           pass: testAccount.pass,
         },
       }),
+      fromAddress: `"Smart Bill System" <${testAccount.user}>`,
       isTest: true,
     };
   } catch (err) {
     console.warn("Could not create Ethereal test account:", err.message);
-    return { transporter: null, isTest: false };
+    return { transporter: null, fromAddress: null, isTest: false };
   }
 };
 
@@ -156,20 +180,9 @@ export const sendSystemEmail = async ({
       `;
 
     // 5. Send via Transporter
-    const { transporter, isTest } = await getTransporter();
-    if (!transporter) {
-      return { success: false, error: "SMTP credentials not configured in backend." };
-    }
-
-    const fromAddress =
-      process.env.SMTP_FROM ||
-      process.env.EMAIL_FROM ||
-      (process.env.EMAIL_USER
-        ? `"SmartBill" <${process.env.EMAIL_USER}>`
-        : `"Smart Bill System" <sehig51620@neowd.com>`);
-
+    const { transporter, fromAddress, isTest } = await getTransporter();
     const info = await transporter.sendMail({
-      from: fromAddress,
+      from: fromAddress || process.env.SMTP_FROM || process.env.EMAIL_FROM || `"Smart Bill System" <no-reply@smartbill.com>`,
       to: toEmail,
       subject: finalSubject,
       html: htmlContent,

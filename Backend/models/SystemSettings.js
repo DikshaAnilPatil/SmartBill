@@ -28,6 +28,27 @@ const systemSettingsSchema = new mongoose.Schema(
       type: Number,
       default: 5,
     },
+    // Dynamic SMTP Configuration (Stored in DB so SuperAdmin can configure email server in UI)
+    smtpHost: {
+      type: String,
+      default: "",
+    },
+    smtpPort: {
+      type: Number,
+      default: 587,
+    },
+    smtpUser: {
+      type: String,
+      default: "",
+    },
+    smtpPass: {
+      type: String,
+      default: "",
+    },
+    smtpFrom: {
+      type: String,
+      default: "",
+    },
     emailTemplates: {
       type: [
         {

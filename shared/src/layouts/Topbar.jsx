@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Bell, LogOut, MoreVertical, Plus } from "lucide-react";
-import { Btn } from "@shared/components/common/ui";
+import { Btn, ConfirmDialog } from "@shared/components/common/ui";
 import { getUserDisplayName, getUserInitials } from "@shared/utils/userUtils";
 import { useCustomization } from "@shared/hooks/useCustomization";
 
@@ -24,6 +24,7 @@ const PAGE_LABELS = {
 
 export default function Topbar({ page, onLogout, onNav, role, notifCount, user }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const { t, formatDate } = useCustomization();
   const displayName = getUserDisplayName(user);
   const initials = getUserInitials(displayName);
@@ -93,7 +94,7 @@ export default function Topbar({ page, onLogout, onNav, role, notifCount, user }
               <button
                 onClick={() => {
                   setMenuOpen(false);
-                  onLogout();
+                  setShowLogoutConfirm(true);
                 }}
                 className="w-full flex items-center gap-2 px-3 py-2 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 hover:text-red-600"
               >
@@ -104,6 +105,17 @@ export default function Topbar({ page, onLogout, onNav, role, notifCount, user }
           )}
         </div>
       </div>
+      {showLogoutConfirm && (
+        <ConfirmDialog
+          message="Are you sure you really want to logout?"
+          confirmText="Logout"
+          onConfirm={() => {
+            setShowLogoutConfirm(false);
+            onLogout();
+          }}
+          onCancel={() => setShowLogoutConfirm(false)}
+        />
+      )}
     </header>
   );
 }

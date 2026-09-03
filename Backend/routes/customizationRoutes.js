@@ -12,6 +12,7 @@ router.use(protect);
 
 router.get("/", getCustomization);
 router.put("/", updateCustomization);
+router.post("/", updateCustomization);
 router.post("/reset", resetCustomization);
 
 export default router;

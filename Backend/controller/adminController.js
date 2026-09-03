@@ -1,7 +1,10 @@
+import bcrypt from "bcryptjs";
+import crypto from "crypto";
 import User from "../models/User.js";
 import Order from "../models/Order.js";
 import SystemSettings from "../models/SystemSettings.js";
 import { createNotification, notifySuperAdmins } from "../services/notificationService.js";
+import { sendSystemEmail } from "../utils/emailService.js";
 
 /**
  * GET /api/admin/businesses
@@ -222,6 +225,11 @@ export const updateSystemSettings = async (req, res) => {
       backupFrequency,
       maxLoginAttempts,
       emailTemplates,
+      smtpHost,
+      smtpPort,
+      smtpUser,
+      smtpPass,
+      smtpFrom,
     } = req.body;
 
     const payload = {};
@@ -237,6 +245,12 @@ export const updateSystemSettings = async (req, res) => {
         payload.maxLoginAttempts = parsedAttempts;
       }
     }
+    if (smtpHost !== undefined) payload.smtpHost = String(smtpHost || "").trim();
+    if (smtpPort !== undefined) payload.smtpPort = Number(smtpPort) || 587;
+    if (smtpUser !== undefined) payload.smtpUser = String(smtpUser || "").trim();
+    if (smtpPass !== undefined && smtpPass !== "") payload.smtpPass = String(smtpPass).trim();
+    if (smtpFrom !== undefined) payload.smtpFrom = String(smtpFrom || "").trim();
+
     if (Array.isArray(emailTemplates)) {
       payload.emailTemplates = emailTemplates.map((t) => ({
         id: Number(t.id),
@@ -781,3 +795,121 @@ export const getSuperAdminDashboardStats = async (req, res) => {
     });
   }
 };
+
+/**
+ * PUT /api/admin/businesses/:id/access
+ * Grant/update business module permissions, generate new temporary password securely on backend,
+ * hash password with bcrypt, save to MongoDB, and email credentials to the user.
+ */
+export const grantBusinessAccess = async (req, res) => {
+  try {
+    if (req.user?.role !== "superadmin") {
+      return res.status(403).json({
+        message: "Forbidden: SuperAdmin access required.",
+      });
+    }
+
+    const { id } = req.params;
+    const { permissions } = req.body;
+
+    if (!permissions || typeof permissions !== "object") {
+      return res.status(400).json({
+        message: "Invalid permissions format.",
+      });
+    }
+
+    const user = await User.findById(id);
+    if (!user) {
+      return res.status(404).json({
+        message: "Business owner account not found.",
+      });
+    }
+
+    // 1. Save selected module permissions in MongoDB
+    user.permissions = permissions;
+
+    // 2. Generate a NEW cryptographically secure temporary password on backend
+    const rawBytes = crypto.randomBytes(6).toString("hex");
+    const tempPassword = `Sb#${rawBytes.slice(0, 4)}!${rawBytes.slice(4, 8)}`;
+
+    // 3. Hash temporary password using bcrypt
+    const hashedPassword = await bcrypt.hash(tempPassword, 10);
+    user.password = hashedPassword;
+
+    // Reset lockout/failed attempts if any
+    user.failedLoginAttempts = 0;
+    user.lockoutUntil = null;
+
+    await user.save();
+
+    // 4. Build Granted Modules List for Email
+    const MODULE_LABELS = {
+      dashboard: "Executive Dashboard",
+      customers: "Customers Directory",
+      pos: "Point of Sale (POS) & Invoicing",
+      products: "Products Catalog",
+      inventory: "Stock & Inventory Control",
+      suppliers: "Suppliers Directory",
+      purchase: "Purchase Invoices",
+      expenses: "Expense Tracking",
+      reports: "Financial & Tax Reports",
+      users: "Staff & User Management",
+      settings: "System & Business Settings",
+    };
+
+    const grantedModules = Object.keys(permissions)
+      .filter((k) => Boolean(permissions[k]))
+      .map((k) => `✓ ${MODULE_LABELS[k] || k}`);
+
+    const modulesText = grantedModules.length > 0
+      ? grantedModules.join("\n")
+      : "No modules granted";
+
+    const userName = user.businessName || `${user.firstName} ${user.lastName}`.trim();
+    const portalUrl = process.env.CLIENT_URL || "http://localhost:5173/login";
+
+    const emailSubject = "SmartBill Access Granted";
+    const emailBody = `Hello ${userName},\n\nYour SmartBill account access has been updated by the SuperAdmin.\n\nLogin Email:\n${user.email}\n\nTemporary Password:\n${tempPassword}\n\nModules you can access:\n${modulesText}\n\nLogin:\n${portalUrl}\n\nPlease log in using the temporary password above and change your password after logging in.\n\nRegards,\nSmartBill Team`;
+
+    // 5. Dispatch Email via Nodemailer (using process.env.SMTP_*)
+    let emailResult = null;
+    try {
+      emailResult = await sendSystemEmail({
+        templateName: "SmartBill Access Granted",
+        toEmail: user.email,
+        variables: {
+          business_name: userName,
+          user_name: userName,
+          email: user.email,
+          temp_password: tempPassword,
+          modules_granted: modulesText,
+          login_url: portalUrl,
+        },
+        defaultSubject: emailSubject,
+        defaultBody: emailBody,
+      });
+    } catch (emailErr) {
+      console.error("Email dispatch failed:", emailErr.message);
+      emailResult = { success: false, error: emailErr.message };
+    }
+
+    if (!emailResult || !emailResult.success) {
+      return res.status(207).json({
+        success: false,
+        emailFailed: true,
+        message: `Account permissions and password updated successfully, BUT notification email could not be delivered (${emailResult?.error || "SMTP error"}). Please verify SMTP settings in .env.`,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Access granted successfully. Temporary password has been sent to the user's registered email.",
+    });
+  } catch (error) {
+    console.error("GRANT BUSINESS ACCESS ERROR:", error);
+    return res.status(500).json({
+      message: error.message || "Failed to grant business access.",
+    });
+  }
+};
+

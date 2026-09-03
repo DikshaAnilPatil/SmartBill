@@ -7,7 +7,12 @@ import {
   XCircle,
   Loader2,
   AlertCircle,
+  Shield,
+  KeyRound,
 } from "lucide-react";
+
+import adminAPI from "@shared/api/adminAPI";
+import { PERMISSION_CATEGORIES } from "../settings/components/UserPermissionsSettings";
 
 const API_BASE = "http://localhost:5000/api";
 
@@ -104,6 +109,93 @@ export default function BusinessesNew() {
   const [suspendBusinessId, setSuspendBusinessId] = useState(null);
   const [suspendReason, setSuspendReason] = useState("");
   const [suspendReasonError, setSuspendReasonError] = useState("");
+
+  const [accessModalOpen, setAccessModalOpen] = useState(false);
+  const [selectedBusiness, setSelectedBusiness] = useState(null);
+  const [selectedPermissions, setSelectedPermissions] = useState({});
+  const [grantingAccess, setGrantingAccess] = useState(false);
+  const [accessMessage, setAccessMessage] = useState(null);
+
+  const openAccessModal = (business) => {
+    setSelectedBusiness(business);
+    const existingPerms =
+      business.permissions &&
+      typeof business.permissions === "object" &&
+      Object.keys(business.permissions).length > 0
+        ? business.permissions
+        : {
+            dashboard: true,
+            customers: true,
+            suppliers: true,
+            products: true,
+            pos: true,
+            purchase: true,
+            inventory: true,
+            expenses: true,
+            reports: true,
+            users: true,
+            settings: true,
+          };
+    setSelectedPermissions({ ...existingPerms });
+    setAccessMessage(null);
+    setAccessModalOpen(true);
+  };
+
+  const toggleAccessPermission = (modKey) => {
+    setSelectedPermissions((prev) => ({
+      ...prev,
+      [modKey]: !prev[modKey],
+    }));
+  };
+
+  const handleGiveAccess = async () => {
+    if (!selectedBusiness) return;
+    setGrantingAccess(true);
+    setAccessMessage(null);
+
+    try {
+      const bizId = selectedBusiness.id || selectedBusiness._id;
+      const res = await adminAPI.grantBusinessAccess(
+        bizId,
+        selectedPermissions
+      );
+
+      const msg =
+        res.message ||
+        "Access granted successfully. Temporary password has been sent to the user's registered email.";
+      const isSuccess = res.success !== false && !res.emailFailed;
+
+      setAccessMessage({
+        type: isSuccess ? "success" : "warning",
+        text: msg,
+      });
+
+      // Update rows with new permissions
+      setRows((prev) =>
+        prev.map((b) =>
+          b.id === bizId || b._id === bizId
+            ? { ...b, permissions: { ...selectedPermissions } }
+            : b
+        )
+      );
+
+      if (isSuccess) {
+        setTimeout(() => {
+          setAccessModalOpen(false);
+          setSelectedBusiness(null);
+        }, 3000);
+      }
+    } catch (err) {
+      console.error("Error granting business access:", err);
+      const errMsg =
+        err.response?.data?.message ||
+        err.message ||
+        "Failed to grant access. Please try again.";
+      setAccessMessage({ type: "error", text: errMsg });
+    } finally {
+      setGrantingAccess(false);
+    }
+  };
 
   const loadBusinesses = async (signal) => {
     const hasCached = rows.length > 0;
@@ -465,6 +557,128 @@ export default function BusinessesNew() {
         </Modal>
       )}
 
+      {/* Manage Module Access Modal */}
+      {accessModalOpen && selectedBusiness && (
+        <Modal
+          title={`Manage Module Access — ${selectedBusiness.name}`}
+          onClose={() => {
+            if (!grantingAccess) {
+              setAccessModalOpen(false);
+              setSelectedBusiness(null);
+            }
+          }}
+        >
+          <div className="space-y-5">
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3.5">
+              <p className="text-xs font-bold text-slate-900">
+                Business Owner:{" "}
+                <span className="font-semibold text-slate-700">
+                  {selectedBusiness.owner}
+                </span>
+              </p>
+              <p className="text-xs text-slate-500 font-mono mt-0.5">
+                Email: {selectedBusiness.ownerEmail}
+              </p>
+            </div>
+
+            {accessMessage && (
+              <div
+                className={`p-3.5 rounded-xl border text-xs font-medium flex items-center gap-2 ${
+                  accessMessage.type === "success"
+                    ? "bg-emerald-50 border-emerald-200 text-emerald-800"
+                    : accessMessage.type === "warning"
+                    ? "bg-amber-50 border-amber-200 text-amber-800"
+                    : "bg-red-50 border-red-200 text-red-800"
+                }`}
+              >
+                <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                <span>{accessMessage.text}</span>
+              </div>
+            )}
+
+            <div className="space-y-3 max-h-[360px] overflow-y-auto pr-1">
+              <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                  Module Access
+                </h4>
+                <span className="text-[11px] font-semibold text-blue-600">
+                  {
+                    Object.values(selectedPermissions || {}).filter(Boolean)
+                      .length
+                  }{" "}
+                  Granted
+                </span>
+              </div>
+
+              {PERMISSION_CATEGORIES.map((cat) => (
+                <div
+                  key={cat.category}
+                  className="border border-slate-200 rounded-lg overflow-hidden bg-slate-50/50"
+                >
+                  <div className="px-3 py-1.5 bg-slate-100 border-b border-slate-200">
+                    <span className="text-[11px] font-bold text-slate-800">
+                      {cat.category}
+                    </span>
+                  </div>
+                  <div className="p-2 grid grid-cols-1 sm:grid-cols-2 gap-2 bg-white">
+                    {cat.modules.map((mod) => (
+                      <label
+                        key={mod.key}
+                        className="flex items-start gap-2 p-1.5 rounded-md hover:bg-slate-50 cursor-pointer select-none"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={Boolean(selectedPermissions[mod.key])}
+                          onChange={() => toggleAccessPermission(mod.key)}
+                          className="accent-blue-600 rounded w-4 h-4 mt-0.5 cursor-pointer flex-shrink-0"
+                        />
+                        <div>
+                          <p className="text-xs font-semibold text-slate-800 leading-none mb-0.5">
+                            {mod.label}
+                          </p>
+                          <p className="text-[10px] text-slate-500 line-clamp-1">
+                            {mod.desc}
+                          </p>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex gap-3 pt-3 border-t border-slate-100">
+              <button
+                type="button"
+                disabled={grantingAccess}
+                onClick={() => {
+                  setAccessModalOpen(false);
+                  setSelectedBusiness(null);
+                }}
+                className="flex-1 px-4 py-2 rounded-lg text-sm font-medium border border-slate-200 text-slate-700 hover:bg-slate-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={grantingAccess}
+                onClick={handleGiveAccess}
+                className="flex-1 px-4 py-2 rounded-lg text-sm font-semibold bg-blue-600 hover:bg-blue-700 text-white transition-colors flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+              >
+                {grantingAccess ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Granting Access...</span>
+                  </>
+                ) : (
+                  <span>Give Access</span>
+                )}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
       {/* Table */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
@@ -557,6 +771,14 @@ export default function BusinessesNew() {
                     </td>
                     <td className="px-5 py-4">
                       <div className="flex items-center gap-2 text-slate-500">
+                        <button
+                          className="p-1.5 rounded-md hover:bg-blue-50 hover:text-blue-600 transition-colors"
+                          title="Manage Access"
+                          onClick={() => openAccessModal(b)}
+                          type="button"
+                        >
+                          <Shield className="h-4 w-4 text-blue-600" />
+                        </button>
                         {b.status === "Suspended" ? (
                           <button
                             className="p-1.5 rounded-md hover:bg-emerald-50 hover:text-emerald-700 transition-colors"

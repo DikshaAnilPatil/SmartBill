@@ -48,6 +48,13 @@ export default function SuperAdminSettingsScreen() {
   const [backupFrequency, setBackupFrequency] = useState("daily");
   const [maxLoginAttempts, setMaxLoginAttempts] = useState("5");
 
+  // Dynamic SMTP Server credentials (stored in MongoDB)
+  const [smtpHost, setSmtpHost] = useState("smtp.gmail.com");
+  const [smtpPort, setSmtpPort] = useState("587");
+  const [smtpUser, setSmtpUser] = useState("");
+  const [smtpPass, setSmtpPass] = useState("");
+  const [smtpFrom, setSmtpFrom] = useState("");
+
   const [systemLoading, setSystemLoading] = useState(true);
   const [systemSaving, setSystemSaving] = useState(false);
 
@@ -147,6 +154,11 @@ const [deletingPlanId, setDeletingPlanId] =
           setDebugMode(Boolean(res.systemSettings.debugMode));
           setBackupFrequency(res.systemSettings.backupFrequency || "daily");
           setMaxLoginAttempts(String(res.systemSettings.maxLoginAttempts ?? 5));
+          setSmtpHost(res.systemSettings.smtpHost || "smtp.gmail.com");
+          setSmtpPort(String(res.systemSettings.smtpPort ?? 587));
+          setSmtpUser(res.systemSettings.smtpUser || "");
+          setSmtpPass(res.systemSettings.smtpPass || "");
+          setSmtpFrom(res.systemSettings.smtpFrom || "");
           if (Array.isArray(res.systemSettings.emailTemplates) && res.systemSettings.emailTemplates.length > 0) {
             setEmailTemplates(res.systemSettings.emailTemplates);
           }
@@ -198,6 +210,12 @@ const [deletingPlanId, setDeletingPlanId] =
           overrides.maxLoginAttempts !== undefined
             ? overrides.maxLoginAttempts
             : parseInt(maxLoginAttempts, 10) || 5,
+
+        smtpHost: overrides.smtpHost !== undefined ? overrides.smtpHost : smtpHost,
+        smtpPort: overrides.smtpPort !== undefined ? parseInt(overrides.smtpPort, 10) || 587 : parseInt(smtpPort, 10) || 587,
+        smtpUser: overrides.smtpUser !== undefined ? overrides.smtpUser : smtpUser,
+        smtpPass: overrides.smtpPass !== undefined ? overrides.smtpPass : smtpPass,
+        smtpFrom: overrides.smtpFrom !== undefined ? overrides.smtpFrom : smtpFrom,
       };
 
       const res = await adminAPI.updateSystemSettings(payload);
@@ -701,6 +719,88 @@ const handleFeatureChange = (feature) => {
                 </button>
               </div>
 
+              {/* SMTP Email Server Gateway Configuration */}
+              <div className="pt-5 mt-5 border-t border-slate-200">
+                <div className="flex items-center gap-2 mb-3">
+                  <Mail className="w-5 h-5 text-blue-600" />
+                  <div>
+                    <h4 className="text-sm font-bold text-slate-900">
+                      SaaS Email & SMTP Server Gateway
+                    </h4>
+                    <p className="text-xs text-slate-500">
+                      Configure your email server credentials in MongoDB so system emails (Welcome, Password Reset, Access Granted) are sent directly to recipients.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-200">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                      SMTP Host
+                    </label>
+                    <input
+                      type="text"
+                      value={smtpHost}
+                      onChange={(e) => setSmtpHost(e.target.value)}
+                      placeholder="smtp.gmail.com"
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-600 bg-white"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                      SMTP Port
+                    </label>
+                    <input
+                      type="number"
+                      value={smtpPort}
+                      onChange={(e) => setSmtpPort(e.target.value)}
+                      placeholder="587"
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-600 bg-white"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                      SMTP Email / Username
+                    </label>
+                    <input
+                      type="email"
+                      value={smtpUser}
+                      onChange={(e) => setSmtpUser(e.target.value)}
+                      placeholder="admin@smartbill.com"
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-600 bg-white"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                      SMTP / Google App Password
+                    </label>
+                    <input
+                      type="password"
+                      value={smtpPass}
+                      onChange={(e) => setSmtpPass(e.target.value)}
+                      placeholder="••••••••••••••••"
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-600 bg-white"
+                    />
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                      Sender Name & Format (SMTP_FROM)
+                    </label>
+                    <input
+                      type="text"
+                      value={smtpFrom}
+                      onChange={(e) => setSmtpFrom(e.target.value)}
+                      placeholder='"SmartBill System" <admin@smartbill.com>'
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-600 bg-white"
+                    />
+                  </div>
+                </div>
+              </div>
+
               <Btn
                 variant="primary"
                 onClick={() => handleSaveSystemSettings()}
@@ -715,7 +815,7 @@ const handleFeatureChange = (feature) => {
               >
                 {systemSaving
                   ? "Saving..."
-                  : "Save System Settings"}
+                  : "Save System & SMTP Settings"}
               </Btn>
             </div>
           )}

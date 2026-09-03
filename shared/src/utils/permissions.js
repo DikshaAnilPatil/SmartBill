@@ -97,10 +97,29 @@ export function isOwnerOrSuperAdmin(user) {
 
 /**
  * Resolves permissions object for the given user.
- * Owners and Superadmins always receive full permissions.
- * Employees receive default role permissions merged with specific module overrides.
+ * Superadmins receive full permissions.
+ * Users/Owners with custom permissions assigned in MongoDB receive those specific module permissions.
  */
 export function getUserPermissions(user) {
+  if (!user) return { ...ROLE_DEFAULT_PERMISSIONS.Owner };
+
+  const roleStr = String(user.role || "").toLowerCase().replace(/[-_\s]/g, "");
+  if (roleStr === "superadmin") {
+    return { ...ROLE_DEFAULT_PERMISSIONS.Owner };
+  }
+
+  // If user has specific module permissions stored in MongoDB
+  if (
+    user.permissions &&
+    typeof user.permissions === "object" &&
+    Object.keys(user.permissions).length > 0
+  ) {
+    return {
+      ...ROLE_DEFAULT_PERMISSIONS.Owner,
+      ...user.permissions,
+    };
+  }
+
   if (isOwnerOrSuperAdmin(user)) {
     return { ...ROLE_DEFAULT_PERMISSIONS.Owner };
   }
@@ -112,17 +131,6 @@ export function getUserPermissions(user) {
   const defaultPerms =
     ROLE_DEFAULT_PERMISSIONS[roleName] || ROLE_DEFAULT_PERMISSIONS.Owner;
 
-  if (
-    user.permissions &&
-    typeof user.permissions === "object" &&
-    Object.keys(user.permissions).length > 0
-  ) {
-    return {
-      ...defaultPerms,
-      ...user.permissions,
-    };
-  }
-
   return { ...defaultPerms };
 }
 
@@ -130,12 +138,14 @@ export function getUserPermissions(user) {
  * Checks whether the current user has permission to access a specific page module.
  */
 export function hasPermission(user, pageKey) {
-  if (isOwnerOrSuperAdmin(user)) return true;
+  if (!user) return true;
+  const roleStr = String(user.role || "").toLowerCase().replace(/[-_\s]/g, "");
+  if (roleStr === "superadmin") return true;
+
   if (
     !pageKey ||
     pageKey === "profile" ||
     pageKey === "notifications" ||
-    pageKey === "dashboard" ||
     ["features", "pricing", "changelog", "roadmap", "about", "blog", "careers", "press", "help-center", "api-docs", "status", "contact"].includes(pageKey)
   ) {
     return true;
