@@ -71,12 +71,16 @@ function AppRoutes() {
     }
   }, []);
 
+  const isAdminRole = (r) => {
+    if (!r) return false;
+    const norm = String(r).toLowerCase().replace(/[-_\s]/g, "");
+    return norm.includes("admin") || norm === "superadmin" || norm === "support" || norm === "billing";
+  };
+
   const handleLogin = (r, u) => {
-    if (r !== "superadmin") {
-      localStorage.removeItem("smartbill_token");
-      localStorage.removeItem("smartbill_user");
-      setUser(null);
-      return;
+    if (!isAdminRole(r)) {
+       window.location.href = "http://localhost:5174/login";
+       return;
     }
     setRole(r);
     if (u) setUser(u);
@@ -104,10 +108,9 @@ function AppRoutes() {
     else navigate(`/app/${p}`);
   }, [navigate]);
 
-  if (role !== "superadmin" && location.pathname.startsWith("/app")) {
-     localStorage.removeItem("smartbill_token");
-     localStorage.removeItem("smartbill_user");
-     return <Navigate to="/login" replace />;
+  if (!isAdminRole(role) && location.pathname.startsWith("/app")) {
+     window.location.href = "http://localhost:5174/app";
+     return null;
   }
 
   return (

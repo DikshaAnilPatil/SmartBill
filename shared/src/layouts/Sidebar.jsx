@@ -6,9 +6,18 @@ import { hasPermission } from "@shared/utils/permissions";
 
 export default function Sidebar({ page, onNav, role, collapsed, onToggle, user }) {
   const { t } = useCustomization();
-  const isSuperAdmin = role === "superadmin";
+  const normRole = String(role || user?.role || "").toLowerCase().replace(/[-_\s]/g, "");
+  const isPlatformAdmin =
+    normRole === "superadmin" ||
+    normRole.includes("admin") ||
+    normRole === "support" ||
+    normRole === "billing" ||
+    (!user?.ownerId && normRole !== "owner");
+
   const displayName = getUserDisplayName(user);
-  const displayEmail = user?.email || "admin@business.in";
+  const displayEmail = user?.email || "admin@smartbill.io";
+
+  const visibleAdminItems = SUPER_ADMIN_ITEMS.filter((item) => hasPermission(user, item.key));
 
   const visibleNavGroups = NAV_GROUPS.map((group) => ({
     ...group,
@@ -34,10 +43,10 @@ export default function Sidebar({ page, onNav, role, collapsed, onToggle, user }
         {!collapsed && (
           <div className="flex-1 min-w-0">
             <p className="text-sm font-bold text-white truncate">
-              {role === "superadmin" ? "Prathamesh" : (user?.businessName || "Smart Bill")}
+              {displayName}
             </p>
             <p className="text-[10px] text-slate-500 capitalize">
-              {role.replace("-", " ")}
+              {String(role || user?.role || "admin").replace(/[-_]/g, " ")}
             </p>
           </div>
         )}
@@ -56,9 +65,9 @@ export default function Sidebar({ page, onNav, role, collapsed, onToggle, user }
 
       {/* Nav */}
       <nav className="flex-1 py-4 overflow-y-auto overflow-x-hidden [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
-        {isSuperAdmin ? (
+        {isPlatformAdmin ? (
           <div className="space-y-0.5 px-3">
-            {SUPER_ADMIN_ITEMS.map(({ key, label, icon: Icon }) => {
+            {visibleAdminItems.map(({ key, label, icon: Icon }) => {
               const active = page === key;
               const translation = t(`nav.${key}`);
               const translatedLabel = translation !== `nav.${key}` ? translation : label;
@@ -154,7 +163,7 @@ export default function Sidebar({ page, onNav, role, collapsed, onToggle, user }
             </div>
           )}
         </div>
-        {!collapsed && !isSuperAdmin && (
+        {!collapsed && !isPlatformAdmin && (
           <div className="mt-2 pt-2 border-t border-slate-800/60 flex items-center justify-between">
             <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider bg-amber-400/10 px-2 py-0.5 rounded border border-amber-400/20">
               {user?.subscription?.plan ? String(user.subscription.plan).toUpperCase() : "STARTER"} PLAN
@@ -171,6 +180,3 @@ export default function Sidebar({ page, onNav, role, collapsed, onToggle, user }
     </aside>
   );
 }
-
-
-

@@ -15,33 +15,47 @@ export default function SubscriptionManagementScreen() {
 
   const featureLabels = {
     basicReports: "Basic Reports",
-    emailSupport: "Email Support",
     advancedReports: "Advanced Reports",
-    gstFiling: "GST Filing",
-    prioritySupport: "Priority Support",
+    gstReports: "GST Reports",
     barcodeScanner: "Barcode Scanner",
+    expenses: "Expenses",
+    purchaseManagement: "Purchase Management",
+    inventory: "Inventory",
+    advancedInventory: "Advanced Inventory",
+    dataExport: "Data Export",
     apiAccess: "API Access",
-    customIntegrations: "Custom Integrations",
-    dedicatedManager: "Dedicated Manager",
   };
 
   const defaultFeatures = {
     basicReports: false,
-    emailSupport: false,
     advancedReports: false,
-    gstFiling: false,
-    prioritySupport: false,
+    gstReports: false,
     barcodeScanner: false,
+    expenses: false,
+    purchaseManagement: false,
+    inventory: false,
+    advancedInventory: false,
+    dataExport: false,
     apiAccess: false,
-    customIntegrations: false,
-    dedicatedManager: false,
   };
+
+  const limitFields = [
+    ["maxUsers", "Max Users"],
+    ["maxInvoicesPerMonth", "Max Invoices per Month"],
+    ["maxCustomers", "Max Customers"],
+    ["maxProducts", "Max Products"],
+  ];
+  const defaultLimits = { maxUsers: "", maxInvoicesPerMonth: "", maxCustomers: "", maxProducts: "" };
+  const defaultUnlimited = { maxUsers: false, maxInvoicesPerMonth: false, maxCustomers: false, maxProducts: false };
+  const formatLimit = (value) => value == null || value === Infinity ? "Unlimited" : Number(value).toLocaleString("en-IN");
 
   const [newPlanName, setNewPlanName] = useState("");
   const [newPlanPrice, setNewPlanPrice] = useState("");
   const [newPlanBillingCycle, setNewPlanBillingCycle] = useState("monthly");
   const [newPlanFeatures, setNewPlanFeatures] = useState(defaultFeatures);
   const [newPlanStatus, setNewPlanStatus] = useState("active");
+  const [newPlanLimits, setNewPlanLimits] = useState(defaultLimits);
+  const [newPlanUnlimited, setNewPlanUnlimited] = useState(defaultUnlimited);
 
   const [editingPlan, setEditingPlan] = useState(null);
   const [editPlanName, setEditPlanName] = useState("");
@@ -49,6 +63,8 @@ export default function SubscriptionManagementScreen() {
   const [editPlanBillingCycle, setEditPlanBillingCycle] = useState("monthly");
   const [editPlanFeatures, setEditPlanFeatures] = useState(defaultFeatures);
   const [editPlanStatus, setEditPlanStatus] = useState("active");
+  const [editPlanLimits, setEditPlanLimits] = useState(defaultLimits);
+  const [editPlanUnlimited, setEditPlanUnlimited] = useState(defaultUnlimited);
 
   const [savingPlan, setSavingPlan] = useState(false);
   const [deletingPlanId, setDeletingPlanId] = useState(null);
@@ -94,6 +110,7 @@ export default function SubscriptionManagementScreen() {
         billingCycle: newPlanBillingCycle,
         features: { ...newPlanFeatures },
         status: newPlanStatus,
+        ...Object.fromEntries(limitFields.map(([key]) => [key, newPlanUnlimited[key] ? null : newPlanLimits[key]])),
       };
       await createSubscriptionPlan(payload);
       setNewPlanName("");
@@ -101,6 +118,8 @@ export default function SubscriptionManagementScreen() {
       setNewPlanBillingCycle("monthly");
       setNewPlanFeatures({ ...defaultFeatures });
       setNewPlanStatus("active");
+      setNewPlanLimits({ ...defaultLimits });
+      setNewPlanUnlimited({ ...defaultUnlimited });
       await loadSubscriptionPlans();
       showToast("Subscription plan added successfully!", "success");
     } catch (error) {
@@ -134,6 +153,8 @@ export default function SubscriptionManagementScreen() {
     setEditPlanBillingCycle(plan.billingCycle || "monthly");
     setEditPlanFeatures({ ...defaultFeatures, ...(plan.features || {}) });
     setEditPlanStatus(plan.status || "active");
+    setEditPlanLimits(Object.fromEntries(limitFields.map(([key]) => [key, plan[key] == null ? "" : String(plan[key])] )));
+    setEditPlanUnlimited(Object.fromEntries(limitFields.map(([key]) => [key, plan[key] == null])));
   };
 
   const handleUpdatePlan = async () => {
@@ -154,6 +175,7 @@ export default function SubscriptionManagementScreen() {
         billingCycle: editPlanBillingCycle,
         features: { ...editPlanFeatures },
         status: editPlanStatus,
+        ...Object.fromEntries(limitFields.map(([key]) => [key, editPlanUnlimited[key] ? null : editPlanLimits[key]])),
       };
       await updateSubscriptionPlan(editingPlan._id, payload);
       await loadSubscriptionPlans();
@@ -209,6 +231,10 @@ export default function SubscriptionManagementScreen() {
                   <span className="text-xs text-slate-500 ml-1">/ {plan.billingCycle || "month"}</span>
                 </div>
                 <div className="mt-5">
+                  <p className="text-xs text-slate-700 mb-2">Usage limits</p>
+                  <p className="text-xs text-slate-500 mb-3">
+                    {formatLimit(plan.maxUsers)} users · {formatLimit(plan.maxInvoicesPerMonth)} invoices/month · {formatLimit(plan.maxCustomers)} customers · {formatLimit(plan.maxProducts)} products
+                  </p>
                   <p className="text-xs font-semibold text-slate-700 mb-3">Features</p>
                   <div className="space-y-2">
                     {Object.entries(featureLabels).map(([key, label]) => {
@@ -270,6 +296,17 @@ export default function SubscriptionManagementScreen() {
               </select>
             </div>
           </div>
+          <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-5">
+            {limitFields.map(([key, label]) => (
+              <div key={key}>
+                <label className="block text-sm font-medium text-slate-700 mb-2">{label}</label>
+                <div className="flex gap-2">
+                  <input type="number" min="0" step="1" disabled={editPlanUnlimited[key]} value={editPlanLimits[key]} onChange={(e) => setEditPlanLimits((prev) => ({ ...prev, [key]: e.target.value }))} className="flex-1 px-3 py-2.5 border border-slate-300 rounded-lg text-sm" />
+                  <label className="flex items-center gap-2 text-sm text-slate-600 whitespace-nowrap"><input type="checkbox" checked={editPlanUnlimited[key]} onChange={(e) => setEditPlanUnlimited((prev) => ({ ...prev, [key]: e.target.checked }))} /> Unlimited</label>
+                </div>
+              </div>
+            ))}
+          </div>
           <div className="mt-6">
             <h4 className="font-semibold text-slate-900 mb-4">Plan Features</h4>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -317,6 +354,17 @@ export default function SubscriptionManagementScreen() {
               <option value="inactive">Inactive</option>
             </select>
           </div>
+        </div>
+        <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-5">
+          {limitFields.map(([key, label]) => (
+            <div key={key}>
+              <label className="block text-sm font-medium text-slate-700 mb-2">{label}</label>
+              <div className="flex gap-2">
+                <input type="number" min="0" step="1" disabled={newPlanUnlimited[key]} value={newPlanLimits[key]} onChange={(e) => setNewPlanLimits((prev) => ({ ...prev, [key]: e.target.value }))} className="flex-1 px-3 py-2.5 border border-slate-300 rounded-lg text-sm" />
+                <label className="flex items-center gap-2 text-sm text-slate-600 whitespace-nowrap"><input type="checkbox" checked={newPlanUnlimited[key]} onChange={(e) => setNewPlanUnlimited((prev) => ({ ...prev, [key]: e.target.checked }))} /> Unlimited</label>
+              </div>
+            </div>
+          ))}
         </div>
         <div className="mt-6">
           <h4 className="font-semibold text-slate-900 mb-4">Plan Features</h4>

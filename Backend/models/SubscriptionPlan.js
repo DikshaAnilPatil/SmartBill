@@ -28,13 +28,13 @@ const subscriptionPlanSchema = new mongoose.Schema(
       default: "monthly",
     },
 
+    maxUsers: { type: Number, default: null, min: 0 },
+    maxInvoicesPerMonth: { type: Number, default: null, min: 0 },
+    maxCustomers: { type: Number, default: null, min: 0 },
+    maxProducts: { type: Number, default: null, min: 0 },
+
     features: {
       basicReports: {
-        type: Boolean,
-        default: false,
-      },
-
-      emailSupport: {
         type: Boolean,
         default: false,
       },
@@ -44,12 +44,7 @@ const subscriptionPlanSchema = new mongoose.Schema(
         default: false,
       },
 
-      gstFiling: {
-        type: Boolean,
-        default: false,
-      },
-
-      prioritySupport: {
+      gstReports: {
         type: Boolean,
         default: false,
       },
@@ -59,20 +54,17 @@ const subscriptionPlanSchema = new mongoose.Schema(
         default: false,
       },
 
+      expenses: { type: Boolean, default: false },
+      purchaseManagement: { type: Boolean, default: false },
+      inventory: { type: Boolean, default: false },
+      advancedInventory: { type: Boolean, default: false },
+      dataExport: { type: Boolean, default: false },
+
       apiAccess: {
         type: Boolean,
         default: false,
       },
 
-      customIntegrations: {
-        type: Boolean,
-        default: false,
-      },
-
-      dedicatedManager: {
-        type: Boolean,
-        default: false,
-      },
     },
 
     status: {

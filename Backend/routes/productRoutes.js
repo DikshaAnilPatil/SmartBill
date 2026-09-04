@@ -1,5 +1,6 @@
 import express from "express";
 import { protect } from "../middleware/mid.js";
+import { checkResourceLimit } from "../middleware/checkPlanLimits.js";
 
 import {
   addProduct,
@@ -12,8 +13,8 @@ import {
 
 const router = express.Router();
 
-router.post("/bulk", protect, bulkAddProducts);
-router.post("/", protect, addProduct);
+router.post("/bulk", protect, checkResourceLimit("products"), bulkAddProducts);
+router.post("/", protect, checkResourceLimit("products"), addProduct);
 
 router.get("/", protect, getProducts);
 router.get("/:id", protect, getProduct);

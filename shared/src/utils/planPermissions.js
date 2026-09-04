@@ -7,57 +7,51 @@ export const PLAN_CONFIGS = {
     key: "starter",
     name: "Starter",
     price: 999,
-    maxBusinesses: 1,
-    maxUsers: 2,
-    maxInvoicesPerMonth: 500,
     features: {
       basicReports: true,
-      emailSupport: true,
       advancedReports: false,
-      gstFiling: false,
-      prioritySupport: false,
+      gstReports: false,
       barcodeScanner: false,
+      expenses: true,
+      purchaseManagement: true,
+      inventory: true,
+      advancedInventory: false,
+      dataExport: false,
       apiAccess: false,
-      customIntegrations: false,
-      dedicatedManager: false,
     },
   },
   pro: {
     key: "pro",
     name: "Pro",
     price: 2499,
-    maxBusinesses: 3,
-    maxUsers: 10,
-    maxInvoicesPerMonth: Infinity,
     features: {
       basicReports: true,
-      emailSupport: true,
       advancedReports: true,
-      gstFiling: true,
-      prioritySupport: true,
+      gstReports: true,
       barcodeScanner: true,
+      expenses: true,
+      purchaseManagement: true,
+      inventory: true,
+      advancedInventory: true,
+      dataExport: true,
       apiAccess: false,
-      customIntegrations: false,
-      dedicatedManager: false,
     },
   },
   enterprise: {
     key: "enterprise",
     name: "Enterprise",
     price: 6999,
-    maxBusinesses: Infinity,
-    maxUsers: Infinity,
-    maxInvoicesPerMonth: Infinity,
     features: {
       basicReports: true,
-      emailSupport: true,
       advancedReports: true,
-      gstFiling: true,
-      prioritySupport: true,
+      gstReports: true,
       barcodeScanner: true,
+      expenses: true,
+      purchaseManagement: true,
+      inventory: true,
+      advancedInventory: true,
+      dataExport: true,
       apiAccess: true,
-      customIntegrations: true,
-      dedicatedManager: true,
     },
   },
 };
@@ -86,7 +80,7 @@ export function getUserPlan(user) {
  * Superadmin has access to all features.
  *
  * @param {object} user - Authenticated user object
- * @param {string} featureKey - e.g. 'advancedReports', 'gstFiling', 'barcodeScanner', 'apiAccess'
+ * @param {string} featureKey - e.g. 'advancedReports', 'gstReports', 'barcodeScanner', 'apiAccess'
  * @returns {boolean}
  */
 export function hasPlanFeature(user, featureKey) {
@@ -101,13 +95,10 @@ export function hasPlanFeature(user, featureKey) {
 export function getRequiredPlanForFeature(featureKey) {
   switch (featureKey) {
     case "advancedReports":
-    case "gstFiling":
+    case "gstReports":
     case "barcodeScanner":
-    case "prioritySupport":
       return "Pro";
     case "apiAccess":
-    case "customIntegrations":
-    case "dedicatedManager":
       return "Enterprise";
     default:
       return "Pro";

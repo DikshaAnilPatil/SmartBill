@@ -105,7 +105,18 @@ export const requirePermission = (moduleKey) => {
     }
 
     const perms = req.user.permissions || {};
-    if (perms[moduleKey] === false) {
+    const modPerm = perms[moduleKey];
+
+    let hasAccess = true;
+    if (modPerm === false) {
+      hasAccess = false;
+    } else if (modPerm && typeof modPerm === "object") {
+      if (modPerm.view === false && modPerm.manage === false) {
+        hasAccess = false;
+      }
+    }
+
+    if (!hasAccess) {
       return res.status(403).json({
         message: `Forbidden: You do not have permission to access the ${moduleKey} module.`,
       });

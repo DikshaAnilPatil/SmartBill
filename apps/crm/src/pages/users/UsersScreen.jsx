@@ -30,13 +30,13 @@ import {
   ROLE_DEFAULT_PERMISSIONS,
 } from "@shared/utils/permissions";
 import { PERMISSION_CATEGORIES } from "../settings/components/UserPermissionsSettings";
-import { getUserPlan } from "@shared/utils/planPermissions";
 import {
   fetchEmployees,
   createEmployee,
   updateEmployee,
   deleteEmployee,
 } from "@shared/api/employeeAPI";
+import subscriptionAPI from "@shared/api/subscriptionAPI";
 
 export default function UsersScreen({ user }) {
   const [employeeList, setEmployeeList] = useState([]);
@@ -46,6 +46,7 @@ export default function UsersScreen({ user }) {
   const [showLimitModal, setShowLimitModal] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [toast, setToast] = useState(null);
+  const [subscriptionStatus, setSubscriptionStatus] = useState(null);
 
   const showToast = (msg, type = "success") => {
     setToast({ msg, type });
@@ -68,6 +69,7 @@ export default function UsersScreen({ user }) {
 
   useEffect(() => {
     loadEmployees();
+    subscriptionAPI.getSubscriptionStatus().then(setSubscriptionStatus).catch(() => {});
   }, []);
 
   const [name, setName] = useState("");
@@ -227,9 +229,11 @@ export default function UsersScreen({ user }) {
     }
   })();
 
-  const plan = getUserPlan(currentUser);
   const userCount = 1 + (employeeList ? employeeList.length : 0);
-  const isUserLimitReached = plan.maxUsers !== Infinity && userCount >= plan.maxUsers;
+  const maxUsers = subscriptionStatus?.plan
+    ? (subscriptionStatus.plan.maxUsers == null ? Infinity : subscriptionStatus.plan.maxUsers)
+    : Infinity;
+  const isUserLimitReached = maxUsers !== Infinity && userCount >= maxUsers;
 
   return (
     <div className="space-y-5">
@@ -463,7 +467,7 @@ export default function UsersScreen({ user }) {
               Upgrade Your Plan
             </h3>
             <p className="text-sm text-slate-500 mb-6 leading-relaxed">
-              You have reached the maximum number of users allowed on your current plan ({plan?.maxUsers || 2} users max). Please upgrade to Pro or Enterprise to add more employees and unlock advanced features.
+              You have reached the maximum number of users allowed on your current plan ({maxUsers} users max). Please upgrade your plan to add more employees.
             </p>
             <div className="flex gap-3">
               <Btn

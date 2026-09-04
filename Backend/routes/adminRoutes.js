@@ -8,6 +8,11 @@ import {
   updateSystemSettings,
   getAdminRevenueAnalytics,
   getSuperAdminDashboardStats,
+  getAdminStaff,
+  createAdminStaff,
+  updateAdminStaff,
+  deleteAdminStaff,
+  updateRolePermissionsInBulk,
 } from "../controller/adminController.js";
 
 const router = express.Router();
@@ -16,6 +21,15 @@ router.use((req, res, next) => {
   console.log(`[AdminRouter] ${req.method} ${req.originalUrl} (url: ${req.url})`);
   next();
 });
+
+// GET, POST, PUT, DELETE /api/admin/staff - Manage internal admin staff accounts
+router.get("/staff", protect, getAdminStaff);
+router.post("/staff", protect, createAdminStaff);
+router.put("/staff/:id", protect, updateAdminStaff);
+router.delete("/staff/:id", protect, deleteAdminStaff);
+
+// PUT /api/admin/roles/:roleId - Bulk update permissions for all users assigned to roleId
+router.put("/roles/:roleId", protect, updateRolePermissionsInBulk);
 
 // GET /api/admin/businesses - Fetch all owner accounts (SuperAdmin only)
 router.get("/", protect, getAllBusinesses);

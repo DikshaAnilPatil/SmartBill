@@ -6,6 +6,18 @@ import SystemSettings from "../models/SystemSettings.js";
 import { createNotification, notifySuperAdmins } from "../services/notificationService.js";
 import { sendSystemEmail } from "../utils/emailService.js";
 
+const isInternalAdmin = (user) => {
+  if (!user) return false;
+  const roleStr = String(user?.role || "").toLowerCase().replace(/[-_\s]/g, "");
+  return (
+    roleStr === "superadmin" ||
+    roleStr.includes("admin") ||
+    roleStr === "support" ||
+    roleStr === "billing" ||
+    (!user?.ownerId && roleStr !== "owner")
+  );
+};
+
 /**
  * GET /api/admin/businesses
  * Fetch all registered business owner accounts from MongoDB for SuperAdmin view.
@@ -13,10 +25,10 @@ import { sendSystemEmail } from "../utils/emailService.js";
  */
 export const getAllBusinesses = async (req, res) => {
   try {
-    // SuperAdmin access control
-    if (req.user?.role !== "superadmin") {
+    // Internal Admin access control
+    if (!isInternalAdmin(req.user)) {
       return res.status(403).json({
-        message: "Forbidden: SuperAdmin access required.",
+        message: "Forbidden: Internal Admin access required.",
       });
     }
 
@@ -98,9 +110,9 @@ export const getAllBusinesses = async (req, res) => {
  */
 export const updateBusinessStatus = async (req, res) => {
   try {
-    if (req.user?.role !== "superadmin") {
+    if (!isInternalAdmin(req.user)) {
       return res.status(403).json({
-        message: "Forbidden: SuperAdmin access required.",
+        message: "Forbidden: Admin access required.",
       });
     }
 
@@ -183,9 +195,9 @@ export const updateBusinessStatus = async (req, res) => {
  */
 export const getSystemSettings = async (req, res) => {
   try {
-    if (req.user?.role !== "superadmin") {
+    if (!isInternalAdmin(req.user)) {
       return res.status(403).json({
-        message: "Forbidden: SuperAdmin access required.",
+        message: "Forbidden: Admin access required.",
       });
     }
 
@@ -212,9 +224,9 @@ export const getSystemSettings = async (req, res) => {
  */
 export const updateSystemSettings = async (req, res) => {
   try {
-    if (req.user?.role !== "superadmin") {
+    if (!isInternalAdmin(req.user)) {
       return res.status(403).json({
-        message: "Forbidden: SuperAdmin access required.",
+        message: "Forbidden: Admin access required.",
       });
     }
 
@@ -287,9 +299,9 @@ export const updateSystemSettings = async (req, res) => {
  */
 export const getAdminRevenueAnalytics = async (req, res) => {
   try {
-    if (req.user?.role !== "superadmin") {
+    if (!isInternalAdmin(req.user)) {
       return res.status(403).json({
-        message: "Forbidden: SuperAdmin access required.",
+        message: "Forbidden: Admin access required.",
       });
     }
 
@@ -683,13 +695,13 @@ export const getAdminRevenueAnalytics = async (req, res) => {
 
 /**
  * GET /api/admin/dashboard-stats
- * Quick high-level summary KPIs and charts for SuperAdminDashboard.jsx
+ * Live dashboard metrics for SuperAdmin / Admin Portal.
  */
 export const getSuperAdminDashboardStats = async (req, res) => {
   try {
-    if (req.user?.role !== "superadmin") {
+    if (!isInternalAdmin(req.user)) {
       return res.status(403).json({
-        message: "Forbidden: SuperAdmin access required.",
+        message: "Forbidden: Admin access required.",
       });
     }
 
@@ -803,9 +815,9 @@ export const getSuperAdminDashboardStats = async (req, res) => {
  */
 export const grantBusinessAccess = async (req, res) => {
   try {
-    if (req.user?.role !== "superadmin") {
+    if (!isInternalAdmin(req.user)) {
       return res.status(403).json({
-        message: "Forbidden: SuperAdmin access required.",
+        message: "Forbidden: Admin access required.",
       });
     }
 
@@ -910,6 +922,230 @@ export const grantBusinessAccess = async (req, res) => {
     return res.status(500).json({
       message: error.message || "Failed to grant business access.",
     });
+  }
+};
+
+/**
+ * GET /api/admin/staff
+ * Fetch all internal admin staff users.
+ */
+export const getAdminStaff = async (req, res) => {
+  try {
+    if (!isInternalAdmin(req.user)) {
+      return res.status(403).json({ message: "Forbidden: Admin access required." });
+    }
+
+    const staff = await User.find({
+      $or: [
+        { role: "superadmin" },
+        { role: { $regex: "admin", $options: "i" } },
+        { role: "support_admin" },
+        { role: "billing_admin" }
+      ]
+    })
+      .select("-password -twoFactorSecret")
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const formattedStaff = staff.map((u) => ({
+      id: u._id.toString(),
+      _id: u._id.toString(),
+      name: `${u.firstName || ""} ${u.lastName || ""}`.trim() || u.email,
+      email: u.email,
+      avatar: `https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150`,
+      roleId: u.role || "support_admin",
+      department: u.department || "Operations",
+      status: u.status || "Active",
+      permissions: u.permissions || {},
+      lastActive: "Recent",
+      createdAt: u.createdAt ? new Date(u.createdAt).toISOString().split("T")[0] : "N/A"
+    }));
+
+    return res.status(200).json({
+      success: true,
+      count: formattedStaff.length,
+      data: formattedStaff
+    });
+  } catch (error) {
+    console.error("GET ADMIN STAFF ERROR:", error);
+    return res.status(500).json({ message: error.message || "Failed to fetch admin staff." });
+  }
+};
+
+/**
+ * POST /api/admin/staff
+ * Create a new internal admin user account with email & password in MongoDB.
+ */
+export const createAdminStaff = async (req, res) => {
+  try {
+    if (!isInternalAdmin(req.user)) {
+      return res.status(403).json({ message: "Forbidden: Admin access required." });
+    }
+
+    const { name, email, password, roleId, department, status, permissions } = req.body;
+
+    if (!email || !password || !name) {
+      return res.status(400).json({ message: "Name, email, and password are required." });
+    }
+
+    const normalizedEmail = email.toLowerCase().trim();
+    const existing = await User.findOne({ email: normalizedEmail });
+    if (existing) {
+      return res.status(400).json({ message: "An account with this email address already exists." });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const nameParts = name.trim().split(" ");
+    const firstName = nameParts[0];
+    const lastName = nameParts.slice(1).join(" ") || "";
+
+    const newStaff = await User.create({
+      firstName,
+      lastName,
+      email: normalizedEmail,
+      password: hashedPassword,
+      role: roleId || "support_admin",
+      department: department || "Operations",
+      status: status || "Active",
+      permissions: permissions || {},
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: "Internal admin user account created successfully.",
+      user: {
+        id: newStaff._id.toString(),
+        _id: newStaff._id.toString(),
+        name: `${newStaff.firstName} ${newStaff.lastName}`.trim(),
+        email: newStaff.email,
+        roleId: newStaff.role,
+        department: newStaff.department,
+        status: newStaff.status,
+        permissions: newStaff.permissions,
+        createdAt: new Date().toISOString().split("T")[0]
+      }
+    });
+  } catch (error) {
+    console.error("CREATE ADMIN STAFF ERROR:", error);
+    return res.status(500).json({ message: error.message || "Failed to create admin staff." });
+  }
+};
+
+/**
+ * PUT /api/admin/staff/:id
+ * Update an existing internal admin user account (role, permissions, department, status, password).
+ */
+export const updateAdminStaff = async (req, res) => {
+  try {
+    if (!isInternalAdmin(req.user)) {
+      return res.status(403).json({ message: "Forbidden: Admin access required." });
+    }
+
+    const { id } = req.params;
+    const { name, department, roleId, status, permissions, password } = req.body;
+
+    const staffUser = await User.findById(id);
+    if (!staffUser) {
+      return res.status(404).json({ message: "Staff user account not found." });
+    }
+
+    if (name) {
+      const nameParts = name.trim().split(" ");
+      staffUser.firstName = nameParts[0];
+      staffUser.lastName = nameParts.slice(1).join(" ") || "";
+    }
+    if (department !== undefined) staffUser.department = department;
+    if (roleId) staffUser.role = roleId;
+    if (status) staffUser.status = status;
+    if (permissions && typeof permissions === "object") staffUser.permissions = permissions;
+    if (password && password.trim().length > 0) {
+      staffUser.password = await bcrypt.hash(password.trim(), 10);
+    }
+
+    await staffUser.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Internal admin account updated successfully.",
+      user: {
+        id: staffUser._id.toString(),
+        _id: staffUser._id.toString(),
+        name: `${staffUser.firstName} ${staffUser.lastName}`.trim(),
+        email: staffUser.email,
+        roleId: staffUser.role,
+        department: staffUser.department,
+        status: staffUser.status,
+        permissions: staffUser.permissions
+      }
+    });
+  } catch (error) {
+    console.error("UPDATE ADMIN STAFF ERROR:", error);
+    return res.status(500).json({ message: error.message || "Failed to update admin staff." });
+  }
+};
+
+/**
+ * DELETE /api/admin/staff/:id
+ * Delete an internal admin staff account.
+ */
+export const deleteAdminStaff = async (req, res) => {
+  try {
+    if (!isInternalAdmin(req.user)) {
+      return res.status(403).json({ message: "Forbidden: Admin access required." });
+    }
+
+    const { id } = req.params;
+    const deletedUser = await User.findByIdAndDelete(id);
+    if (!deletedUser) {
+      return res.status(404).json({ message: "Staff user account not found." });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Staff user account deleted successfully."
+    });
+  } catch (error) {
+    console.error("DELETE ADMIN STAFF ERROR:", error);
+    return res.status(500).json({ message: error.message || "Failed to delete admin staff." });
+  }
+};
+
+/**
+ * PUT /api/admin/roles/:roleId
+ * Update permissions for a role (e.g. support_admin, billing_admin) across ALL users in MongoDB having that role.
+ */
+export const updateRolePermissionsInBulk = async (req, res) => {
+  try {
+    if (!isInternalAdmin(req.user)) {
+      return res.status(403).json({ message: "Forbidden: Admin access required." });
+    }
+
+    const { roleId } = req.params;
+    const { permissions } = req.body;
+
+    if (!permissions || typeof permissions !== "object") {
+      return res.status(400).json({ message: "Valid permissions object is required." });
+    }
+
+    // Update ALL users in MongoDB assigned to this role
+    const updateResult = await User.updateMany(
+      {
+        $or: [
+          { role: roleId },
+          { role: { $regex: roleId, $options: "i" } }
+        ]
+      },
+      { $set: { permissions: permissions } }
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: `Role permissions updated and synced across ${updateResult.modifiedCount || updateResult.nModified || 0} user account(s).`,
+      modifiedCount: updateResult.modifiedCount || updateResult.nModified || 0
+    });
+  } catch (error) {
+    console.error("UPDATE ROLE PERMISSIONS ERROR:", error);
+    return res.status(500).json({ message: error.message || "Failed to update role permissions." });
   }
 };
 

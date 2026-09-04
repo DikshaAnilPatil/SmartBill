@@ -7,6 +7,7 @@ import TrialBanner from "@shared/components/common/TrialBanner";
 import SuperAdminDashboard from "./pages/dashboard/SuperAdminDashboard";
 import SuperAdminSettingsScreen from "./pages/admin/SuperAdminSettingsScreen";
 import SubscriptionManagementScreen from "./pages/admin/SubscriptionManagementScreen";
+import AdminRolesScreen from "./pages/admin/AdminRolesScreen";
 import NotificationsScreen from "./pages/users/NotificationsScreen";
 import ProfileScreen from "./pages/settings/ProfileScreen";
 import { useCustomization } from "@shared/hooks/useCustomization";
@@ -18,6 +19,7 @@ import { hasPermission } from "@shared/utils/permissions";
 
 function LowStockAlert({ lowStockItems, outOfStockItems, globalThreshold, onClose, onNav }) {
   const total = lowStockItems.length + outOfStockItems.length;
+
   if (total === 0) return null;
 
   return (
@@ -136,8 +138,6 @@ export default function AppShell({ role, user, onLogout, page, onNav }) {
       return <AccessDenied pageKey={page} onNav={onNav} />;
     }
 
-
-
     switch (page) {
       case "super-dashboard":
         return <SuperAdminDashboard />;
@@ -145,6 +145,8 @@ export default function AppShell({ role, user, onLogout, page, onNav }) {
         return <BusinessesNew />;
       case "revenue":
         return <Revenue />;
+      case "admin-role":
+        return <AdminRolesScreen />;
       case "subscriptions":
         return <SubscriptionManagementScreen />;
       case "settings":

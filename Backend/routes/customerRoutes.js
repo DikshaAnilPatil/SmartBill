@@ -10,6 +10,7 @@ import {
 } from "../controller/customerController.js";
 
 import { protect } from "../middleware/mid.js";
+import { checkResourceLimit } from "../middleware/checkPlanLimits.js";
 
 const router = express.Router();
 
@@ -19,7 +20,7 @@ router.use(protect);
 router.get("/", getCustomers);
 router.get("/:id", getCustomer);
 router.get("/:id/details", getCustomerDetails);
-router.post("/", createCustomer);
+router.post("/", checkResourceLimit("customers"), createCustomer);
 router.put("/:id", updateCustomer);
 router.delete("/:id", deleteCustomer);
 

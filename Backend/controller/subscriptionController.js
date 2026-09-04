@@ -1,9 +1,11 @@
              import crypto from "crypto";
 import { razorpayInstance } from "../config/razorpay.js";
 import { PLAN_LIMITS } from "../config/plans.js";
-import { getOrUpdateSubscriptionState } from "../middleware/checkPlanLimits.js";
+import { getOrUpdateSubscriptionState, getPlanConfig } from "../middleware/checkPlanLimits.js";
 import User from "../models/User.js";
 import Order from "../models/Order.js";
+import Customer from "../models/Customer.js";
+import Product from "../models/productModel.js";
 import { createNotification, notifySuperAdmins } from "../services/notificationService.js";
 import { sendSubscriptionReminderEmail } from "../utils/emailService.js";
 
@@ -29,14 +31,14 @@ export const getUpgradePreview = async (req, res) => {
 
     const { newPlan } = req.query;
     const newPlanKey = (newPlan || "").toLowerCase().trim();
-    const newPlanConfig = PLAN_LIMITS[newPlanKey];
+    const newPlanConfig = await getPlanConfig(newPlanKey);
 
     if (!newPlanConfig) {
       return res.status(400).json({ message: "Invalid plan selected" });
     }
 
     const currentPlanKey = user.subscription?.plan || "starter";
-    const currentPlanConfig = PLAN_LIMITS[currentPlanKey] || PLAN_LIMITS.starter;
+    const currentPlanConfig = await getPlanConfig(currentPlanKey);
 
     if (currentPlanKey === newPlanKey) {
       return res.status(400).json({ message: "You are already on this plan" });
@@ -103,7 +105,7 @@ export const createSubscriptionOrder = async (req, res) => {
   try {
     const { planName, isUpgrade, proratedAmount } = req.body;
     const planKey = (planName || "").toLowerCase().replace(/\s*plan\s*/gi, "").trim();
-    const planConfig = PLAN_LIMITS[planKey] || PLAN_LIMITS[planName?.toLowerCase()];
+    const planConfig = await getPlanConfig(planKey);
 
     if (!planConfig) {
       return res.status(400).json({ message: "Invalid plan selected" });
@@ -187,7 +189,11 @@ export const verifySubscriptionPayment = async (req, res) => {
     }
 
     const planKey = (planName || "pro").toLowerCase().replace(/\s*plan\s*/gi, "").trim();
-    const planConfig = PLAN_LIMITS[planKey] || PLAN_LIMITS.starter;
+    const planConfig = await getPlanConfig(planKey);
+
+    if (!planConfig) {
+      return res.status(400).json({ message: "Invalid plan selected" });
+    }
 
     // Find target user
     let user = req.user ? await User.findById(req.user._id) : null;
@@ -252,6 +258,16 @@ export const verifySubscriptionPayment = async (req, res) => {
           upgradedAt: now,
           pendingDowngradePlan: "",
           planHistory: user.subscription.planHistory || [],
+          paymentHistory: [
+            ...(user.subscription.paymentHistory || []),
+            {
+              plan: planKey,
+              amount: planConfig.price,
+              paidAt: now,
+              razorpayOrderId: razorpay_order_id,
+              razorpayPaymentId: razorpay_payment_id,
+            },
+          ],
         };
 
         await user.save();
@@ -374,7 +390,7 @@ export const getSubscriptionStatus = async (req, res) => {
 
     const subState = await getOrUpdateSubscriptionState(user);
     const planKey = user.subscription?.plan || "starter";
-    const planConfig = PLAN_LIMITS[planKey] || PLAN_LIMITS.starter;
+    const planConfig = await getPlanConfig(planKey);
 
     // Current month invoice usage
     const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
@@ -382,6 +398,11 @@ export const getSubscriptionStatus = async (req, res) => {
       ownerId,
       createdAt: { $gte: startOfMonth },
     });
+    const [userCount, customerCount, productCount] = await Promise.all([
+      User.countDocuments({ $or: [{ _id: ownerId }, { ownerId }] }),
+      Customer.countDocuments({ ownerId }),
+      Product.countDocuments({ $or: [{ ownerId }, { userId: ownerId }] }),
+    ]);
 
     res.json({
       success: true,
@@ -391,6 +412,12 @@ export const getSubscriptionStatus = async (req, res) => {
       usage: {
         invoicesThisMonth: invoiceCount,
         maxInvoicesPerMonth: planConfig.maxInvoicesPerMonth,
+        users: userCount,
+        maxUsers: planConfig.maxUsers,
+        customers: customerCount,
+        maxCustomers: planConfig.maxCustomers,
+        products: productCount,
+        maxProducts: planConfig.maxProducts,
       },
     });
   } catch (error) {

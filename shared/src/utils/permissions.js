@@ -140,15 +140,86 @@ export function getUserPermissions(user) {
 export function hasPermission(user, pageKey) {
   if (!user) return true;
   const roleStr = String(user.role || "").toLowerCase().replace(/[-_\s]/g, "");
+
   if (roleStr === "superadmin") return true;
 
   if (
     !pageKey ||
+    pageKey === "super-dashboard" ||
+    pageKey === "dashboard" ||
     pageKey === "profile" ||
     pageKey === "notifications" ||
     ["features", "pricing", "changelog", "roadmap", "about", "blog", "careers", "press", "help-center", "api-docs", "status", "contact"].includes(pageKey)
   ) {
     return true;
+  }
+
+  // Extract user permissions object
+  const perms = user.permissions || {};
+
+  // Helper to check permission flag for a module
+  const checkPerm = (moduleKey) => {
+    if (!perms || Object.keys(perms).length === 0) return null;
+    const item = perms[moduleKey];
+    if (item === undefined) return null;
+    if (typeof item === "boolean") return item;
+    if (item && typeof item === "object") {
+      if (item.view !== undefined) return Boolean(item.view);
+      return Boolean(item.view || item.create || item.edit || item.manage || item.export);
+    }
+    return Boolean(item);
+  };
+
+  let modResult = null;
+
+  switch (pageKey) {
+    case "businesses":
+    case "vendors":
+      modResult = checkPerm("vendors") ?? checkPerm("businesses");
+      break;
+
+    case "revenue":
+      modResult = checkPerm("revenue");
+      break;
+
+    case "subscriptions":
+      modResult = checkPerm("subscriptions");
+      break;
+
+    case "admin-role":
+    case "admin_roles":
+      modResult = checkPerm("admin_roles") ?? checkPerm("admin-role");
+      break;
+
+    case "settings":
+      modResult = checkPerm("settings");
+      break;
+
+    case "offers-coupons":
+      modResult = checkPerm("offers_coupons") ?? checkPerm("marketing");
+      break;
+
+    case "regions":
+      modResult = checkPerm("regions");
+      break;
+
+    default:
+      modResult = checkPerm(pageKey);
+      break;
+  }
+
+  // If user.permissions object explicitly defined permissions for this module, return that result
+  if (modResult !== null) {
+    return modResult;
+  }
+
+  // Fallback defaults based on role if permissions object was not explicitly set
+  if (roleStr.includes("support")) {
+    return ["businesses", "vendors"].includes(pageKey);
+  }
+
+  if (roleStr.includes("billing")) {
+    return ["businesses", "vendors", "revenue", "subscriptions", "settings", "offers-coupons"].includes(pageKey);
   }
 
   const permissions = getUserPermissions(user);

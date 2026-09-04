@@ -13,14 +13,15 @@ import subscriptionAPI from "@shared/api/subscriptionAPI";
 
 const FEATURE_LABELS = {
   basicReports: "Basic Reports",
-  emailSupport: "Email Support",
   advancedReports: "Advanced Reports",
-  gstFiling: "GST Filing",
-  prioritySupport: "Priority Support",
+  gstReports: "GST Reports",
   barcodeScanner: "Barcode Scanner",
+  expenses: "Expenses",
+  purchaseManagement: "Purchase Management",
+  inventory: "Inventory",
+  advancedInventory: "Advanced Inventory",
+  dataExport: "Data Export",
   apiAccess: "API Access",
-  customIntegrations: "Custom Integrations",
-  dedicatedManager: "Dedicated Manager",
 };
 
 /*

@@ -1,5 +1,6 @@
 import express from "express";
 import { protect } from "../middleware/mid.js";
+import { requireFeatureWhenEnabled } from "../middleware/checkPlanLimits.js";
 import {
   getInventorySettings,
   updateInventorySettings,
@@ -14,6 +15,15 @@ router.use(protect);
 router.get("/", getInventorySettings);
 
 // PUT /api/settings/inventory
-router.put("/", updateInventorySettings);
+router.put(
+  "/",
+  requireFeatureWhenEnabled("advancedInventory", [
+    "enableSerialTracking",
+    "enableBatchTracking",
+    "enableMultiUnit",
+    "enableBarcodeScanner",
+  ]),
+  updateInventorySettings,
+);
 
 export default router;

@@ -785,9 +785,9 @@ export default function SettingsScreen({ user, initialTab, onNav } = {}) {
   };
 
   const PLAN_FEATURES = {
-    starter: ["Up to 500 invoices/month", "2 users", "Basic reports", "Email support"],
-    pro: ["Unlimited invoices", "Up to 10 users", "Advanced reports", "GST filing", "Priority support", "Barcode scanner"],
-    enterprise: ["Unlimited invoices", "Unlimited users", "All Pro features", "API access", "Custom integrations", "Dedicated manager"],
+    starter: ["1 business", "2 users", "500 invoices/month", "250 customers", "500 products", "Basic reports and inventory"],
+    pro: ["10 users", "Unlimited invoices", "5,000 customers and 5,000 products", "Advanced and GST reports", "Barcode scanner, export and advanced inventory"],
+    enterprise: ["Unlimited users, invoices, products and customers", "All reports and advanced features", "API access"],
   };
 
   function formatINRLocal(amount) {
@@ -901,6 +901,19 @@ export default function SettingsScreen({ user, initialTab, onNav } = {}) {
                         {businessInfo.businessType}
                       </span>
                     </div>
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mt-5">
+                    {["users", "customers", "products"].map((resource) => {
+                      const current = subData.usage[resource] ?? 0;
+                      const maximum = subData.usage[`max${resource[0].toUpperCase()}${resource.slice(1)}`];
+                      const unlimited = maximum === Infinity || maximum == null || maximum > 10000;
+                      return (
+                        <div key={resource} className="rounded-lg border border-slate-200 dark:border-slate-800 p-3">
+                          <p className="text-xs capitalize text-slate-500 dark:text-slate-400">{resource}</p>
+                          <p className="font-semibold text-slate-800 dark:text-slate-200">{current} / {unlimited ? "Unlimited" : maximum}</p>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
 
@@ -2052,6 +2065,19 @@ export default function SettingsScreen({ user, initialTab, onNav } = {}) {
                               {h.price ? ` · ${formatINRLocal(h.price)}/mo` : ""}
                             </p>
                           </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {subData.subscription?.paymentHistory?.length > 0 && (
+                  <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm">
+                    <h3 className="font-semibold text-slate-800 dark:text-white mb-4">Billing History</h3>
+                    <div className="space-y-2">
+                      {[...subData.subscription.paymentHistory].reverse().map((payment, index) => (
+                        <div key={index} className="flex items-center justify-between gap-3 text-sm">
+                          <span className="text-slate-700 dark:text-slate-200">{PLAN_INFO[payment.plan]?.name || payment.plan} plan</span>
+                          <span className="text-slate-500 dark:text-slate-400">{formatINRLocal(payment.amount)} · {payment.paidAt ? new Date(payment.paidAt).toLocaleDateString("en-IN") : "—"}</span>
                         </div>
                       ))}
                     </div>

@@ -6,12 +6,13 @@ import {
 } from "../controller/expenseController.js";
 
 import { authMiddleware } from "../middleware/auth.js";
+import { requireFeature } from "../middleware/checkPlanLimits.js";
 
 const router = express.Router();
 
 router.use(authMiddleware);
 
 router.get("/", listExpenses);
-router.post("/", createExpense);
+router.post("/", requireFeature("expenses"), createExpense);
 
 export default router;

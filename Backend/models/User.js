@@ -142,6 +142,15 @@ const userSchema = new mongoose.Schema(
           reason: { type: String, default: "upgrade" }, // "initial" | "upgrade" | "downgrade"
         },
       ],
+      paymentHistory: [
+        {
+          plan: { type: String },
+          amount: { type: Number, default: 0 },
+          paidAt: { type: Date, default: Date.now },
+          razorpayOrderId: { type: String, default: "" },
+          razorpayPaymentId: { type: String, default: "" },
+        },
+      ],
     },
   },
   {

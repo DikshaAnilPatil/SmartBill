@@ -6,6 +6,7 @@ import {
   updateEmployee,
   deleteEmployee,
 } from "../controller/employeeController.js";
+import { checkResourceLimit } from "../middleware/checkPlanLimits.js";
 
 const router = express.Router();
 
@@ -13,7 +14,7 @@ const router = express.Router();
 router.use(authMiddleware);
 
 router.get("/", getEmployees);
-router.post("/", createEmployee);
+router.post("/", checkResourceLimit("users"), createEmployee);
 router.put("/:id", updateEmployee);
 router.delete("/:id", deleteEmployee);
 

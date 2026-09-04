@@ -34,13 +34,13 @@ export default function ReportsScreen({ user }) {
   })();
 
   const canAccessPL = hasPlanFeature(currentUser, "advancedReports");
-  const canAccessGST = hasPlanFeature(currentUser, "gstFiling");
+  const canAccessGST = hasPlanFeature(currentUser, "gstReports");
 
   const reportTypes = [
     { key: "sales", label: "Sales Report", icon: TrendingUp, locked: false },
     { key: "purchase", label: "Purchase Report", icon: ShoppingCart, locked: false },
     { key: "pl", label: "Profit & Loss", icon: BarChart3, locked: !canAccessPL, requiredFeature: "advancedReports" },
-    { key: "gst", label: "GST Report", icon: Percent, locked: !canAccessGST, requiredFeature: "gstFiling" },
+    { key: "gst", label: "GST Report", icon: Percent, locked: !canAccessGST, requiredFeature: "gstReports" },
     { key: "inventory", label: "Inventory Report", icon: Package, locked: false },
   ];
 
@@ -75,7 +75,7 @@ export default function ReportsScreen({ user }) {
         ) : (
           <PlanFeatureLock
             user={currentUser}
-            featureKey="gstFiling"
+            featureKey="gstReports"
             title="GST Filing Reports Locked"
             description="Automated GSTR-1, GSTR-3B tax calculations and GST filing reports are available on Pro and Enterprise plans."
           />

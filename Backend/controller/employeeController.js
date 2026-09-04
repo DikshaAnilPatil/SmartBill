@@ -1,7 +1,6 @@
 import bcrypt from "bcryptjs";
 import User from "../models/User.js";
 import { sendEmployeeCredentialsEmail } from "../utils/emailService.js";
-import { PLAN_LIMITS } from "../config/plans.js";
 
 // ======================================================
 // GET ALL EMPLOYEES FOR THE OWNER
@@ -98,21 +97,6 @@ export const createEmployee = async (req, res) => {
         success: false,
         message: "Owner account not found.",
       });
-    }
-
-    // Check maxUsers plan limit
-    const planKey = (owner.subscription?.plan || "starter").toLowerCase().replace(/\s*plan\s*/gi, "").trim();
-    const planConfig = PLAN_LIMITS[planKey] || PLAN_LIMITS.starter;
-    if (planConfig.maxUsers !== Infinity) {
-      const currentEmployeeCount = await User.countDocuments({ ownerId: owner._id });
-      const totalUserCount = 1 + currentEmployeeCount; // owner + employees
-      if (totalUserCount >= planConfig.maxUsers) {
-        return res.status(403).json({
-          success: false,
-          message: `Your ${planConfig.name} plan limit of ${planConfig.maxUsers} users has been reached. Please upgrade your plan to add more employees.`,
-          limitReached: true,
-        });
-      }
     }
 
     // Name parsing
