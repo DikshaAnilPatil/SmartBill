@@ -255,11 +255,10 @@ export default function TrialBanner({ user, onNav }) {
           }
 
           alert(
-            `✓ ${
-              verifyRes.message ||
-              "Payment successful! Welcome to " +
-                plan.name +
-                " plan."
+            `✓ ${verifyRes.message ||
+            "Payment successful! Welcome to " +
+            plan.name +
+            " plan."
             }`
           );
 
@@ -269,9 +268,9 @@ export default function TrialBanner({ user, onNav }) {
         } catch (err) {
           alert(
             "Payment verification error: " +
-              (err?.message ||
-                err?.response?.data?.message ||
-                "Unknown error")
+            (err?.message ||
+              err?.response?.data?.message ||
+              "Unknown error")
           );
         } finally {
           setLoadingPlan(null);
@@ -350,9 +349,9 @@ export default function TrialBanner({ user, onNav }) {
 
       alert(
         "Could not start payment process: " +
-          (error?.message ||
-            error?.response?.data?.message ||
-            "Unknown error")
+        (error?.message ||
+          error?.response?.data?.message ||
+          "Unknown error")
       );
 
       setLoadingPlan(null);
@@ -499,11 +498,10 @@ export default function TrialBanner({ user, onNav }) {
                   return (
                     <div
                       key={plan.name}
-                      className={`border-2 rounded-xl p-5 flex flex-col justify-between relative bg-white ${
-                        plan.badge
+                      className={`border-2 rounded-xl p-5 flex flex-col justify-between relative bg-white ${plan.badge
                           ? "border-blue-500 shadow-md shadow-blue-50"
                           : "border-slate-200"
-                      }`}
+                        }`}
                     >
                       {/* Popular badge */}
 
@@ -566,15 +564,13 @@ export default function TrialBanner({ user, onNav }) {
                         disabled={
                           loadingPlan === plan.name
                         }
-                        className={`w-full py-2 px-4 rounded-lg font-bold text-xs shadow transition-all cursor-pointer ${
-                          plan.badge
+                        className={`w-full py-2 px-4 rounded-lg font-bold text-xs shadow transition-all cursor-pointer ${plan.badge
                             ? "bg-blue-600 hover:bg-blue-700 text-white"
                             : "bg-slate-900 hover:bg-slate-800 text-white"
-                        } ${
-                          loadingPlan === plan.name
+                          } ${loadingPlan === plan.name
                             ? "opacity-70 cursor-not-allowed"
                             : ""
-                        }`}
+                          }`}
                       >
                         {loadingPlan === plan.name
                           ? "Processing..."

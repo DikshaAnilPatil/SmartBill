@@ -132,8 +132,8 @@ export default function LandingPage({ onNav }) {
       } else {
         setPlansError(
           error?.response?.data?.message ||
-            error?.message ||
-            "Unable to load subscription plans."
+          error?.message ||
+          "Unable to load subscription plans."
         );
       }
     } finally {
@@ -144,12 +144,6 @@ export default function LandingPage({ onNav }) {
       setPlansLoading(false);
     }
   }, []);
-
-  /*
-  |--------------------------------------------------------------------------
-  | Load plans when page opens
-  |--------------------------------------------------------------------------
-  */
 
   useEffect(() => {
     fetchPlans();
@@ -270,11 +264,10 @@ export default function LandingPage({ onNav }) {
             }
 
             alert(
-              `✓ ${
-                verifyRes?.message ||
-                "Payment successful! Welcome to " +
-                  plan.name +
-                  " plan."
+              `✓ ${verifyRes?.message ||
+              "Payment successful! Welcome to " +
+              plan.name +
+              " plan."
               }`
             );
 
@@ -292,11 +285,11 @@ export default function LandingPage({ onNav }) {
 
             alert(
               "Payment verification error: " +
-                (
-                  err?.response?.data?.message ||
-                  err?.message ||
-                  "Unknown error"
-                )
+              (
+                err?.response?.data?.message ||
+                err?.message ||
+                "Unknown error"
+              )
             );
           } finally {
             setLoadingPlan(null);
@@ -400,11 +393,11 @@ export default function LandingPage({ onNav }) {
 
       alert(
         "Could not start payment process: " +
-          (
-            error?.response?.data?.message ||
-            error?.message ||
-            "Unknown error"
-          )
+        (
+          error?.response?.data?.message ||
+          error?.message ||
+          "Unknown error"
+        )
       );
 
       setLoadingPlan(null);
@@ -715,7 +708,7 @@ export default function LandingPage({ onNav }) {
 
                   const isPopular =
                     plan.name?.toLowerCase() ===
-                      "pro" ||
+                    "pro" ||
                     (!hasProPlan &&
                       index === 1);
 
@@ -740,14 +733,13 @@ export default function LandingPage({ onNav }) {
                         relative
                         rounded-2xl
                         border
-                        ${
-                          isPopular
-                            ? `
+                        ${isPopular
+                          ? `
                               border-blue-500
                               shadow-xl
                               shadow-blue-100
                             `
-                            : `
+                          : `
                               border-slate-200
                               shadow-sm
                             `
@@ -809,10 +801,10 @@ export default function LandingPage({ onNav }) {
 
                       {plan.billingCycle ===
                         "custom" && (
-                        <p className="text-sm text-slate-500 mt-1">
-                          Custom billing
-                        </p>
-                      )}
+                          <p className="text-sm text-slate-500 mt-1">
+                            Custom billing
+                          </p>
+                        )}
 
                       {/* Features */}
 
@@ -888,14 +880,13 @@ export default function LandingPage({ onNav }) {
                           transition
                           disabled:opacity-60
                           disabled:cursor-not-allowed
-                          ${
-                            isPopular
-                              ? `
+                          ${isPopular
+                            ? `
                                 bg-blue-600
                                 text-white
                                 hover:bg-blue-700
                               `
-                              : `
+                            : `
                                 border
                                 border-slate-300
                                 bg-white
@@ -906,7 +897,7 @@ export default function LandingPage({ onNav }) {
                         `}
                       >
                         {loadingPlan ===
-                        planIdentifier
+                          planIdentifier
                           ? "Processing..."
                           : "Get Started"}
                       </button>
@@ -939,7 +930,7 @@ export default function LandingPage({ onNav }) {
 
       <section id="contact" className="py-20 px-6 bg-slate-50 border-t border-slate-200">
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row gap-12">
-          
+
           <div className="flex-1 space-y-8">
             <div>
               <p className="text-xs text-blue-600 font-semibold uppercase tracking-widest mb-3">
@@ -998,12 +989,12 @@ export default function LandingPage({ onNav }) {
                   <input type="text" className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/20 outline-none transition-all" />
                 </div>
               </div>
-              
+
               <div>
                 <label className="block text-sm font-semibold text-slate-900 mb-2">Email Address</label>
                 <input type="email" required className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/20 outline-none transition-all" />
               </div>
-              
+
               <div>
                 <label className="block text-sm font-semibold text-slate-900 mb-2">How can we help?</label>
                 <textarea rows="4" className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/20 outline-none transition-all resize-none" placeholder="Tell us more about your inquiry..."></textarea>

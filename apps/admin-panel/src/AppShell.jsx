@@ -6,6 +6,7 @@ import Topbar from "@shared/layouts/Topbar";
 import TrialBanner from "@shared/components/common/TrialBanner";
 import SuperAdminDashboard from "./pages/dashboard/SuperAdminDashboard";
 import SuperAdminSettingsScreen from "./pages/admin/SuperAdminSettingsScreen";
+import SubscriptionManagementScreen from "./pages/admin/SubscriptionManagementScreen";
 import NotificationsScreen from "./pages/users/NotificationsScreen";
 import ProfileScreen from "./pages/settings/ProfileScreen";
 import { useCustomization } from "@shared/hooks/useCustomization";
@@ -144,6 +145,8 @@ export default function AppShell({ role, user, onLogout, page, onNav }) {
         return <BusinessesNew />;
       case "revenue":
         return <Revenue />;
+      case "subscriptions":
+        return <SubscriptionManagementScreen />;
       case "settings":
         return <SuperAdminSettingsScreen />;
       case "notifications":

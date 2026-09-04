@@ -60,7 +60,8 @@ export default function Sidebar({ page, onNav, role, collapsed, onToggle, user }
           <div className="space-y-0.5 px-3">
             {SUPER_ADMIN_ITEMS.map(({ key, label, icon: Icon }) => {
               const active = page === key;
-              const translatedLabel = t(`nav.${key}`) || label;
+              const translation = t(`nav.${key}`);
+              const translatedLabel = translation !== `nav.${key}` ? translation : label;
               return (
                 <button
                   key={key}
@@ -101,7 +102,8 @@ export default function Sidebar({ page, onNav, role, collapsed, onToggle, user }
                 <div className="space-y-0.5 px-3">
                   {group.items.map(({ key, label, icon: Icon }) => {
                     const active = page === key;
-                    const translatedLabel = t(`nav.${key}`) || label;
+                    const translation = t(`nav.${key}`);
+                    const translatedLabel = translation !== `nav.${key}` ? translation : label;
                     return (
                       <button
                         type="button"

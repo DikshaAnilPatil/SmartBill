@@ -21,11 +21,11 @@ export const NotificationContext = createContext({
   unreadCount: 0,
   loading: false,
   connected: false,
-  markAsRead: async () => {},
-  markAllAsRead: async () => {},
-  deleteNotification: async () => {},
-  clearAllNotifications: async () => {},
-  refresh: async () => {},
+  markAsRead: async () => { },
+  markAllAsRead: async () => { },
+  deleteNotification: async () => { },
+  clearAllNotifications: async () => { },
+  refresh: async () => { },
 });
 
 export const useNotifications = () => {
@@ -146,7 +146,7 @@ export function NotificationProvider({ children, onNav }) {
       if (eventSourceRef.current) {
         try {
           eventSourceRef.current.close();
-        } catch (_) {}
+        } catch (_) { }
       }
 
       try {
@@ -179,7 +179,7 @@ export function NotificationProvider({ children, onNav }) {
 
                 const notifIdStr = String(newNotif._id || newNotif.id || "");
 
-                // Prepend new notification to live state
+
                 setNotifications((prev) => {
                   const exists = prev.some((item) => {
                     const id = String(item._id || item.id || "");
@@ -195,15 +195,14 @@ export function NotificationProvider({ children, onNav }) {
                   setUnreadCount((prev) => prev + 1);
                 }
 
-                // Trigger real-time interactive toast alert
                 const toastFn =
                   newNotif.type === "error"
                     ? toast.error
                     : newNotif.type === "warning"
-                    ? toast.warning
-                    : newNotif.type === "success"
-                    ? toast.success
-                    : toast.info;
+                      ? toast.warning
+                      : newNotif.type === "success"
+                        ? toast.success
+                        : toast.info;
 
                 toastFn(newNotif.title, {
                   description: newNotif.message,
@@ -211,9 +210,9 @@ export function NotificationProvider({ children, onNav }) {
                   action:
                     newNotif.link && onNav
                       ? {
-                          label: "View",
-                          onClick: () => onNav(newNotif.link),
-                        }
+                        label: "View",
+                        onClick: () => onNav(newNotif.link),
+                      }
                       : undefined,
                 });
                 break;
@@ -267,7 +266,7 @@ export function NotificationProvider({ children, onNav }) {
                   try {
                     localStorage.setItem("smartbill_inventorySettings", JSON.stringify(data.settings));
                     window.dispatchEvent(new CustomEvent("inventorySettingsUpdated", { detail: data.settings }));
-                  } catch (_) {}
+                  } catch (_) { }
                 }
                 break;
 
@@ -288,9 +287,9 @@ export function NotificationProvider({ children, onNav }) {
           setConnected(false);
           try {
             es.close();
-          } catch (_) {}
+          } catch (_) { }
 
-          // Attempt reconnection after 3 seconds
+
           if (reconnectTimeoutRef.current) {
             clearTimeout(reconnectTimeoutRef.current);
           }
@@ -307,7 +306,7 @@ export function NotificationProvider({ children, onNav }) {
     refresh();
     connectSSE();
 
-    // Fallback background sync every 8 seconds to ensure zero missed updates
+
     const pollInterval = setInterval(() => {
       if (isSubscribed && localStorage.getItem("smartbill_token")) {
         fetchNotificationsAPI()
@@ -316,11 +315,11 @@ export function NotificationProvider({ children, onNav }) {
               setNotifications(res.notifications);
               setUnreadCount(
                 res.unreadCount ??
-                  res.notifications.filter((n) => !n.read).length
+                res.notifications.filter((n) => !n.read).length
               );
             }
           })
-          .catch(() => {});
+          .catch(() => { });
       }
     }, 8000);
 
@@ -342,7 +341,7 @@ export function NotificationProvider({ children, onNav }) {
       if (eventSourceRef.current) {
         try {
           eventSourceRef.current.close();
-        } catch (_) {}
+        } catch (_) { }
       }
       window.removeEventListener("userUpdated", handleAuthChange);
       window.removeEventListener("storage", handleAuthChange);

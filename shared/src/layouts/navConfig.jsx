@@ -106,11 +106,12 @@ export const NAV_GROUPS = [
 
 export const SUPER_ADMIN_ITEMS = [
   { key: "super-dashboard", label: "Overview", icon: LayoutDashboard },
-
-  { key: "businesses", label: "Businesses", icon: Building2 },
-
+  { key: "businesses", label: "Vendors", icon: Building2 },
   { key: "revenue", label: "Revenue", icon: BarChart3 },
-
+  { key: "admin-role", label: "Admin Role", icon: Shield },
+  { key: "offers-coupons", label: "Offers & Coupons", icon: Tag },
+  { key: "regions", label: "Regions", icon: Globe },
+  { key: "subscriptions", label: "Subscription Mgmt", icon: CreditCard },
   { key: "settings", label: "Settings", icon: Settings },
 ];
 
