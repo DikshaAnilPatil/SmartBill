@@ -156,7 +156,7 @@ export default function AppShell({ role, user, onLogout, page, onNav }) {
       case "suppliers":
         return <SuppliersScreen />;
       case "products":
-        return <ProductsScreen />;
+        return <ProductsScreen onNav={onNav} />;
       case "revenue":
         return <Revenue />;
       case "pos":

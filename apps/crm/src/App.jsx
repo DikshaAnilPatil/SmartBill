@@ -120,8 +120,10 @@ function AppRoutes() {
 
   const handleLogin = (r, u) => {
     if (r === "superadmin") {
-       window.location.href = "http://localhost:5175/login";
-       return;
+      localStorage.removeItem("smartbill_token");
+      localStorage.removeItem("smartbill_user");
+      setUser(null);
+      return;
     }
     setRole(r);
     if (u) setUser(u);
@@ -154,8 +156,9 @@ function AppRoutes() {
   }, [navigate]);
 
   if (role === "superadmin" && location.pathname.startsWith("/app")) {
-     window.location.href = "http://localhost:5175/app";
-     return null;
+     localStorage.removeItem("smartbill_token");
+     localStorage.removeItem("smartbill_user");
+     return <Navigate to="/login" replace />;
   }
 
   return (

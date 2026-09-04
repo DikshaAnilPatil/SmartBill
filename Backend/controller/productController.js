@@ -5,14 +5,69 @@ import { createNotification } from "../services/notificationService.js";
 // Add Product
 export const addProduct = async (req, res) => {
   try {
-    const rawSku = req.body.sku && String(req.body.sku).trim()
-      ? String(req.body.sku).trim()
-      : `SKU-${Date.now().toString(36).toUpperCase()}`;
+    const {
+      name: rawName,
+      sku: inputSku,
+      category = "General",
+      supplier = "",
+      cost = 0,
+      price = 0,
+      wholesalePrice = 0,
+      minPrice = 0,
+      stock = 0,
+      minStock = 10,
+      gst = 0,
+      unit = "Piece",
+      status = "Active",
+    } = req.body;
+
+    const name = String(rawName || "").trim();
+    if (!name) {
+      return res.status(400).json({
+        success: false,
+        message: "Product name is required.",
+      });
+    }
+
+    const rawSku = inputSku && String(inputSku).trim()
+      ? String(inputSku).trim()
+      : `SKU-${Date.now().toString(36).toUpperCase()}-${Math.floor(Math.random() * 1000)}`;
+
+    const effectiveOwnerId = req.user.ownerId || req.user._id;
+    const actualUserId = req.user.actualUserId || req.user._id;
+
+    // Check if a product with this exact SKU already exists for this business/user
+    const existingProduct = await Product.findOne({
+      sku: rawSku,
+      $or: [
+        { ownerId: effectiveOwnerId },
+        { userId: effectiveOwnerId },
+        { userId: actualUserId },
+        { ownerId: actualUserId },
+      ],
+    });
+
+    // If duplicate SKU found (e.g. user copied & pasted rows in Excel), auto-differentiate with unique suffix
+    const finalSku = existingProduct
+      ? `${rawSku}-${Date.now().toString(36).toUpperCase()}-${Math.floor(100 + Math.random() * 900)}`
+      : rawSku;
 
     const product = new Product({
-      ...req.body,
-      sku: rawSku,
-      userId: req.user._id,
+      name,
+      sku: finalSku,
+      category: String(category || "General").trim(),
+      supplier: String(supplier || "").trim(),
+      cost: Number(cost) || 0,
+      price: Number(price) || 0,
+      wholesalePrice: Number(wholesalePrice) || 0,
+      minPrice: Number(minPrice) || 0,
+      stock: 0, // Stock starts strictly at 0 and is updated when purchased from supplier
+      minStock: Number(minStock) || 0,
+      gst: Number(gst) || 0,
+      unit: String(unit || "Piece").trim(),
+      status: status || "Active",
+      userId: actualUserId,
+      ownerId: effectiveOwnerId,
     });
 
     // Save product to MongoDB
@@ -20,11 +75,11 @@ export const addProduct = async (req, res) => {
 
     // Trigger instant stock alert if initially low or out of stock
     try {
-      const stock = Number(product.stock || 0);
-      const minStock = Number(product.minStock ?? 10);
-      if (stock <= 0) {
+      const currentStock = Number(product.stock || 0);
+      const threshold = Number(product.minStock ?? 10);
+      if (currentStock <= 0) {
         await createNotification({
-          ownerId: req.user._id,
+          ownerId: effectiveOwnerId,
           title: `Out of Stock: ${product.name}`,
           message: `${product.name} (SKU: ${product.sku || "N/A"}) was added with 0 stock.`,
           type: "error",
@@ -32,15 +87,15 @@ export const addProduct = async (req, res) => {
           link: "inventory",
           metadata: { productId: product._id, stock: 0 },
         });
-      } else if (stock <= minStock) {
+      } else if (currentStock <= threshold) {
         await createNotification({
-          ownerId: req.user._id,
+          ownerId: effectiveOwnerId,
           title: `Low Stock: ${product.name}`,
-          message: `${product.name} has only ${stock} ${product.unit || "units"} remaining (Min threshold: ${minStock}).`,
+          message: `${product.name} has only ${currentStock} ${product.unit || "units"} remaining (Min threshold: ${threshold}).`,
           type: "warning",
           category: "stock",
           link: "inventory",
-          metadata: { productId: product._id, stock },
+          metadata: { productId: product._id, stock: currentStock },
         });
       }
     } catch (notifErr) {
@@ -70,12 +125,227 @@ export const addProduct = async (req, res) => {
   }
 };
 
-// Get Products for logged-in user only
+// Bulk Add / Import Products
+export const bulkAddProducts = async (req, res) => {
+  try {
+    const {
+      products,
+      mode = "upsert", // "upsert" | "update_stock" | "create_only"
+      stockMode = "replace", // "replace" | "add"
+    } = req.body;
+
+    const productsToInsert = Array.isArray(products)
+      ? products
+      : Array.isArray(req.body)
+      ? req.body
+      : [];
+
+    if (!Array.isArray(productsToInsert) || productsToInsert.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "No products provided for import.",
+      });
+    }
+
+    const effectiveOwnerId = req.user.ownerId || req.user._id;
+    const actualUserId = req.user.actualUserId || req.user._id;
+
+    // Fetch existing products for this business/user
+    const existingProducts = await Product.find({
+      $or: [
+        { ownerId: effectiveOwnerId },
+        { userId: effectiveOwnerId },
+        { userId: actualUserId },
+        { ownerId: actualUserId },
+      ],
+    });
+
+    const existingSkuMap = new Map();
+    const existingNameMap = new Map();
+    existingProducts.forEach((p) => {
+      if (p.sku) existingSkuMap.set(String(p.sku).trim().toLowerCase(), p);
+      if (p.name) existingNameMap.set(String(p.name).trim().toLowerCase(), p);
+    });
+
+    let createdCount = 0;
+    let updatedCount = 0;
+    const processedDocs = [];
+    const stockAlertNotifications = [];
+    let count = 0;
+
+    for (const item of productsToInsert) {
+      const name = String(item.name || "").trim();
+      if (!name) continue;
+
+      const rawSku = item.sku && String(item.sku).trim() ? String(item.sku).trim() : "";
+      const skuLower = rawSku ? rawSku.toLowerCase() : "";
+      const nameLower = name.toLowerCase();
+
+      // Find existing match by SKU or Name
+      const existing = (skuLower && existingSkuMap.get(skuLower)) || existingNameMap.get(nameLower);
+
+      if (existing && mode !== "create_only") {
+        // UPDATE EXISTING PRODUCT
+        const currentStock = Number(existing.stock || 0);
+        const importStock = Number(item.stock || 0);
+        const newStock = stockMode === "add" ? currentStock + importStock : importStock;
+
+        existing.stock = newStock;
+        if (item.minStock !== undefined && item.minStock !== null && item.minStock !== "") {
+          existing.minStock = Number(item.minStock) || 0;
+        }
+
+        if (mode !== "update_stock") {
+          // Update details, category, and pricing
+          if (name) existing.name = name;
+          if (rawSku) existing.sku = rawSku;
+          if (item.category) existing.category = String(item.category).trim();
+          if (item.supplier !== undefined) existing.supplier = String(item.supplier).trim();
+          if (item.cost !== undefined) existing.cost = Number(item.cost) || 0;
+          if (item.price !== undefined) existing.price = Number(item.price) || 0;
+          if (item.wholesalePrice !== undefined) existing.wholesalePrice = Number(item.wholesalePrice) || 0;
+          if (item.minPrice !== undefined) existing.minPrice = Number(item.minPrice) || 0;
+          if (item.gst !== undefined) existing.gst = Number(item.gst) || 0;
+          if (item.unit) existing.unit = String(item.unit).trim();
+          if (item.status) existing.status = item.status || "Active";
+        }
+
+        await existing.save();
+        updatedCount++;
+        processedDocs.push(existing);
+
+        // Check stock alert threshold
+        const threshold = Number(existing.minStock ?? 10);
+        if (newStock <= 0) {
+          stockAlertNotifications.push({
+            ownerId: effectiveOwnerId,
+            title: `Out of Stock: ${existing.name}`,
+            message: `${existing.name} (SKU: ${existing.sku || "N/A"}) stock updated to 0.`,
+            type: "error",
+            category: "stock",
+            link: "inventory",
+            metadata: { productId: existing._id, stock: 0 },
+          });
+        } else if (newStock <= threshold) {
+          stockAlertNotifications.push({
+            ownerId: effectiveOwnerId,
+            title: `Low Stock: ${existing.name}`,
+            message: `${existing.name} has only ${newStock} ${existing.unit || "units"} remaining.`,
+            type: "warning",
+            category: "stock",
+            link: "inventory",
+            metadata: { productId: existing._id, stock: newStock },
+          });
+        }
+      } else if (mode !== "update_stock") {
+        // CREATE NEW PRODUCT
+        let baseSku = rawSku || `SKU-${Date.now().toString(36).toUpperCase()}-${++count}`;
+        let sku = baseSku;
+        let skuKey = sku.toLowerCase();
+
+        // If duplicate SKU exists in DB or earlier in this batch, auto-differentiate
+        if (existingSkuMap.has(skuKey)) {
+          sku = `${baseSku}-${Date.now().toString(36).toUpperCase()}-${Math.floor(100 + Math.random() * 900)}`;
+          skuKey = sku.toLowerCase();
+        }
+
+        const newDoc = new Product({
+          name,
+          sku,
+          category: String(item.category || "General").trim(),
+          supplier: String(item.supplier || "").trim(),
+          cost: Number(item.cost) || 0,
+          price: Number(item.price) || 0,
+          wholesalePrice: Number(item.wholesalePrice) || 0,
+          minPrice: Number(item.minPrice) || 0,
+          stock: Number(item.stock) || 0,
+          minStock: Number(item.minStock) || 10,
+          gst: Number(item.gst) || 0,
+          unit: String(item.unit || "Piece").trim(),
+          status: item.status || "Active",
+          userId: actualUserId,
+          ownerId: effectiveOwnerId,
+        });
+
+        await newDoc.save();
+        createdCount++;
+        processedDocs.push(newDoc);
+
+        // Keep local map updated for subsequent rows in this same batch
+        existingSkuMap.set(skuKey, newDoc);
+        existingNameMap.set(nameLower, newDoc);
+
+        const currentStock = Number(newDoc.stock || 0);
+        const threshold = Number(newDoc.minStock ?? 10);
+        if (currentStock <= 0) {
+          stockAlertNotifications.push({
+            ownerId: effectiveOwnerId,
+            title: `Out of Stock: ${newDoc.name}`,
+            message: `${newDoc.name} was added with 0 stock.`,
+            type: "error",
+            category: "stock",
+            link: "inventory",
+            metadata: { productId: newDoc._id, stock: 0 },
+          });
+        } else if (currentStock <= threshold) {
+          stockAlertNotifications.push({
+            ownerId: effectiveOwnerId,
+            title: `Low Stock: ${newDoc.name}`,
+            message: `${newDoc.name} has only ${currentStock} ${newDoc.unit || "units"} remaining.`,
+            type: "warning",
+            category: "stock",
+            link: "inventory",
+            metadata: { productId: newDoc._id, stock: currentStock },
+          });
+        }
+      }
+    }
+
+    if (processedDocs.length === 0 && productsToInsert.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: "No valid products found to process.",
+      });
+    }
+
+    // Trigger stock alert notifications in background
+    if (stockAlertNotifications.length > 0) {
+      stockAlertNotifications.slice(0, 5).forEach((notif) => {
+        createNotification(notif).catch(() => {});
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: `Import completed: ${createdCount} created, ${updatedCount} updated.`,
+      count: createdCount + updatedCount,
+      createdCount,
+      updatedCount,
+      products: processedDocs,
+    });
+  } catch (error) {
+    console.error("BULK ADD PRODUCTS ERROR:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+// Get Products for logged-in user and business
 export const getProducts = async (req, res) => {
   try {
+    const effectiveOwnerId = req.user.ownerId || req.user._id;
+    const actualUserId = req.user.actualUserId || req.user._id;
+
     const products = await Product.find({
-      userId: req.user._id,
-    });
+      $or: [
+        { ownerId: effectiveOwnerId },
+        { userId: effectiveOwnerId },
+        { userId: actualUserId },
+        { ownerId: actualUserId },
+      ],
+    }).sort({ createdAt: -1 });
 
     res.json({
       success: true,
@@ -95,11 +365,18 @@ export const getProducts = async (req, res) => {
 export const updateProduct = async (req, res) => {
   try {
     const { id } = req.params;
+    const effectiveOwnerId = req.user.ownerId || req.user._id;
+    const actualUserId = req.user.actualUserId || req.user._id;
 
-    // Find product belonging to logged-in user
+    // Find product belonging to logged-in user or business
     const product = await Product.findOne({
       _id: id,
-      userId: req.user._id,
+      $or: [
+        { ownerId: effectiveOwnerId },
+        { userId: effectiveOwnerId },
+        { userId: actualUserId },
+        { ownerId: actualUserId },
+      ],
     });
 
     if (!product) {
@@ -147,7 +424,7 @@ export const updateProduct = async (req, res) => {
       const minStock = Number(product.minStock ?? 10);
       if (stock <= 0) {
         await createNotification({
-          ownerId: req.user._id,
+          ownerId: effectiveOwnerId,
           title: `Out of Stock: ${product.name}`,
           message: `${product.name} (SKU: ${product.sku || "N/A"}) stock has dropped to 0.`,
           type: "error",
@@ -157,7 +434,7 @@ export const updateProduct = async (req, res) => {
         });
       } else if (stock <= minStock) {
         await createNotification({
-          ownerId: req.user._id,
+          ownerId: effectiveOwnerId,
           title: `Low Stock: ${product.name}`,
           message: `${product.name} has only ${stock} ${product.unit || "units"} remaining.`,
           type: "warning",
@@ -189,11 +466,18 @@ export const updateProduct = async (req, res) => {
 export const deleteProduct = async (req, res) => {
   try {
     const { id } = req.params;
+    const effectiveOwnerId = req.user.ownerId || req.user._id;
+    const actualUserId = req.user.actualUserId || req.user._id;
 
-    // Delete only if product belongs to logged-in user
+    // Delete only if product belongs to logged-in user or business
     const product = await Product.findOneAndDelete({
       _id: id,
-      userId: req.user._id,
+      $or: [
+        { ownerId: effectiveOwnerId },
+        { userId: effectiveOwnerId },
+        { userId: actualUserId },
+        { ownerId: actualUserId },
+      ],
     });
 
     if (!product) {
@@ -227,7 +511,18 @@ export const getProduct = async (req, res) => {
         .json({ success: false, message: "Invalid product id." });
     }
 
-    const product = await Product.findOne({ _id: id, userId: req.user._id });
+    const effectiveOwnerId = req.user.ownerId || req.user._id;
+    const actualUserId = req.user.actualUserId || req.user._id;
+
+    const product = await Product.findOne({
+      _id: id,
+      $or: [
+        { ownerId: effectiveOwnerId },
+        { userId: effectiveOwnerId },
+        { userId: actualUserId },
+        { ownerId: actualUserId },
+      ],
+    });
     if (!product) {
       return res
         .status(404)

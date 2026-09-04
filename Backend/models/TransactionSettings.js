@@ -77,27 +77,6 @@ const transactionSettingsSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
-
-    // 4. Sales Returns & Refunds
-    restoreStockAfterReturn: {
-      type: Boolean,
-      default: true,
-    },
-
-    allowPartialReturn: {
-      type: Boolean,
-      default: true,
-    },
-
-    requireReturnPasscode: {
-      type: Boolean,
-      default: false,
-    },
-
-    allowReturnWithoutInvoice: {
-      type: Boolean,
-      default: false,
-    },
   },
   {
     timestamps: true,

@@ -37,6 +37,14 @@ const dropLegacyIndexes = async () => {
         console.log("[DB] Successfully dropped legacy global invoiceNo_1 index from orders.");
       }
     }
+
+    if (names.includes("products")) {
+      const indexes = await db.collection("products").indexes();
+      if (indexes.some((idx) => idx.name === "sku_1")) {
+        await db.collection("products").dropIndex("sku_1");
+        console.log("[DB] Successfully dropped legacy global sku_1 index from products.");
+      }
+    }
   } catch (err) {
     console.warn("[DB] Index cleanup notice:", err.message);
   }

@@ -12,16 +12,27 @@ import {
   Receipt,
   Building2,
   FileText,
+  FileSpreadsheet,
+  Download,
+  Upload,
+  Package,
+  Sparkles,
 } from "lucide-react";
 import {
   createPurchase,
   fetchPurchases,
   markPurchaseAsPaid,
+  deletePurchase,
 } from "@shared/api/purchaseAPI";
-import { getProducts } from "@shared/api/productAPI";
+import { getProducts, createProduct } from "@shared/api/productAPI";
 import { fetchSuppliers } from "@shared/api/supplierAPI";
 import { fmt } from "@shared/utils/format";
-import { Toast, StepperInput } from "@shared/components/common/ui";
+import { Toast, StepperInput, Modal, Input, Select, Btn } from "@shared/components/common/ui";
+import {
+  parseExcelOrCsvFile,
+  normalizePurchaseInvoiceRows,
+  downloadPurchaseInvoiceTemplate,
+} from "@shared/utils/csvHelper";
 
 const GST_OPTIONS = [0, 5, 12, 18, 28];
 const PAYMENT_METHODS = [
@@ -110,9 +121,137 @@ export default function PurchaseScreen() {
   const [paymentNotes, setPaymentNotes] = useState("");
   const [recordingPayment, setRecordingPayment] = useState(false);
 
+  // Quick Add Product Modal States
+  const [showQuickAddProductModal, setShowQuickAddProductModal] = useState(false);
+  const [quickProductForm, setQuickProductForm] = useState({
+    name: "",
+    sku: "",
+    category: "General",
+    cost: "",
+    price: "",
+    gst: "18",
+    unit: "Piece",
+    stock: "0",
+    minStock: "10",
+  });
+  const [quickProductSaving, setQuickProductSaving] = useState(false);
+
   const showToast = (msg, type = "success") => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 3500);
+  };
+
+  // Import Supplier Bill / Invoice Modal States
+  const [showImportBillModal, setShowImportBillModal] = useState(false);
+  const [importBillFile, setImportBillFile] = useState(null);
+  const [parsedBillItems, setParsedBillItems] = useState([]);
+  const [billImportErrors, setBillImportErrors] = useState([]);
+  const [billParsing, setBillParsing] = useState(false);
+
+  // Handle Bill File Upload & Parse
+  const handleBillFileChange = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImportBillFile(file);
+    setBillParsing(true);
+    setBillImportErrors([]);
+
+    try {
+      const rawRows = await parseExcelOrCsvFile(file);
+      const { items: normalized, errors } = normalizePurchaseInvoiceRows(rawRows, productList);
+      setParsedBillItems(normalized);
+      setBillImportErrors(errors);
+    } catch (err) {
+      console.error("Failed to parse supplier bill:", err);
+      setBillImportErrors([`Failed to parse supplier bill: ${err.message}`]);
+      setParsedBillItems([]);
+    } finally {
+      setBillParsing(false);
+    }
+  };
+
+  const handleApplyImportedBill = () => {
+    if (parsedBillItems.length === 0) {
+      showToast("No valid items to load", "error");
+      return;
+    }
+    setItems(parsedBillItems);
+    setShowImportBillModal(false);
+    setImportBillFile(null);
+    setParsedBillItems([]);
+    setBillImportErrors([]);
+    showToast(`Loaded ${parsedBillItems.length} items from supplier bill into purchase entry!`, "success");
+  };
+
+  // Quick Add Product Handler
+  const handleQuickAddProduct = async (e) => {
+    if (e) e.preventDefault();
+    const name = String(quickProductForm.name || "").trim();
+    if (!name) {
+      showToast("Product name is required", "error");
+      return;
+    }
+    setQuickProductSaving(true);
+    try {
+      const res = await createProduct({
+        name,
+        sku: quickProductForm.sku ? String(quickProductForm.sku).trim() : `SKU-${Date.now().toString(36).toUpperCase()}`,
+        category: quickProductForm.category || "General",
+        cost: Number(quickProductForm.cost) || 0,
+        price: Number(quickProductForm.price) || (Number(quickProductForm.cost) || 0) * 1.2,
+        gst: Number(quickProductForm.gst) || 0,
+        unit: quickProductForm.unit || "Piece",
+        stock: Number(quickProductForm.stock) || 0,
+        minStock: Number(quickProductForm.minStock) || 10,
+        status: "Active",
+      });
+
+      const newProd = res?.product || res;
+      setProductList((prev) => [newProd, ...prev]);
+
+      // Automatically fill empty item row or append a new item row with this product
+      setItems((prev) => {
+        const emptyIdx = prev.findIndex((it) => !it.product || !it.product.trim());
+        const costVal = newProd.cost !== undefined && Number(newProd.cost) > 0 ? newProd.cost : newProd.price || 0;
+        const gstVal = newProd.gst !== undefined ? Number(newProd.gst) : 18;
+        const newRow = {
+          productId: newProd._id || newProd.id,
+          product: newProd.name,
+          qty: 1,
+          unit: newProd.unit || "Piece",
+          rate: costVal,
+          gstRate: gstVal,
+          discount: 0,
+          amount: Number(costVal),
+          gstAmount: Number(costVal) * (gstVal / 100),
+        };
+        if (emptyIdx !== -1) {
+          return prev.map((it, i) => (i === emptyIdx ? newRow : it));
+        }
+        return [...prev, newRow];
+      });
+
+      showToast(`Product "${newProd.name}" created and selected!`, "success");
+      setShowQuickAddProductModal(false);
+      setQuickProductForm({
+        name: "",
+        sku: "",
+        category: "General",
+        cost: "",
+        price: "",
+        gst: "18",
+        unit: "Piece",
+        stock: "0",
+        minStock: "10",
+      });
+      window.dispatchEvent(new CustomEvent("productUpdated"));
+      window.dispatchEvent(new CustomEvent("stockUpdated"));
+    } catch (err) {
+      console.error("QUICK ADD PRODUCT ERROR:", err);
+      showToast(err.response?.data?.message || err.message || "Failed to create product", "error");
+    } finally {
+      setQuickProductSaving(false);
+    }
   };
 
   // Load initial data from APIs
@@ -152,6 +291,22 @@ export default function PurchaseScreen() {
 
   useEffect(() => {
     loadData();
+
+    const handleUpdate = () => {
+      loadData();
+    };
+
+    window.addEventListener("stockUpdated", handleUpdate);
+    window.addEventListener("productUpdated", handleUpdate);
+    window.addEventListener("purchaseCreated", handleUpdate);
+    window.addEventListener("orderCreated", handleUpdate);
+
+    return () => {
+      window.removeEventListener("stockUpdated", handleUpdate);
+      window.removeEventListener("productUpdated", handleUpdate);
+      window.removeEventListener("purchaseCreated", handleUpdate);
+      window.removeEventListener("orderCreated", handleUpdate);
+    };
   }, [loadData]);
 
   // Handle reorder auto-fill from Inventory
@@ -163,19 +318,19 @@ export default function PurchaseScreen() {
         const selectedProduct = productList.find((prod) => prod.name === p.name);
 
         if (selectedProduct) {
-          const qty = p.minStock || 10;
           const rate =
             selectedProduct.cost !== undefined && selectedProduct.cost > 0
               ? selectedProduct.cost
               : selectedProduct.price || 0;
           const gstRate =
             selectedProduct.gst !== undefined ? selectedProduct.gst : 18;
+          const qty = p.minStock ? Math.max(1, p.minStock * 2) : 10;
           const amount = qty * rate;
           const gstAmount = amount * (gstRate / 100);
 
           setItems([
             {
-              productId: selectedProduct._id || selectedProduct.id || "",
+              productId: selectedProduct._id || selectedProduct.id,
               product: selectedProduct.name,
               qty: qty,
               unit: selectedProduct.unit || "pcs",
@@ -203,18 +358,27 @@ export default function PurchaseScreen() {
         const next = { ...item, [field]: value };
 
         if (field === "product") {
+          const cleanVal = String(value || "").trim().toLowerCase();
           const selected = productList.find(
-            (p) => p.name === value || (p._id || p.id) === value
+            (p) =>
+              String(p.name || "").toLowerCase() === cleanVal ||
+              (p._id || p.id) === value
           );
           if (selected) {
             next.productId = selected._id || selected.id;
             next.product = selected.name;
-            next.unit = selected.unit || "pcs";
+            next.unit = selected.unit || "Piece";
             next.rate =
-              selected.cost !== undefined && selected.cost > 0
+              selected.cost !== undefined && Number(selected.cost) > 0
                 ? selected.cost
                 : selected.price || 0;
-            next.gstRate = selected.gst !== undefined ? selected.gst : 18;
+            next.gstRate = selected.gst !== undefined ? Number(selected.gst) : 18;
+          } else {
+            // Free-form typed product name (manual new item)
+            next.productId = null;
+            next.product = value;
+            if (!next.unit) next.unit = "Piece";
+            if (next.gstRate === undefined || next.gstRate === null) next.gstRate = 18;
           }
         }
 
@@ -415,6 +579,25 @@ export default function PurchaseScreen() {
       );
     } finally {
       setRecordingPayment(false);
+    }
+  };
+
+  const handleDeletePurchase = async (purchaseId) => {
+    if (
+      !window.confirm(
+        "Are you sure you want to delete this purchase bill? This will automatically reverse the added inventory stock and supplier credit balance."
+      )
+    ) {
+      return;
+    }
+    try {
+      await deletePurchase(purchaseId);
+      showToast("Purchase bill deleted and stock reversed successfully!", "success");
+      window.dispatchEvent(new CustomEvent("stockUpdated"));
+      window.dispatchEvent(new CustomEvent("productUpdated"));
+      await loadData();
+    } catch (err) {
+      showToast(err.response?.data?.message || err.message || "Failed to delete purchase", "error");
     }
   };
 
@@ -701,19 +884,40 @@ export default function PurchaseScreen() {
             {/* Products Table */}
             <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-sm">
               <div className="flex items-center justify-between mb-3">
-                <h3 className="font-semibold text-slate-900 dark:text-slate-100 text-sm">
-                  Products
-                </h3>
-                <span className="text-xs text-slate-500 dark:text-slate-400">
-                  {items.length} item{items.length !== 1 ? "s" : ""}
-                </span>
+                <div className="flex items-center gap-2">
+                  <h3 className="font-semibold text-slate-900 dark:text-slate-100 text-sm">
+                    Products
+                  </h3>
+                  <span className="text-xs text-slate-500 dark:text-slate-400">
+                    ({items.length} item{items.length !== 1 ? "s" : ""})
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={() => setShowImportBillModal(true)}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-400 text-xs font-semibold hover:bg-emerald-100 transition-colors cursor-pointer shadow-2xs"
+                  >
+                    <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Import Bill (.xlsx)</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setShowQuickAddProductModal(true)}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-800 text-blue-600 dark:text-blue-400 text-xs font-semibold hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors cursor-pointer shadow-2xs"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>+ Quick Add Product</span>
+                  </button>
+                </div>
               </div>
 
               <div className="overflow-x-auto">
                 <table className="w-full text-xs text-left">
                   <thead>
                     <tr className="border-b border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 font-semibold">
-                      <th className="pb-2 min-w-[160px]">Product *</th>
+                      <th className="pb-2 min-w-[190px]">Product / Item Name *</th>
                       <th className="pb-2 w-16 text-center">Qty *</th>
 
                       <th className="pb-2 w-24 text-right">Rate *</th>
@@ -726,32 +930,56 @@ export default function PurchaseScreen() {
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                     {items.map((item, i) => (
                       <tr key={i} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40">
-                        {/* Product */}
+                        {/* Product Search / Free-form Input */}
                         <td className="py-2.5 pr-2">
-                          <select
-                            value={item.product}
-                            onChange={(e) =>
-                              updateItem(i, "product", e.target.value)
-                            }
-                            className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md px-2 py-1.5 text-xs text-slate-900 dark:text-white outline-none focus:border-blue-500"
-                          >
-                            <option value="">Select Product</option>
-                            {productList.map((p) => {
-                              const pName = p.name;
-                              const isTaken =
-                                selectedProductNames.includes(pName) &&
-                                item.product !== pName;
-                              return (
-                                <option
-                                  key={p._id || p.id}
-                                  value={pName}
-                                  disabled={isTaken}
-                                >
-                                  {pName} {isTaken ? "(Selected)" : ""}
+                          <div className="relative">
+                            <input
+                              type="text"
+                              list={`purchase-prod-datalist-${i}`}
+                              value={item.product}
+                              onChange={(e) =>
+                                updateItem(i, "product", e.target.value)
+                              }
+                              placeholder="Type or select product..."
+                              className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md px-2.5 py-1.5 text-xs text-slate-900 dark:text-white outline-none focus:border-blue-500 font-medium placeholder-slate-400"
+                            />
+                            <datalist id={`purchase-prod-datalist-${i}`}>
+                              {productList.map((p) => (
+                                <option key={p._id || p.id} value={p.name}>
+                                  {p.sku ? `[${p.sku}] ` : ""}(Stock: {p.stock} {p.unit || "pcs"}) - ₹{p.cost || p.price || 0}
                                 </option>
+                              ))}
+                            </datalist>
+                          </div>
+                          {(() => {
+                            const trimmedName = String(item.product || "").trim();
+                            if (!trimmedName) return null;
+                            const matchedProduct = productList.find(
+                              (p) =>
+                                (item.productId && (p._id === item.productId || p.id === item.productId)) ||
+                                (p.name && p.name.trim().toLowerCase() === trimmedName.toLowerCase())
+                            );
+                            if (matchedProduct) {
+                              const cur = Number(matchedProduct.stock || 0);
+                              const add = Number(item.qty || 0);
+                              return (
+                                <div className="flex items-center gap-1.5 mt-1 text-[10px] text-slate-500">
+                                  <span>In Stock: <strong className="text-slate-700 dark:text-slate-300 font-mono">{cur}</strong></span>
+                                  <span>➔</span>
+                                  <span className="font-semibold text-emerald-600 dark:text-emerald-400">
+                                    After Bill: {cur + add} {matchedProduct.unit || "Piece"}
+                                  </span>
+                                </div>
                               );
-                            })}
-                          </select>
+                            } else {
+                              return (
+                                <div className="flex items-center gap-1 mt-1 text-[10px] text-purple-600 dark:text-purple-400 font-medium">
+                                  <Sparkles className="w-3 h-3" />
+                                  <span>New item: will be auto-added to your catalog</span>
+                                </div>
+                              );
+                            }
+                          })()}
                         </td>
 
                         {/* Qty */}
@@ -1127,22 +1355,32 @@ export default function PurchaseScreen() {
                           )}
                         </td>
                         <td className="px-4 py-3 text-center">
-                          {purchase.paymentStatus !== "Paid" && remAmt > 0 ? (
+                          <div className="flex items-center justify-center gap-2">
+                            {purchase.paymentStatus !== "Paid" && remAmt > 0 ? (
+                              <button
+                                type="button"
+                                onClick={() => handleOpenPaymentModal(purchase)}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white text-xs font-semibold shadow-sm hover:shadow transition-all cursor-pointer"
+                                title="Record payment to supplier"
+                              >
+                                <CreditCard className="w-3.5 h-3.5" />
+                                Record Payment
+                              </button>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-600 dark:text-emerald-400">
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                                Cleared
+                              </span>
+                            )}
                             <button
                               type="button"
-                              onClick={() => handleOpenPaymentModal(purchase)}
-                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white text-xs font-semibold shadow-sm hover:shadow transition-all cursor-pointer"
-                              title="Record payment to supplier"
+                              onClick={() => handleDeletePurchase(purchase._id || purchase.id)}
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors cursor-pointer"
+                              title="Delete purchase bill & reverse inventory stock"
                             >
-                              <CreditCard className="w-3.5 h-3.5" />
-                              Record Payment
+                              <Trash2 className="w-3.5 h-3.5" />
                             </button>
-                          ) : (
-                            <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-600 dark:text-emerald-400">
-                              <CheckCircle2 className="w-3.5 h-3.5" />
-                              Cleared
-                            </span>
-                          )}
+                          </div>
                         </td>
                       </tr>
                     );
@@ -1370,6 +1608,275 @@ export default function PurchaseScreen() {
           </div>
         );
       })()}
+
+      {/* ── QUICK ADD NEW PRODUCT MODAL ── */}
+      {showQuickAddProductModal && (
+        <Modal
+          title="Quick Add New Product"
+          onClose={() => {
+            setShowQuickAddProductModal(false);
+          }}
+        >
+          <form onSubmit={handleQuickAddProduct} className="space-y-4">
+            <Input
+              label="Product Name *"
+              placeholder="e.g. Wireless Ergonomic Mouse"
+              value={quickProductForm.name}
+              onChange={(v) => setQuickProductForm((f) => ({ ...f, name: v }))}
+              required
+            />
+
+            <div className="grid grid-cols-2 gap-3">
+              <Input
+                label="SKU / Barcode"
+                placeholder="Auto-generated if empty"
+                value={quickProductForm.sku}
+                onChange={(v) => setQuickProductForm((f) => ({ ...f, sku: v }))}
+              />
+              <Input
+                label="Category"
+                placeholder="e.g. Electronics, Hardware"
+                value={quickProductForm.category}
+                onChange={(v) => setQuickProductForm((f) => ({ ...f, category: v }))}
+              />
+            </div>
+
+            <div className="grid grid-cols-3 gap-3">
+              <Input
+                label="Purchase Cost (₹)"
+                type="number"
+                placeholder="0"
+                value={quickProductForm.cost}
+                onChange={(v) => setQuickProductForm((f) => ({ ...f, cost: v }))}
+              />
+              <Input
+                label="Selling Price (₹)"
+                type="number"
+                placeholder="0"
+                value={quickProductForm.price}
+                onChange={(v) => setQuickProductForm((f) => ({ ...f, price: v }))}
+              />
+              <Input
+                label="GST %"
+                type="number"
+                placeholder="18"
+                value={quickProductForm.gst}
+                onChange={(v) => setQuickProductForm((f) => ({ ...f, gst: v }))}
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <Input
+                label="Unit"
+                placeholder="Piece, Box, Kg, Liter..."
+                value={quickProductForm.unit}
+                onChange={(v) => setQuickProductForm((f) => ({ ...f, unit: v }))}
+              />
+              <Input
+                label="Min. Stock Level"
+                type="number"
+                placeholder="10"
+                value={quickProductForm.minStock}
+                onChange={(v) => setQuickProductForm((f) => ({ ...f, minStock: v }))}
+              />
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <Btn
+                variant="outline"
+                type="button"
+                onClick={() => setShowQuickAddProductModal(false)}
+                className="flex-1 justify-center"
+              >
+                Cancel
+              </Btn>
+              <Btn
+                variant="primary"
+                type="submit"
+                disabled={quickProductSaving}
+                className="flex-1 justify-center"
+                icon={<Plus className="w-4 h-4" />}
+              >
+                {quickProductSaving ? "Creating..." : "Create & Add to Bill"}
+              </Btn>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {/* ── IMPORT SUPPLIER BILL / INVOICE MODAL ── */}
+      {showImportBillModal && (
+        <Modal
+          title="Import Supplier Bill / Invoice"
+          onClose={() => {
+            setShowImportBillModal(false);
+            setImportBillFile(null);
+            setParsedBillItems([]);
+            setBillImportErrors([]);
+          }}
+        >
+          <div className="space-y-4 max-h-[75vh] overflow-y-auto pr-1">
+            {/* Template Download Banner */}
+            <div className="p-4 bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200 rounded-2xl flex items-center justify-between gap-3 flex-wrap">
+              <div>
+                <div className="flex items-center gap-1.5 font-semibold text-emerald-950 text-sm">
+                  <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                  <span>Download Supplier Bill Template</span>
+                </div>
+                <p className="text-xs text-emerald-700 mt-0.5">
+                  Template with Product Name, Quantity, Purchase Rate (₹), GST %, and Discount columns.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Btn
+                  variant="outline"
+                  size="sm"
+                  onClick={() => downloadPurchaseInvoiceTemplate("xlsx")}
+                  icon={<Download className="w-3.5 h-3.5 text-emerald-600" />}
+                  className="bg-white hover:bg-emerald-50 hover:border-emerald-300 text-xs shadow-sm"
+                >
+                  Excel Template (.xlsx)
+                </Btn>
+                <Btn
+                  variant="outline"
+                  size="sm"
+                  onClick={() => downloadPurchaseInvoiceTemplate("csv")}
+                  icon={<Download className="w-3.5 h-3.5 text-blue-600" />}
+                  className="bg-white hover:bg-blue-50 hover:border-blue-300 text-xs shadow-sm"
+                >
+                  CSV Template (.csv)
+                </Btn>
+              </div>
+            </div>
+
+            {/* File Upload Box */}
+            <div className="space-y-1.5">
+              <label className="block text-xs font-semibold text-slate-700">
+                Upload Supplier Invoice / Bill (.xlsx, .xls, .csv)
+              </label>
+              <div className="relative border-2 border-dashed border-slate-200 hover:border-emerald-400 bg-slate-50/70 hover:bg-emerald-50/30 rounded-2xl p-4 transition-all text-center">
+                <input
+                  type="file"
+                  accept=".xlsx, .xls, .csv"
+                  onChange={handleBillFileChange}
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                />
+                <div className="flex flex-col items-center justify-center gap-1.5">
+                  <div className="w-10 h-10 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600">
+                    <Upload className="w-5 h-5" />
+                  </div>
+                  <div className="text-xs">
+                    {importBillFile ? (
+                      <span className="font-semibold text-emerald-700 flex items-center justify-center gap-1.5">
+                        <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                        {importBillFile.name} ({(importBillFile.size / 1024).toFixed(1)} KB)
+                      </span>
+                    ) : (
+                      <>
+                        <span className="font-semibold text-slate-700">Click to upload bill spreadsheet</span> or drag and drop
+                        <span className="block text-[11px] text-slate-400 mt-0.5">Supports Microsoft Excel (.xlsx, .xls) and CSV (.csv)</span>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Errors if any */}
+            {billImportErrors.length > 0 && (
+              <div className="p-3 bg-red-50 border border-red-200 rounded-2xl max-h-32 overflow-y-auto">
+                <p className="text-xs font-bold text-red-700 mb-1">Warnings / Errors ({billImportErrors.length}):</p>
+                <ul className="text-[11px] text-red-600 space-y-0.5 list-disc pl-4">
+                  {billImportErrors.map((err, i) => (
+                    <li key={i}>{err}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* Parsed Items Preview */}
+            {parsedBillItems.length > 0 && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-semibold text-slate-800">
+                    ✓ {parsedBillItems.length} valid item{parsedBillItems.length !== 1 ? "s" : ""} detected from supplier bill:
+                  </span>
+                  <span className="font-mono text-emerald-700 font-bold">
+                    Est. Total: ₹{parsedBillItems.reduce((sum, it) => sum + it.amount + it.gstAmount, 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}
+                  </span>
+                </div>
+
+                <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+                  <div className="max-h-48 overflow-y-auto overflow-x-auto">
+                    <table className="w-full text-xs text-left">
+                      <thead className="bg-slate-100 text-slate-600 sticky top-0 font-semibold uppercase text-[10px] tracking-wider">
+                        <tr>
+                          <th className="px-3 py-2">Item Name</th>
+                          <th className="px-3 py-2 text-center">Qty</th>
+                          <th className="px-3 py-2 text-right">Rate (₹)</th>
+                          <th className="px-3 py-2 text-center">GST %</th>
+                          <th className="px-3 py-2 text-right">Amount (₹)</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {parsedBillItems.map((it, idx) => (
+                          <tr key={idx} className="hover:bg-slate-50/80">
+                            <td className="px-3 py-2 font-medium text-slate-900 max-w-[180px] truncate">
+                              {it.product}
+                              {it.isExisting && (
+                                <span className="ml-1.5 px-1 py-0.2 rounded text-[9px] bg-blue-50 text-blue-700 border border-blue-200">
+                                  Matched
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-3 py-2 text-center font-mono font-semibold text-slate-800">
+                              {it.qty} {it.unit}
+                            </td>
+                            <td className="px-3 py-2 text-right font-mono text-slate-700">
+                              ₹{it.rate}
+                            </td>
+                            <td className="px-3 py-2 text-center text-slate-500">
+                              {it.gstRate}%
+                            </td>
+                            <td className="px-3 py-2 text-right font-mono font-bold text-slate-900">
+                              ₹{(it.amount + it.gstAmount).toFixed(2)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Actions */}
+            <div className="flex gap-3 pt-2 border-t border-slate-100">
+              <Btn
+                variant="outline"
+                onClick={() => {
+                  setShowImportBillModal(false);
+                  setImportBillFile(null);
+                  setParsedBillItems([]);
+                  setBillImportErrors([]);
+                }}
+                className="flex-1 justify-center"
+              >
+                Cancel
+              </Btn>
+              <Btn
+                variant="primary"
+                disabled={billParsing || parsedBillItems.length === 0}
+                onClick={handleApplyImportedBill}
+                className="flex-1 justify-center shadow-md shadow-emerald-600/20 bg-emerald-600 hover:bg-emerald-700 text-white"
+                icon={<Check className="w-4 h-4" />}
+              >
+                {billParsing ? "Reading Bill..." : `Load Items into Bill (${parsedBillItems.length})`}
+              </Btn>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

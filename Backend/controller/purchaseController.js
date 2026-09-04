@@ -395,3 +395,91 @@ export const markPurchaseAsPaid = async (req, res) => {
     });
   }
 };
+
+// ================= DELETE / CANCEL PURCHASE =================
+export const deletePurchase = async (req, res) => {
+  try {
+    const purchase = await Purchase.findOne({
+      _id: req.params.id,
+      ownerId: req.user._id,
+    });
+
+    if (!purchase) {
+      return res.status(404).json({ message: "Purchase record not found." });
+    }
+
+    const ownershipFilter = {
+      $or: [{ userId: req.user._id }, { ownerId: req.user._id }],
+    };
+
+    // 1. Revert Inventory Stock
+    if (Array.isArray(purchase.items)) {
+      for (const item of purchase.items) {
+        let product = null;
+        if (item.productId && mongoose.isValidObjectId(item.productId)) {
+          product = await Product.findOne({
+            _id: item.productId,
+            ...ownershipFilter,
+          });
+        }
+        if (!product && item.productName) {
+          const cleanName = String(item.productName).trim();
+          product = await Product.findOne({
+            name: new RegExp(`^${cleanName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i"),
+            ...ownershipFilter,
+          });
+        }
+        if (product) {
+          const qtyToDeduct = Number(item.quantity) || 0;
+          product.stock = Math.max(0, (Number(product.stock) || 0) - qtyToDeduct);
+          await product.save();
+        }
+      }
+    }
+
+    // 2. Revert Supplier Payable Balance
+    if (Number(purchase.remainingAmount) > 0) {
+      let supplierDoc = null;
+      if (purchase.supplierId) {
+        supplierDoc = await Supplier.findOne({
+          _id: purchase.supplierId,
+          ownerId: req.user._id,
+        });
+      }
+      if (!supplierDoc && purchase.supplierName) {
+        supplierDoc = await Supplier.findOne({
+          name: String(purchase.supplierName).trim(),
+          ownerId: req.user._id,
+        });
+      }
+      if (supplierDoc) {
+        supplierDoc.balance = Math.max(
+          0,
+          (Number(supplierDoc.balance) || 0) - Number(purchase.remainingAmount)
+        );
+        await supplierDoc.save();
+      }
+    }
+
+    await Purchase.deleteOne({ _id: purchase._id, ownerId: req.user._id });
+
+    try {
+      await createNotification({
+        ownerId: req.user._id,
+        userId: req.user.actualUserId || req.user._id,
+        title: `Purchase Deleted: #${purchase.supplierInvoiceNo || purchase.purchaseOrderNo || "Bill"}`,
+        message: `Purchase from ${purchase.supplierName} was deleted. Inventory stock was adjusted.`,
+        type: "warning",
+        category: "purchase",
+        link: "purchase",
+      });
+    } catch (_) {}
+
+    return res.status(200).json({
+      message: "Purchase record deleted and inventory stock reversed successfully.",
+    });
+  } catch (error) {
+    console.error("DELETE PURCHASE ERROR:", error.message);
+    return res.status(500).json({ message: error.message || "Failed to delete purchase." });
+  }
+};

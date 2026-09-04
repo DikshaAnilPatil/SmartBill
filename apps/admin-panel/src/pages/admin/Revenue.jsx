@@ -174,21 +174,20 @@ export default function Revenue() {
             <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
           </div>
 
-          {/* Timeframe selector */}
-          <div className="inline-flex bg-slate-100 p-1 rounded-xl border border-slate-200">
-            {["This Week", "This Month", "3M", "6M", "1Y"].map((tf) => (
-              <button
-                key={tf}
-                onClick={() => setTimeframe(tf)}
-                className={`text-xs px-3 py-1.5 rounded-lg font-medium transition ${
-                  timeframe === tf
-                    ? "bg-blue-600 text-white shadow-sm font-semibold"
-                    : "text-slate-600 hover:text-slate-900"
-                }`}
-              >
-                {tf}
-              </button>
-            ))}
+          {/* Timeframe Selector */}
+          <div className="relative">
+            <select
+              value={timeframe}
+              onChange={(e) => setTimeframe(e.target.value)}
+              className="appearance-none bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 text-xs rounded-xl px-3 py-2 pr-8 font-medium cursor-pointer transition focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="This Week">This Week</option>
+              <option value="This Month">This Month</option>
+              <option value="3M">3M</option>
+              <option value="6M">6M</option>
+              <option value="1Y">1Y</option>
+            </select>
+            <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
           </div>
 
           {/* Refresh Button */}

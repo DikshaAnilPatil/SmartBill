@@ -30,6 +30,13 @@ export default function AdminLogin({ onLogin }) {
       }
 
       const loggedInUser = data.user;
+      if (loggedInUser?.role !== "superadmin") {
+        setError("Access denied. Only SuperAdmin accounts can log in to the Admin Portal.");
+        localStorage.removeItem("smartbill_token");
+        localStorage.removeItem("smartbill_user");
+        return;
+      }
+
       localStorage.setItem("smartbill_token", data.token);
       setUserToStorage(loggedInUser);
       setToast({ msg: "Login successful", type: "success" });

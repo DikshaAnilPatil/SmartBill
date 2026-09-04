@@ -1,11 +1,15 @@
 import { useState, useEffect, useCallback } from "react";
 import {
   AlertTriangle,
+  ChevronDown,
   DollarSign,
   Download,
+  FileSpreadsheet,
   Package,
+  Plus,
   RefreshCw,
   ShoppingCart,
+  Upload,
   XCircle,
 } from "lucide-react";
 import { fmt } from "@shared/utils/format";
@@ -14,14 +18,23 @@ import {
   Btn,
   Card,
   StatCard,
+  Toast,
   statusBadge,
 } from "@shared/components/common/ui";
 import { getProducts } from "@shared/api/productAPI";
+import { exportToCsv, exportToExcel } from "@shared/utils/csvHelper";
 
 export default function InventoryScreen({ onNav }) {
   const [productList, setProductList] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [toast, setToast] = useState(null);
+  const [showExportMenu, setShowExportMenu] = useState(false);
+
+  const showToast = (msg, type = "success") => {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 3000);
+  };
   const [globalThreshold, setGlobalThreshold] = useState(() => {
     try {
       const stored = localStorage.getItem("smartbill_inventorySettings");
@@ -215,10 +228,109 @@ export default function InventoryScreen({ onNav }) {
         )}
       </Card>
 
+      {toast && (
+        <Toast message={toast.msg} type={toast.type} onClose={() => setToast(null)} />
+      )}
+
       <Card>
-        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
-          <h3 className="font-semibold text-slate-900">Current Stock</h3>
-          <div className="flex gap-2">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 flex-wrap gap-2">
+          <div>
+            <h3 className="font-semibold text-slate-900">Current Stock</h3>
+            <p className="text-xs text-slate-500">Live quantity, valuation, and stock health</p>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Export Inventory Dropdown */}
+            <div className="relative">
+              <Btn
+                variant="outline"
+                size="sm"
+                onClick={() => setShowExportMenu(!showExportMenu)}
+                icon={<Download className="w-3.5 h-3.5" />}
+              >
+                Export Stock
+                <ChevronDown className="w-3 h-3 ml-1 opacity-70" />
+              </Btn>
+              {showExportMenu && (
+                <div className="absolute right-0 mt-1 w-44 bg-white rounded-xl shadow-xl border border-slate-200 py-1.5 z-30">
+                  <button
+                    onClick={() => {
+                      const columns = [
+                        { key: "name", label: "Product Name" },
+                        { key: "sku", label: "SKU / Barcode" },
+                        { key: "category", label: "Category" },
+                        { key: "stock", label: "Current Stock" },
+                        { key: "unit", label: "Unit" },
+                        { key: "minStock", label: "Min Stock Level" },
+                        { key: "cost", label: "Purchase Cost (₹)" },
+                        { key: "price", label: "Selling Price (₹)" },
+                        {
+                          key: "stockValue",
+                          label: "Total Value (₹)",
+                          accessor: (r) => (Number(r.price || 0) * Number(r.stock || 0)).toFixed(2),
+                        },
+                        { key: "status", label: "Status" },
+                      ];
+                      exportToExcel("SmartBill_Inventory_Stock.xlsx", "Current Stock", columns, productList);
+                      showToast(`Exported stock for ${productList.length} items to Excel!`, "success");
+                      setShowExportMenu(false);
+                    }}
+                    className="w-full px-3.5 py-2 text-left text-xs font-medium text-slate-700 hover:bg-emerald-50 hover:text-emerald-700 flex items-center gap-2 transition-colors"
+                  >
+                    <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                    Excel (.xlsx)
+                  </button>
+                  <button
+                    onClick={() => {
+                      const columns = [
+                        { key: "name", label: "Product Name" },
+                        { key: "sku", label: "SKU / Barcode" },
+                        { key: "category", label: "Category" },
+                        { key: "stock", label: "Current Stock" },
+                        { key: "unit", label: "Unit" },
+                        { key: "minStock", label: "Min Stock Level" },
+                        { key: "cost", label: "Purchase Cost (₹)" },
+                        { key: "price", label: "Selling Price (₹)" },
+                        {
+                          key: "stockValue",
+                          label: "Total Value (₹)",
+                          accessor: (r) => (Number(r.price || 0) * Number(r.stock || 0)).toFixed(2),
+                        },
+                        { key: "status", label: "Status" },
+                      ];
+                      exportToCsv("SmartBill_Inventory_Stock.csv", columns, productList);
+                      showToast(`Exported stock for ${productList.length} items to CSV!`, "success");
+                      setShowExportMenu(false);
+                    }}
+                    className="w-full px-3.5 py-2 text-left text-xs font-medium text-slate-700 hover:bg-blue-50 hover:text-blue-700 flex items-center gap-2 transition-colors"
+                  >
+                    <Download className="w-4 h-4 text-blue-600" />
+                    CSV (.csv)
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {onNav && (
+              <Btn
+                variant="outline"
+                size="sm"
+                onClick={() => onNav("products")}
+                icon={<Upload className="w-3.5 h-3.5" />}
+              >
+                Update Stock via Excel
+              </Btn>
+            )}
+
+            {onNav && (
+              <Btn
+                variant="primary"
+                size="sm"
+                onClick={() => onNav("products")}
+                icon={<Plus className="w-3.5 h-3.5" />}
+              >
+                Add Product
+              </Btn>
+            )}
             <Btn
               variant="outline"
               size="sm"
@@ -226,15 +338,25 @@ export default function InventoryScreen({ onNav }) {
               disabled={loading}
               icon={<RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />}
             >
-              Refresh Stock
+              Refresh
             </Btn>
           </div>
         </div>
         {loading ? (
           <div className="p-8 text-center text-slate-500 text-sm">Loading inventory stock...</div>
         ) : productList.length === 0 ? (
-          <div className="p-8 text-center text-slate-500 text-sm">
-            No products found. Please add products in the Products page.
+          <div className="p-8 text-center text-slate-500 text-sm space-y-3">
+            <p>No products found in your inventory.</p>
+            {onNav && (
+              <Btn
+                variant="primary"
+                size="sm"
+                onClick={() => onNav("products")}
+                icon={<Plus className="w-3.5 h-3.5" />}
+              >
+                + Add First Product
+              </Btn>
+            )}
           </div>
         ) : (
           <table className="w-full text-sm">
@@ -247,10 +369,13 @@ export default function InventoryScreen({ onNav }) {
                   "Min Level",
                   "Value",
                   "Status",
+                  "Action",
                 ].map((h) => (
                   <th
                     key={h}
-                    className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide"
+                    className={`px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide ${
+                      h === "Action" ? "text-right" : "text-left"
+                    }`}
                   >
                     {h}
                   </th>
@@ -304,6 +429,25 @@ export default function InventoryScreen({ onNav }) {
                   </td>
                   <td className="px-5 py-3.5">
                     {statusBadge(p.stock === 0 ? "Inactive" : p.status || "Active")}
+                  </td>
+                  <td className="px-5 py-3.5 text-right">
+                    <Btn
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        if (onNav) {
+                          localStorage.setItem(
+                            "reorderProduct",
+                            JSON.stringify({ name: p.name, minStock: p.minStock })
+                          );
+                          onNav("purchase");
+                        }
+                      }}
+                      icon={<ShoppingCart className="w-3.5 h-3.5 text-blue-600" />}
+                      className="text-xs py-1 px-2.5 text-blue-700 bg-blue-50/70 border-blue-200 hover:bg-blue-100"
+                    >
+                      + Inward Stock
+                    </Btn>
                   </td>
                 </tr>
               ))}

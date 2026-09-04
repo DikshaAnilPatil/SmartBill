@@ -202,6 +202,14 @@ export default function AuthScreen({ view, onNav, onLogin, fixedRole }) {
       const data = await loginUser(payload);
 
       const loggedInUser = data.user;
+
+      if (loggedInUser?.role === "superadmin" && fixedRole !== "superadmin") {
+        setFormError("Admin credentials cannot be used to log in to the Business Portal. Please use the Admin Portal.");
+        localStorage.removeItem("smartbill_token");
+        localStorage.removeItem("smartbill_user");
+        return;
+      }
+
       localStorage.setItem("smartbill_token", data.token);
       setUserToStorage(loggedInUser);
       showToast("Login successful", "success");

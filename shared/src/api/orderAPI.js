@@ -33,14 +33,6 @@ export const fetchOrders = () =>
 export const fetchOrder = (id) =>
   axiosClient.get(`/orders/${id}`).then((res) => res.data);
 
-/**
- * Process a sales return / refund.
- * @param {object} payload
- * @returns {{ message: string, returnStatus: string, refundAmount: number, restoredStock: boolean }}
- */
-export const createOrderReturn = (payload) =>
-  axiosClient.post("/orders/return", payload).then((res) => res.data);
-
 
 
 

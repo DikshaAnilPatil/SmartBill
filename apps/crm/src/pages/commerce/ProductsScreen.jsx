@@ -1,14 +1,25 @@
 import { useState, useEffect, useCallback } from "react";
 import {
+  AlertCircle,
   AlertTriangle,
+  ArrowUpDown,
+  Boxes,
+  Check,
+  CheckCircle2,
+  ChevronDown,
   Download,
   Edit2,
   Eye,
+  FileSpreadsheet,
   Filter,
+  Layers,
   Package,
   Plus,
+  RefreshCw,
   Search,
   Settings,
+  ShoppingCart,
+  Sparkles,
   Trash2,
   Upload,
   X,
@@ -30,16 +41,22 @@ import {
 import {
   getProducts,
   createProduct,
+  bulkCreateProducts,
   updateProduct,
   deleteProduct,
 } from "@shared/api/productAPI";
 import {
   exportToCsv,
-  parseCsv,
+  exportToExcel,
+  parseExcelOrCsvFile,
+  normalizeProductImportRows,
+  downloadProductExcelTemplate,
+  downloadProductCsvTemplate,
   downloadProductTemplate,
 } from "@shared/utils/csvHelper";
+import * as XLSX from "xlsx";
 
-export default function ProductsScreen() {
+export default function ProductsScreen({ onNav }) {
   const [search, setSearch] = useState("");
   const [showModal, setShowModal] = useState(false);
   const [catFilter, setCatFilter] = useState("All");
@@ -65,12 +82,17 @@ export default function ProductsScreen() {
     setTimeout(() => setToast(null), 3000);
   };
 
-  // CSV Import / Export State
+  // CSV / Excel Import / Export State
   const [showImportModal, setShowImportModal] = useState(false);
   const [importFile, setImportFile] = useState(null);
   const [parsedProducts, setParsedProducts] = useState([]);
   const [importErrors, setImportErrors] = useState([]);
+  const [importSummary, setImportSummary] = useState({ total: 0, newCount: 0, updateCount: 0, errorCount: 0 });
+  const [importMode, setImportMode] = useState("upsert"); // "upsert" | "update_stock" | "create_only"
+  const [stockMode, setStockMode] = useState("replace"); // "replace" | "add"
+  const [parsing, setParsing] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [showExportMenu, setShowExportMenu] = useState(false);
 
   // Products are loaded from the backend API.
   const [productList, setProductList] = useState([]);
@@ -131,87 +153,84 @@ export default function ProductsScreen() {
   // =========================
   // EXPORT PRODUCTS
   // =========================
-  const handleExportProducts = () => {
+  const getExportColumns = () => [
+    { key: "name", label: "Product Name" },
+    { key: "sku", label: "SKU / Barcode" },
+    { key: "category", label: "Category" },
+    { key: "supplier", label: "Supplier" },
+    { key: "price", label: "Selling Price (₹)" },
+    { key: "cost", label: "Purchase Cost (₹)" },
+    { key: "wholesalePrice", label: "Wholesale Price (₹)" },
+    { key: "minPrice", label: "Min Price (₹)" },
+    { key: "stock", label: "Stock Quantity" },
+    { key: "minStock", label: "Min Stock Alert" },
+    { key: "unit", label: "Unit" },
+    { key: "gst", label: "GST (%)" },
+    { key: "status", label: "Status" },
+  ];
+
+  const handleExportCsv = () => {
     if (productList.length === 0) {
       showToast("No products available to export.", "error");
       return;
     }
-    const columns = [
-      { key: "name", label: "Product Name" },
-      { key: "sku", label: "SKU / Barcode" },
-      { key: "category", label: "Category" },
-      { key: "supplier", label: "Supplier" },
-      { key: "price", label: "Selling Price (₹)" },
-      { key: "cost", label: "Purchase Cost (₹)" },
-      { key: "stock", label: "Stock Quantity" },
-      { key: "minStock", label: "Min Stock Alert" },
-      { key: "unit", label: "Unit" },
-      { key: "gst", label: "GST (%)" },
-      { key: "status", label: "Status" },
-    ];
-    exportToCsv("SmartBill_Products.csv", columns, productList);
-    showToast(`Exported ${productList.length} products successfully!`, "success");
+    exportToCsv("SmartBill_Products.csv", getExportColumns(), productList);
+    showToast(`Exported ${productList.length} products to CSV successfully!`, "success");
+    setShowExportMenu(false);
+  };
+
+  const handleExportExcel = () => {
+    if (productList.length === 0) {
+      showToast("No products available to export.", "error");
+      return;
+    }
+    exportToExcel("SmartBill_Products.xlsx", "Products & Stock", getExportColumns(), productList);
+    showToast(`Exported ${productList.length} products to Excel (.xlsx) successfully!`, "success");
+    setShowExportMenu(false);
   };
 
   // =========================
-  // PARSE CSV FILE
+  // PARSE CSV / EXCEL FILE
   // =========================
-  const handleFileChange = (e) => {
+  const handleFileChange = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
     setImportFile(file);
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const text = event.target?.result;
-      const records = parseCsv(text);
-      if (!records || records.length === 0) {
-        setImportErrors(["CSV file is empty or could not be parsed."]);
-        setParsedProducts([]);
-        return;
-      }
+    setParsing(true);
+    setImportErrors([]);
 
-      const valid = [];
-      const errors = [];
+    try {
+      const rawRows = await parseExcelOrCsvFile(file);
+      const result = normalizeProductImportRows(rawRows, productList);
+      setParsedProducts(result.valid);
+      setImportErrors(result.errors);
+      setImportSummary(result.summary);
 
-      records.forEach((r, idx) => {
-        const name = r.productname || r.name || r.title || "";
-        const rawPrice = r.sellingprice || r.price;
-        const rawCost = r.purchasecost || r.cost;
-        const rawStock = r.initialstockqty || r.stock || r.quantity;
-        const price = Number(rawPrice || 0);
-        const cost = Number(rawCost || 0);
-        const stock = Number(rawStock || 0);
-        const sku = r.skubarcode || r.sku || r.barcode || `SKU-${Date.now().toString().slice(-4)}-${idx + 1}`;
-        const category = r.category || "Electronics";
-        const minStock = Number(r.minstockalert || r.minstock || 10);
-        const unit = r.unitpiecekgbox || r.unit || "Piece";
-        const gst = Number(r.gstrate || r.gst || 0);
-
-        if (!name.trim()) {
-          errors.push(`Row ${idx + 2}: Product Name is required.`);
-        } else if (isNaN(price) || price < 0) {
-          errors.push(`Row ${idx + 2} ("${name}"): Invalid selling price.`);
-        } else {
-          valid.push({
-            name: name.trim(),
-            sku: sku.trim(),
-            category,
-            supplier: r.supplier || "",
-            cost,
-            price,
-            stock,
-            minStock,
-            unit,
-            gst,
-            status: "Active",
-          });
+      // Auto-register any new categories found in the import
+      const discoveredCats = new Set([...categories]);
+      result.valid.forEach((p) => {
+        if (p.category && String(p.category).trim()) {
+          discoveredCats.add(String(p.category).trim());
         }
       });
+      setCategories(Array.from(discoveredCats));
 
-      setParsedProducts(valid);
-      setImportErrors(errors);
-    };
-    reader.readAsText(file);
+      // Auto-register any new units found in the import
+      const discoveredUnits = new Set([...units]);
+      result.valid.forEach((p) => {
+        if (p.unit && String(p.unit).trim()) {
+          discoveredUnits.add(String(p.unit).trim());
+        }
+      });
+      setUnits(Array.from(discoveredUnits));
+    } catch (err) {
+      console.error("Failed to parse file:", err);
+      setImportErrors([`Failed to parse file: ${err.message}`]);
+      setParsedProducts([]);
+      setImportSummary({ total: 0, newCount: 0, updateCount: 0, errorCount: 1 });
+    } finally {
+      setParsing(false);
+    }
   };
 
   // =========================
@@ -223,31 +242,34 @@ export default function ProductsScreen() {
       return;
     }
     setImporting(true);
-    let createdCount = 0;
-    let failedCount = 0;
 
-    for (const p of parsedProducts) {
-      try {
-        await createProduct(p);
-        createdCount++;
-      } catch (err) {
-        failedCount++;
-      }
-    }
+    try {
+      const res = await bulkCreateProducts(parsedProducts, {
+        mode: importMode,
+        stockMode: stockMode,
+      });
 
-    await loadProducts();
-    window.dispatchEvent(new CustomEvent("stockUpdated"));
-    window.dispatchEvent(new CustomEvent("productUpdated"));
-    setImporting(false);
-    setShowImportModal(false);
-    setImportFile(null);
-    setParsedProducts([]);
-    setImportErrors([]);
+      await loadProducts();
+      window.dispatchEvent(new CustomEvent("stockUpdated"));
+      window.dispatchEvent(new CustomEvent("productUpdated"));
+      setImporting(false);
+      setShowImportModal(false);
+      setImportFile(null);
+      setParsedProducts([]);
+      setImportErrors([]);
+      setImportSummary({ total: 0, newCount: 0, updateCount: 0, errorCount: 0 });
 
-    if (failedCount > 0) {
-      showToast(`Imported ${createdCount} products. ${failedCount} items had errors or duplicate SKUs.`, "warning");
-    } else {
-      showToast(`Successfully imported ${createdCount} products!`, "success");
+      const msg =
+        res.message ||
+        `Successfully imported ${res.count || parsedProducts.length} items (${res.createdCount || 0} created, ${res.updatedCount || 0} updated).`;
+      showToast(msg, "success");
+    } catch (bulkErr) {
+      console.error("Bulk import failed:", bulkErr);
+      showToast(
+        bulkErr.response?.data?.message || bulkErr.message || "Bulk import failed. Please check your data.",
+        "error"
+      );
+      setImporting(false);
     }
   };
 
@@ -352,9 +374,11 @@ export default function ProductsScreen() {
   });
 
   const filtered = productList.filter((p) => {
-    const matchSearch =
-      p.name.toLowerCase().includes(search.toLowerCase()) ||
-      p.sku.includes(search);
+    if (!p) return false;
+    const nameStr = String(p.name || "").toLowerCase();
+    const skuStr = String(p.sku || "").toLowerCase();
+    const searchStr = (search || "").toLowerCase().trim();
+    const matchSearch = !searchStr || nameStr.includes(searchStr) || skuStr.includes(searchStr);
     const matchCat = catFilter === "All" || p.category === catFilter;
     return matchSearch && matchCat;
   });
@@ -627,17 +651,47 @@ export default function ProductsScreen() {
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            {/* Live Current Stock & Inward Action Card */}
+            <div className="p-3.5 bg-blue-50/60 dark:bg-blue-950/30 rounded-xl border border-blue-200/80 dark:border-blue-800/60 flex items-center justify-between flex-wrap gap-3">
+              <div>
+                <span className="text-[11px] font-bold uppercase tracking-wider text-blue-900 dark:text-blue-200">
+                  Current Stock Level
+                </span>
+                <p className="text-lg font-bold text-slate-900 dark:text-white mt-0.5 font-mono">
+                  {editForm.stock} <span className="text-xs font-normal text-slate-500">{editForm.unit}</span>
+                </p>
+                <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
+                  Stock increases when recording <strong>Purchases</strong> from suppliers and decreases on <strong>POS Sales</strong>.
+                </p>
+              </div>
+              <Btn
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  localStorage.setItem(
+                    "reorderProduct",
+                    JSON.stringify({ name: editForm.name, minStock: editForm.minStock })
+                  );
+                  setShowEditModal(false);
+                  if (onNav) onNav("purchase");
+                  else window.location.href = "/app/purchase";
+                }}
+                icon={<ShoppingCart className="w-3.5 h-3.5 text-blue-600" />}
+                className="bg-white hover:bg-blue-50 text-blue-700 border-blue-300 text-xs shadow-2xs font-semibold"
+              >
+                + Inward via Purchase
+              </Btn>
+            </div>
+
+            <div>
               <Input
-                label="Opening Stock"
-                value={editForm.stock}
-                onChange={(v) => setEditForm((f) => ({ ...f, stock: v }))}
-              />
-              <Input
-                label="Min. Stock Level"
+                label="Min. Stock Level (Low Stock Alert Threshold)"
+                type="number"
                 value={editForm.minStock}
                 onChange={(v) => setEditForm((f) => ({ ...f, minStock: v }))}
               />
+              <p className="text-[10px] text-slate-400 mt-0.5">Alerts trigger automatically when stock falls below this quantity</p>
             </div>
 
             <Select
@@ -707,7 +761,6 @@ export default function ProductsScreen() {
                       cost: Number(editForm.cost || 0),
                       price: Number(editForm.price || 0),
                       gst: Number(editForm.gst || 0),
-                      stock: Number(editForm.stock || 0),
                       minStock: Number(editForm.minStock || 0),
                       unit: editForm.unit,
                       status: "Active",
@@ -800,10 +853,10 @@ export default function ProductsScreen() {
             )}
 
             <Select
-              label="Supplier"
-              value={form.supplier}
-              onChange={(v) => setForm((f) => ({ ...f, supplier: v }))}
-              options={supplierList.map((s) => s.name)}
+              label="Supplier (Optional)"
+              value={form.supplier || "None / Direct"}
+              onChange={(v) => setForm((f) => ({ ...f, supplier: v === "None / Direct" ? "" : v }))}
+              options={supplierList.length > 0 ? ["None / Direct", ...supplierList.map((s) => s.name)] : ["None / Direct"]}
             />
             <div className="grid grid-cols-3 gap-3">
               <Input
@@ -826,19 +879,29 @@ export default function ProductsScreen() {
                 onChange={(v) => setForm((f) => ({ ...f, gst: v }))}
               />
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            {/* Informational Stock Notice */}
+            <div className="p-3.5 bg-blue-50/60 dark:bg-blue-950/30 rounded-xl border border-blue-200/80 dark:border-blue-800/60 flex items-center justify-between gap-3">
+              <div>
+                <span className="text-[11px] font-bold uppercase tracking-wider text-blue-900 dark:text-blue-200">
+                  Initial Stock
+                </span>
+                <p className="text-xs text-slate-600 dark:text-slate-300 mt-0.5">
+                  New products start at <strong>0 stock</strong>. Stock will be updated automatically when you record a supplier bill in <strong>Purchases</strong>.
+                </p>
+              </div>
+              <span className="px-3 py-1.5 bg-blue-100 dark:bg-blue-900/60 text-blue-800 dark:text-blue-200 font-mono font-bold text-sm rounded-lg flex-shrink-0">
+                0 {form.unit || "Piece"}
+              </span>
+            </div>
+
+            <div>
               <Input
-                label="Opening Stock"
-                type="number"
-                value={form.stock}
-                onChange={(v) => setForm((f) => ({ ...f, stock: v }))}
-              />
-              <Input
-                label="Min. Stock Level"
+                label="Min. Stock Level (Low Stock Alert Threshold)"
                 type="number"
                 value={form.minStock}
                 onChange={(v) => setForm((f) => ({ ...f, minStock: v }))}
               />
+              <p className="text-[10px] text-slate-400 mt-0.5">Get notified automatically when stock drops below this quantity</p>
             </div>
             <Select
               label="Unit"
@@ -895,25 +958,32 @@ export default function ProductsScreen() {
                 variant="primary"
                 disabled={saving}
                 onClick={async () => {
+                  const trimmedName = String(form.name || "").trim();
+                  if (!trimmedName) {
+                    showToast("Product name is required.", "error");
+                    return;
+                  }
+
                   setSaving(true);
-                  // Check for duplicate SKU
-                  if (productList.some((p) => p.sku === form.sku)) {
+                  // Check for duplicate SKU only if a custom SKU was entered
+                  const trimmedSku = String(form.sku || "").trim();
+                  if (trimmedSku && productList.some((p) => String(p.sku || "").trim() === trimmedSku)) {
                     showToast('SKU already exists. Please use a unique SKU.', 'error');
                     setSaving(false);
                     return;
                   }
                   try {
                     await createProduct({
-                      name: form.name,
-                      sku: form.sku,
-                      category: form.category,
-                      supplier: form.supplier,
+                      name: trimmedName,
+                      sku: trimmedSku,
+                      category: form.category || "General",
+                      supplier: form.supplier === "None / Direct" ? "" : form.supplier,
                       cost: Number(form.cost || 0),
                       price: Number(form.price || 0),
                       gst: Number(form.gst || 0),
-                      stock: Number(form.stock || 0),
+                      stock: 0,
                       minStock: Number(form.minStock || 0),
-                      unit: form.unit,
+                      unit: form.unit || "Piece",
                       status: "Active",
                     });
                     await loadProducts();
@@ -924,8 +994,8 @@ export default function ProductsScreen() {
                     setForm({
                       name: "",
                       sku: "",
-                      category: "Electronics",
-                      supplier: supplierList[0]?.name ?? "",
+                      category: "General",
+                      supplier: "",
                       cost: "0",
                       price: "0",
                       gst: "",
@@ -936,7 +1006,7 @@ export default function ProductsScreen() {
                     showToast("Product created successfully", "success");
                   } catch (err) {
                     showToast(
-                      err.message || "Failed to create product.",
+                      err.response?.data?.message || err.message || "Failed to create product.",
                       "error",
                     );
                   } finally {
@@ -952,48 +1022,207 @@ export default function ProductsScreen() {
         </Modal>
       )}
 
-      {/* BULK IMPORT CSV MODAL */}
+      {/* BULK IMPORT EXCEL / CSV MODAL */}
       {showImportModal && (
         <Modal
-          title="Bulk Import Products from CSV"
+          title="Bulk Import Products & Stock"
           onClose={() => {
             setShowImportModal(false);
             setImportFile(null);
             setParsedProducts([]);
             setImportErrors([]);
+            setImportSummary({ total: 0, newCount: 0, updateCount: 0, errorCount: 0 });
           }}
         >
-          <div className="space-y-4">
-            <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl flex items-center justify-between">
+          <div className="space-y-4 max-h-[75vh] overflow-y-auto pr-1">
+            {/* Step 1: Template Download Banner */}
+            <div className="p-4 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-2xl flex items-center justify-between gap-3 flex-wrap">
               <div>
-                <p className="text-sm font-semibold text-blue-900">Download CSV Template</p>
-                <p className="text-xs text-blue-700">Use our pre-formatted template with all required columns.</p>
+                <div className="flex items-center gap-1.5 font-semibold text-blue-950 text-sm">
+                  <FileSpreadsheet className="w-4 h-4 text-blue-600" />
+                  <span>Download Formatted Templates</span>
+                </div>
+                <p className="text-xs text-blue-700 mt-0.5">
+                  Download a pre-formatted Excel or CSV template with column headers and sample data.
+                </p>
               </div>
-              <Btn
-                variant="outline"
-                size="sm"
-                onClick={downloadProductTemplate}
-                icon={<Download className="w-3.5 h-3.5" />}
-              >
-                Template
-              </Btn>
+              <div className="flex items-center gap-2 flex-wrap">
+                <Btn
+                  variant="outline"
+                  size="sm"
+                  onClick={() => downloadProductExcelTemplate()}
+                  icon={<Download className="w-3.5 h-3.5 text-emerald-600" />}
+                  className="bg-white hover:bg-emerald-50 hover:border-emerald-300 hover:text-emerald-700 text-xs shadow-sm"
+                >
+                  Excel Template (.xlsx)
+                </Btn>
+                <Btn
+                  variant="outline"
+                  size="sm"
+                  onClick={() => downloadProductCsvTemplate()}
+                  icon={<Download className="w-3.5 h-3.5 text-blue-600" />}
+                  className="bg-white hover:bg-blue-50 hover:border-blue-300 hover:text-blue-700 text-xs shadow-sm"
+                >
+                  CSV Template (.csv)
+                </Btn>
+                {productList.length > 0 && (
+                  <Btn
+                    variant="outline"
+                    size="sm"
+                    onClick={() => downloadProductExcelTemplate(productList)}
+                    icon={<Download className="w-3.5 h-3.5 text-purple-600" />}
+                    className="bg-white hover:bg-purple-50 hover:border-purple-300 hover:text-purple-700 text-xs shadow-sm"
+                  >
+                    My Catalog ({productList.length} Items)
+                  </Btn>
+                )}
+              </div>
             </div>
 
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                Upload CSV File
+            {/* Accounting / Inventory Workflow Notice */}
+            <div className="flex items-start gap-2.5 p-3 bg-amber-50/80 border border-amber-200/80 rounded-2xl text-xs text-amber-900">
+              <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+              <div>
+                <span className="font-semibold">Catalog Master & Opening Stock:</span>
+                <span className="text-amber-800 ml-1">
+                  Use this import to set up your product master catalog and initial opening stock (inventory you already own). For new vendor shipments, supplier tax invoices, and payment tracking, record or import a bill under <span className="font-semibold text-amber-950">Transactions ➔ Purchases</span>.
+                </span>
+              </div>
+            </div>
+
+            {/* Step 2: Upload File Box */}
+            <div className="space-y-1.5">
+              <label className="block text-xs font-semibold text-slate-700">
+                Upload File (.xlsx, .xls, .csv)
               </label>
-              <input
-                type="file"
-                accept=".csv"
-                onChange={handleFileChange}
-                className="w-full text-xs text-slate-600 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 border border-slate-200 rounded-xl p-2 cursor-pointer"
-              />
+              <div className="relative border-2 border-dashed border-slate-200 hover:border-blue-400 bg-slate-50/70 hover:bg-blue-50/30 rounded-2xl p-4 transition-all text-center">
+                <input
+                  type="file"
+                  accept=".xlsx, .xls, .csv"
+                  onChange={handleFileChange}
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                />
+                <div className="flex flex-col items-center justify-center gap-1.5">
+                  <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600">
+                    <Upload className="w-5 h-5" />
+                  </div>
+                  <div className="text-xs">
+                    {importFile ? (
+                      <span className="font-semibold text-blue-700 flex items-center justify-center gap-1.5">
+                        <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                        {importFile.name} ({(importFile.size / 1024).toFixed(1)} KB)
+                      </span>
+                    ) : (
+                      <>
+                        <span className="font-semibold text-slate-700">Click to upload</span> or drag and drop
+                        <span className="block text-[11px] text-slate-400 mt-0.5">Supports Microsoft Excel (.xlsx, .xls) and CSV (.csv)</span>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
             </div>
 
+            {/* Step 3: Import & Stock Strategy Options */}
+            {parsedProducts.length > 0 && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 p-3.5 bg-slate-50 border border-slate-200 rounded-2xl">
+                {/* Import Mode */}
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                    Import Action
+                  </label>
+                  <div className="space-y-1.5 text-xs">
+                    <label className="flex items-center gap-2 p-2 rounded-xl border border-slate-200 bg-white cursor-pointer hover:border-blue-300">
+                      <input
+                        type="radio"
+                        name="importMode"
+                        value="upsert"
+                        checked={importMode === "upsert"}
+                        onChange={() => setImportMode("upsert")}
+                        className="text-blue-600"
+                      />
+                      <div>
+                        <p className="font-semibold text-slate-900">Update & Add (Upsert)</p>
+                        <p className="text-[10px] text-slate-500">Update matching products & add new ones</p>
+                      </div>
+                    </label>
+                    <label className="flex items-center gap-2 p-2 rounded-xl border border-slate-200 bg-white cursor-pointer hover:border-blue-300">
+                      <input
+                        type="radio"
+                        name="importMode"
+                        value="update_stock"
+                        checked={importMode === "update_stock"}
+                        onChange={() => setImportMode("update_stock")}
+                        className="text-blue-600"
+                      />
+                      <div>
+                        <p className="font-semibold text-slate-900">Update Stock Only</p>
+                        <p className="text-[10px] text-slate-500">Only modify stock quantities of existing items</p>
+                      </div>
+                    </label>
+                    <label className="flex items-center gap-2 p-2 rounded-xl border border-slate-200 bg-white cursor-pointer hover:border-blue-300">
+                      <input
+                        type="radio"
+                        name="importMode"
+                        value="create_only"
+                        checked={importMode === "create_only"}
+                        onChange={() => setImportMode("create_only")}
+                        className="text-blue-600"
+                      />
+                      <div>
+                        <p className="font-semibold text-slate-900">Add New Only</p>
+                        <p className="text-[10px] text-slate-500">Only add new products; skip existing items</p>
+                      </div>
+                    </label>
+                  </div>
+                </div>
+
+                {/* Stock Mode */}
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                    Stock Adjustment Strategy
+                  </label>
+                  <div className="space-y-1.5 text-xs">
+                    <label className="flex items-center gap-2 p-2 rounded-xl border border-slate-200 bg-white cursor-pointer hover:border-blue-300">
+                      <input
+                        type="radio"
+                        name="stockMode"
+                        value="replace"
+                        checked={stockMode === "replace"}
+                        onChange={() => setStockMode("replace")}
+                        className="text-blue-600"
+                      />
+                      <div>
+                        <p className="font-semibold text-slate-900">Set / Replace Stock Quantity</p>
+                        <p className="text-[10px] text-slate-500">File stock count is the new inventory count</p>
+                      </div>
+                    </label>
+                    <label className="flex items-center gap-2 p-2 rounded-xl border border-slate-200 bg-white cursor-pointer hover:border-blue-300">
+                      <input
+                        type="radio"
+                        name="stockMode"
+                        value="add"
+                        checked={stockMode === "add"}
+                        onChange={() => setStockMode("add")}
+                        className="text-blue-600"
+                      />
+                      <div>
+                        <p className="font-semibold text-slate-900">Add to Current Stock (+)</p>
+                        <p className="text-[10px] text-slate-500">Add file quantity on top of current stock</p>
+                      </div>
+                    </label>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Validation Warnings / Errors */}
             {importErrors.length > 0 && (
-              <div className="p-3 bg-red-50 border border-red-200 rounded-xl max-h-32 overflow-y-auto">
-                <p className="text-xs font-bold text-red-700 mb-1">CSV Warnings / Errors ({importErrors.length}):</p>
+              <div className="p-3 bg-red-50 border border-red-200 rounded-2xl max-h-32 overflow-y-auto">
+                <p className="text-xs font-bold text-red-700 mb-1 flex items-center gap-1.5">
+                  <AlertCircle className="w-3.5 h-3.5" />
+                  Warnings & Errors ({importErrors.length}):
+                </p>
                 <ul className="text-[11px] text-red-600 space-y-0.5 list-disc pl-4">
                   {importErrors.map((err, i) => (
                     <li key={i}>{err}</li>
@@ -1002,28 +1231,104 @@ export default function ProductsScreen() {
               </div>
             )}
 
+            {/* Step 4: Summary & Live Preview */}
             {parsedProducts.length > 0 && (
-              <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl">
-                <p className="text-xs font-bold text-emerald-800">
-                  ✓ {parsedProducts.length} valid products ready for import.
-                </p>
-                <div className="max-h-32 overflow-y-auto mt-2 divide-y divide-emerald-100 text-xs text-slate-700">
-                  {parsedProducts.slice(0, 5).map((p, i) => (
-                    <div key={i} className="py-1 flex justify-between">
-                      <span className="font-medium">{p.name}</span>
-                      <span className="font-mono text-slate-500">₹{p.price} | Stock: {p.stock}</span>
-                    </div>
-                  ))}
-                  {parsedProducts.length > 5 && (
-                    <p className="text-[10px] text-slate-500 pt-1 text-center font-medium">
-                      + {parsedProducts.length - 5} more items...
-                    </p>
-                  )}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div className="flex items-center gap-2 text-xs flex-wrap">
+                    <span className="px-2.5 py-1 rounded-lg bg-slate-100 text-slate-700 font-semibold">
+                      Total Rows: {importSummary.total}
+                    </span>
+                    <span className="px-2.5 py-1 rounded-lg bg-emerald-100 text-emerald-800 font-semibold flex items-center gap-1">
+                      <Sparkles className="w-3 h-3" />
+                      New Products: {importSummary.newCount}
+                    </span>
+                    <span className="px-2.5 py-1 rounded-lg bg-blue-100 text-blue-800 font-semibold flex items-center gap-1">
+                      <RefreshCw className="w-3 h-3" />
+                      Existing Updates: {importSummary.updateCount}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+                  <div className="max-h-48 overflow-y-auto overflow-x-auto">
+                    <table className="w-full text-xs text-left">
+                      <thead className="bg-slate-100 text-slate-600 sticky top-0 font-semibold uppercase text-[10px] tracking-wider">
+                        <tr>
+                          <th className="px-3 py-2">Action</th>
+                          <th className="px-3 py-2">Product</th>
+                          <th className="px-3 py-2">SKU</th>
+                          <th className="px-3 py-2">Category</th>
+                          <th className="px-3 py-2">Price</th>
+                          <th className="px-3 py-2">Stock Impact</th>
+                          <th className="px-3 py-2">Unit</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {parsedProducts.map((p, idx) => {
+                          const resultingStock =
+                            p.isExisting && stockMode === "add"
+                              ? p.currentStock + p.stock
+                              : p.stock;
+
+                          return (
+                            <tr
+                              key={idx}
+                              className={`hover:bg-slate-50/80 transition-colors ${
+                                p.isExisting ? "bg-blue-50/20" : ""
+                              }`}
+                            >
+                              <td className="px-3 py-2 whitespace-nowrap">
+                                {p.isExisting ? (
+                                  <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-100 text-blue-700 border border-blue-200 flex items-center gap-1 w-max">
+                                    <RefreshCw className="w-2.5 h-2.5" />
+                                    Update
+                                  </span>
+                                ) : (
+                                  <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-100 text-emerald-700 border border-emerald-200 flex items-center gap-1 w-max">
+                                    <Plus className="w-2.5 h-2.5" />
+                                    New
+                                  </span>
+                                )}
+                              </td>
+                              <td className="px-3 py-2 font-medium text-slate-900 max-w-[150px] truncate">
+                                {p.name}
+                              </td>
+                              <td className="px-3 py-2 font-mono text-slate-500 text-[11px]">
+                                {p.sku || "Auto"}
+                              </td>
+                              <td className="px-3 py-2 text-slate-600">
+                                {p.category}
+                              </td>
+                              <td className="px-3 py-2 font-semibold text-slate-800">
+                                ₹{p.price}
+                              </td>
+                              <td className="px-3 py-2 font-mono">
+                                {p.isExisting ? (
+                                  <span className="text-blue-700 font-medium">
+                                    {p.currentStock}{" "}
+                                    {stockMode === "add" ? `+ ${p.stock} = ` : "➔ "}
+                                    <strong>{resultingStock}</strong>
+                                  </span>
+                                ) : (
+                                  <span className="text-emerald-700 font-bold">{p.stock}</span>
+                                )}
+                              </td>
+                              <td className="px-3 py-2 text-slate-500">
+                                {p.unit}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               </div>
             )}
 
-            <div className="flex gap-3 pt-2">
+            {/* Modal Bottom Actions */}
+            <div className="flex gap-3 pt-2 border-t border-slate-100">
               <Btn
                 variant="outline"
                 onClick={() => {
@@ -1031,6 +1336,7 @@ export default function ProductsScreen() {
                   setImportFile(null);
                   setParsedProducts([]);
                   setImportErrors([]);
+                  setImportSummary({ total: 0, newCount: 0, updateCount: 0, errorCount: 0 });
                 }}
                 className="flex-1 justify-center"
               >
@@ -1038,12 +1344,14 @@ export default function ProductsScreen() {
               </Btn>
               <Btn
                 variant="primary"
-                disabled={importing || parsedProducts.length === 0}
+                disabled={importing || parsing || parsedProducts.length === 0}
                 onClick={handleExecuteImport}
-                className="flex-1 justify-center"
+                className="flex-1 justify-center shadow-md shadow-blue-500/20"
                 icon={<Upload className="w-4 h-4" />}
               >
-                {importing ? "Importing..." : `Import (${parsedProducts.length})`}
+                {importing
+                  ? "Importing Products..."
+                  : `Import Products & Stock (${parsedProducts.length})`}
               </Btn>
             </div>
           </div>
@@ -1060,22 +1368,48 @@ export default function ProductsScreen() {
               icon={<Search className="w-4 h-4" />}
             />
           </div>
-          <Btn
-            variant="outline"
-            size="md"
-            onClick={handleExportProducts}
-            icon={<Download className="w-4 h-4" />}
-          >
-            Export CSV
-          </Btn>
+
+          {/* Export Dropdown */}
+          <div className="relative">
+            <Btn
+              variant="outline"
+              size="md"
+              onClick={() => setShowExportMenu(!showExportMenu)}
+              icon={<Download className="w-4 h-4" />}
+            >
+              Export
+              <ChevronDown className="w-3.5 h-3.5 ml-1 opacity-70" />
+            </Btn>
+            {showExportMenu && (
+              <div className="absolute right-0 mt-1 w-44 bg-white rounded-xl shadow-xl border border-slate-200 py-1.5 z-30">
+                <button
+                  onClick={handleExportExcel}
+                  className="w-full px-3.5 py-2 text-left text-xs font-medium text-slate-700 hover:bg-emerald-50 hover:text-emerald-700 flex items-center gap-2 transition-colors"
+                >
+                  <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                  Export to Excel (.xlsx)
+                </button>
+                <button
+                  onClick={handleExportCsv}
+                  className="w-full px-3.5 py-2 text-left text-xs font-medium text-slate-700 hover:bg-blue-50 hover:text-blue-700 flex items-center gap-2 transition-colors"
+                >
+                  <Download className="w-4 h-4 text-blue-600" />
+                  Export to CSV (.csv)
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Import Button */}
           <Btn
             variant="outline"
             size="md"
             onClick={() => setShowImportModal(true)}
             icon={<Upload className="w-4 h-4" />}
           >
-            Import CSV
+            Import Excel / CSV
           </Btn>
+
           <Btn
             variant="outline"
             size="md"
@@ -1207,20 +1541,49 @@ export default function ProductsScreen() {
                       {fmt(p.price)}
                     </td>
                     <td className="px-5 py-4">
-                      <span
-                        className={`font-mono font-semibold text-sm ${p.stock === 0 ? "text-blue-600" : lowStock ? "text-amber-600" : "text-slate-900"}`}
-                      >
-                        {p.stock}
-                      </span>
-                      {lowStock && (
-                        <div className="flex items-center gap-1 text-[10px] text-amber-600 mt-0.5">
-                          <AlertTriangle className="w-3 h-3" />
-                          Low Stock
+                      {Number(p.stock || 0) <= 0 ? (
+                        <div>
+                          <span className="font-mono font-bold text-[11px] text-rose-600 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 px-2 py-0.5 rounded inline-block">
+                            0 in Stock
+                          </span>
+                          <p className="text-[10px] text-slate-400 mt-0.5">Awaiting purchase</p>
+                        </div>
+                      ) : (
+                        <div>
+                          <span
+                            className={`font-mono font-bold text-sm ${lowStock ? "text-amber-600" : "text-slate-900 dark:text-slate-100"}`}
+                          >
+                            {p.stock} <span className="text-[10px] font-normal text-slate-500">{p.unit || "Piece"}</span>
+                          </span>
+                          {lowStock && (
+                            <div className="flex items-center gap-1 text-[10px] text-amber-600 mt-0.5">
+                              <AlertTriangle className="w-3 h-3" />
+                              Low Stock (Min: {p.minStock})
+                            </div>
+                          )}
                         </div>
                       )}
                     </td>
                     <td className="px-5 py-4">
                       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <Btn
+                          variant="outline"
+                          size="sm"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            localStorage.setItem(
+                              "reorderProduct",
+                              JSON.stringify({ name: p.name, minStock: p.minStock })
+                            );
+                            if (onNav) onNav("purchase");
+                            else window.location.href = "/app/purchase";
+                          }}
+                          icon={<ShoppingCart className="w-3.5 h-3.5 text-blue-600" />}
+                          title="Record Supplier Purchase to Inward Stock"
+                          className="text-[11px] py-1 px-2 text-blue-700 bg-blue-50/70 border-blue-200 hover:bg-blue-100"
+                        >
+                          Inward Stock
+                        </Btn>
                         <Btn
                           variant="ghost"
                           size="sm"

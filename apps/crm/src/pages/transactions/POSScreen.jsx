@@ -29,8 +29,7 @@ import {
 } from "lucide-react";
 import { fmt } from "@shared/utils/format";
 import { Badge, Btn, Card, Input, Select, Modal, StepperInput } from "@shared/components/common/ui";
-import { fetchCustomers, createCustomer } from "@shared/api/customerAPI";
-import { createOrder, createOrderReturn, fetchOrders } from "@shared/api/orderAPI";
+import { createOrder } from "@shared/api/orderAPI";
 import { getProducts } from "@shared/api/productAPI";
 import { getInvoiceSettings } from "@shared/api/invoiceSettingsAPI";
 import { fetchPartySettings } from "@shared/api/partySettingsAPI";
@@ -158,25 +157,12 @@ export default function POSScreen() {
   // Global Invoice Discount state (for Entire Invoice mode)
   const [globalDiscount, setGlobalDiscount] = useState(0);
 
-  // --- SALES RETURN MODAL STATES ---
-  const [showReturnModal, setShowReturnModal] = useState(false);
-  const [pastOrders, setPastOrders] = useState([]);
-  const [returnInvoiceNo, setReturnInvoiceNo] = useState("");
-  const [selectedReturnOrder, setSelectedReturnOrder] = useState(null);
-  const [returnItems, setReturnItems] = useState([]);
-  const [returnPasscode, setReturnPasscode] = useState("");
-  const [showReturnPasscode, setShowReturnPasscode] = useState(false);
-  const [requirePasscode, setRequirePasscode] = useState(false);
-  const [returnReason, setReturnReason] = useState("Customer Return");
-  const [returnPaymentMode, setReturnPaymentMode] = useState("Cash");
-  const [processingReturn, setProcessingReturn] = useState(false);
-  const [returnError, setReturnError] = useState("");
-  const [manualReturnProduct, setManualReturnProduct] = useState("");
-
   const showToast = (msg) => {
     setSuccessToast(msg);
     setTimeout(() => setSuccessToast(""), 4000);
   };
+
+
 
   // Helper to extract product ID safely (supporting MongoDB _id and legacy id)
   const getProductId = (p) => {
@@ -222,25 +208,13 @@ export default function POSScreen() {
     setLoadingProducts(true);
     try {
       const res = await getProducts();
-      if (res && Array.isArray(res.products) && res.products.length > 0) {
+      if (res && Array.isArray(res.products)) {
         setProductList(res.products.filter((p) => p && (p.status === "Active" || !p.status)));
       }
-    } catch {
-      // Fallback
+    } catch (err) {
+      console.warn("Failed to load POS products:", err);
     } finally {
       setLoadingProducts(false);
-    }
-  }, []);
-
-  // Load past orders for sales returns
-  const loadPastOrders = useCallback(async () => {
-    try {
-      const res = await fetchOrders();
-      if (res && Array.isArray(res.orders)) {
-        setPastOrders(res.orders);
-      }
-    } catch (err) {
-      console.warn("Failed to load past orders for return:", err);
     }
   }, []);
 
@@ -269,33 +243,53 @@ export default function POSScreen() {
       })
       .catch(console.warn);
 
-    // Load past orders
-    loadPastOrders();
-
     // Load products
     loadProductsList();
 
-    return () => window.removeEventListener("partySettingsUpdated", handleSettingsUpdated);
-  }, [loadProductsList, loadPastOrders]);
+    const handleProductsOrStockUpdated = () => {
+      loadProductsList();
+    };
 
-  const handleOpenReturnModal = () => {
-    setShowReturnModal(true);
-    setReturnError("");
-    setReturnInvoiceNo("");
-    setSelectedReturnOrder(null);
-    setReturnItems([]);
-    setReturnPasscode("");
-    loadPastOrders();
-  };
+    window.addEventListener("stockUpdated", handleProductsOrStockUpdated);
+    window.addEventListener("productUpdated", handleProductsOrStockUpdated);
+    window.addEventListener("orderCreated", handleProductsOrStockUpdated);
+    window.addEventListener("purchaseCreated", handleProductsOrStockUpdated);
 
-  const filteredProducts = (productList || []).filter(
-    (p) =>
-      p &&
-      ((p.name && String(p.name).toLowerCase().includes((search || "").toLowerCase())) ||
-        (p.sku && String(p.sku).toLowerCase().includes((search || "").toLowerCase())))
-  );
+    return () => {
+      window.removeEventListener("partySettingsUpdated", handleSettingsUpdated);
+      window.removeEventListener("stockUpdated", handleProductsOrStockUpdated);
+      window.removeEventListener("productUpdated", handleProductsOrStockUpdated);
+      window.removeEventListener("orderCreated", handleProductsOrStockUpdated);
+      window.removeEventListener("purchaseCreated", handleProductsOrStockUpdated);
+    };
+  }, [loadProductsList]);
+
+  const [stockFilter, setStockFilter] = useState("in_stock"); // "in_stock" | "all"
 
   const allowNegativeStock = txSettings?.allowNegativeStock === true;
+
+  const inStockCount = useMemo(
+    () => (productList || []).filter((p) => (Number(p.stock) || 0) > 0).length,
+    [productList]
+  );
+  const outOfStockCount = useMemo(
+    () => (productList || []).filter((p) => (Number(p.stock) || 0) <= 0).length,
+    [productList]
+  );
+
+  const filteredProducts = (productList || []).filter((p) => {
+    if (!p) return false;
+    const matchesSearch =
+      (p.name && String(p.name).toLowerCase().includes((search || "").toLowerCase())) ||
+      (p.sku && String(p.sku).toLowerCase().includes((search || "").toLowerCase()));
+    if (!matchesSearch) return false;
+
+    const inStock = Number(p.stock) || 0;
+    if (stockFilter === "in_stock" && !allowNegativeStock) {
+      return inStock > 0;
+    }
+    return true;
+  });
   const allowDiscount = txSettings?.allowDiscount !== false;
   const allowPriceEditing = txSettings?.allowPriceEditing === true;
   const discountAppliedOn = txSettings?.discountAppliedOn || "Item-wise";
@@ -1102,73 +1096,6 @@ export default function POSScreen() {
     }
   };
 
-  // --- SALES RETURN EXECUTION ---
-  const handleSelectOrderForReturn = (order) => {
-    setSelectedReturnOrder(order);
-    setReturnInvoiceNo(order.invoiceNo);
-    const initialItems = (order.items || []).map((it) => ({
-      ...it,
-      returnQty: it.qty,
-      selected: true,
-    }));
-    setReturnItems(initialItems);
-  };
-
-  const handleProcessSalesReturn = async () => {
-    setReturnError("");
-    setProcessingReturn(true);
-
-    try {
-      const activeItemsToReturn = returnItems
-        .filter((it) => it.selected && Number(it.returnQty) > 0)
-        .map((it) => ({
-          productId: it.productId,
-          name: it.name,
-          sku: it.sku,
-          price: it.price,
-          qty: Number(it.returnQty),
-          amount: (Number(it.price) || 0) * Number(it.returnQty),
-        }));
-
-      if (activeItemsToReturn.length === 0) {
-        setReturnError("Please select at least one item and quantity to return.");
-        setProcessingReturn(false);
-        return;
-      }
-
-      const totalRefund = activeItemsToReturn.reduce(
-        (s, i) => s + (i.amount || 0),
-        0
-      );
-
-      const payload = {
-        orderId: selectedReturnOrder?._id,
-        invoiceNo: returnInvoiceNo.trim(),
-        items: activeItemsToReturn,
-        reason: returnReason,
-        refundAmount: totalRefund,
-        paymentMode: returnPaymentMode,
-        passcode: returnPasscode,
-      };
-
-      const res = await createOrderReturn(payload);
-
-      showToast(
-        `✓ Sales Return processed! Refund: ${fmt(res.refundAmount)}${
-          res.restoredStock ? " (Stock restored to inventory)" : ""
-        }`
-      );
-      setShowReturnModal(false);
-      loadProductsList();
-    } catch (err) {
-      setReturnError(
-        err?.response?.data?.message || err?.message || "Failed to process sales return."
-      );
-    } finally {
-      setProcessingReturn(false);
-    }
-  };
-
   if (showInvoice) {
     const order = lastOrder;
     const invoiceItems =
@@ -1480,6 +1407,7 @@ export default function POSScreen() {
             value={search}
             onChange={setSearch}
             icon={<ScanLine className="w-4 h-4" />}
+            placeholder="Search products, SKU, barcode..."
             className="flex-1"
           />
           <Btn
@@ -1495,14 +1423,39 @@ export default function POSScreen() {
           >
             Refresh
           </Btn>
-          <Btn
-            variant="secondary"
-            size="md"
-            onClick={handleOpenReturnModal}
-            icon={<RotateCcw className="w-4 h-4" />}
-          >
-            Sales Return
-          </Btn>
+        </div>
+
+        {/* Stock Filter Tabs (In Stock Only vs All Catalog) */}
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div className="flex items-center gap-1.5 p-1 bg-slate-100 dark:bg-slate-800/80 rounded-xl border border-slate-200 dark:border-slate-700">
+            <button
+              type="button"
+              onClick={() => setStockFilter("in_stock")}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                stockFilter === "in_stock"
+                  ? "bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-2xs font-bold"
+                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900"
+              }`}
+            >
+              In Stock for Sale ({inStockCount})
+            </button>
+            <button
+              type="button"
+              onClick={() => setStockFilter("all")}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                stockFilter === "all"
+                  ? "bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-2xs font-bold"
+                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900"
+              }`}
+            >
+              All Catalog Items ({productList.length})
+            </button>
+          </div>
+          {outOfStockCount > 0 && stockFilter === "in_stock" && (
+            <span className="text-[11px] text-slate-400">
+              ({outOfStockCount} unpurchased/out-of-stock items hidden)
+            </span>
+          )}
         </div>
 
         {/* Pricing tier notification badge if wholesale / min price configured */}
@@ -1522,12 +1475,18 @@ export default function POSScreen() {
             Loading products from database...
           </div>
         ) : filteredProducts.length === 0 ? (
-          <div className="flex-1 flex flex-col items-center justify-center text-gray-500 text-sm bg-gray-50 rounded-md border border-dashed border-gray-200 p-6">
-            <Package className="w-10 h-10 text-gray-300 mb-2" />
-            <p className="font-medium text-gray-700">No products found</p>
-            <p className="text-xs text-gray-400">
-              Add products in the Products section to sell here.
-            </p>
+          <div className="flex-1 flex flex-col items-center justify-center text-gray-500 text-sm bg-gray-50 dark:bg-slate-800/40 rounded-xl border border-dashed border-gray-200 dark:border-slate-700 p-8 text-center space-y-3">
+            <Package className="w-12 h-12 text-gray-300 dark:text-slate-600 mb-1" />
+            <div>
+              <p className="font-bold text-gray-800 dark:text-slate-200 text-base">
+                {search ? `No in-stock products match "${search}"` : "No in-stock products available for sale"}
+              </p>
+              <p className="text-xs text-gray-400 dark:text-slate-500 mt-1 max-w-sm mx-auto">
+                {outOfStockCount > 0 && stockFilter === "in_stock"
+                  ? `You have ${outOfStockCount} item(s) in your catalog awaiting stock. Record a Purchase Bill from a supplier to inward inventory and enable billing!`
+                  : "Please check your search keyword or add products and purchase stock from suppliers."}
+              </p>
+            </div>
           </div>
         ) : (
           <div className="flex flex-col gap-3 overflow-y-auto pr-2">
@@ -2211,325 +2170,6 @@ export default function POSScreen() {
         </div>
       </Card>
 
-      {/* --- SALES RETURN MODAL --- */}
-      {showReturnModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-xl w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800 space-y-4 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-lg bg-rose-100 text-rose-600 flex items-center justify-center">
-                  <RotateCcw className="w-4 h-4" />
-                </div>
-                <div>
-                  <h3 className="font-bold text-slate-900 dark:text-white text-base">
-                    Process Sales Return
-                  </h3>
-                  <p className="text-xs text-slate-500">
-                    Return sold items and restore inventory according to Transaction Settings.
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowReturnModal(false)}
-                className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* Return Settings Summary Badge */}
-            <div className="bg-slate-50 dark:bg-slate-800/60 p-2.5 rounded-xl text-[11px] text-slate-600 dark:text-slate-300 flex flex-wrap gap-2 justify-between">
-              <span>
-                Stock Restoral:{" "}
-                <strong>
-                  {txSettings?.restoreStockAfterReturn !== false
-                    ? "Automatic"
-                    : "Disabled"}
-                </strong>
-              </span>
-              <span>
-                Partial Return:{" "}
-                <strong>
-                  {txSettings?.allowPartialReturn !== false ? "Allowed" : "Full Only"}
-                </strong>
-              </span>
-              <span>
-                Passcode:{" "}
-                <strong>
-                  {txSettings?.requireReturnPasscode ? "Required" : "Not Required"}
-                </strong>
-              </span>
-            </div>
-
-            {/* Invoice Lookup */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 block">
-                Select Invoice / Enter Invoice No.
-              </label>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={returnInvoiceNo}
-                  onChange={(e) => setReturnInvoiceNo(e.target.value)}
-                  className="flex-1 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-blue-500"
-                />
-                <Btn
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    const match = pastOrders.find(
-                      (o) =>
-                        o.invoiceNo?.toLowerCase() ===
-                        returnInvoiceNo.trim().toLowerCase()
-                    );
-                    if (match) {
-                      handleSelectOrderForReturn(match);
-                      setReturnError("");
-                    } else {
-                      setReturnError("No order found with this invoice number.");
-                    }
-                  }}
-                >
-                  Lookup
-                </Btn>
-              </div>
-            </div>
-
-            {/* Quick list of past orders */}
-            {!selectedReturnOrder && pastOrders.length > 0 && (
-              <div className="space-y-1">
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                  Recent Invoices
-                </p>
-                <div className="max-h-36 overflow-y-auto space-y-1 pr-1">
-                  {pastOrders.slice(0, 5).map((o) => (
-                    <button
-                      key={o._id}
-                      type="button"
-                      onClick={() => handleSelectOrderForReturn(o)}
-                      className="w-full text-left text-xs p-2 rounded-lg hover:bg-blue-50 dark:hover:bg-slate-800 border border-slate-100 dark:border-slate-800 flex justify-between items-center"
-                    >
-                      <span className="font-mono font-bold text-blue-600">
-                        {o.invoiceNo}
-                      </span>
-                      <span className="text-slate-500">
-                        {o.customerName} • {fmt(o.totalOrderValue)}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Direct product return if allowReturnWithoutInvoice is true */}
-            {!selectedReturnOrder && txSettings?.allowReturnWithoutInvoice && (
-              <div className="space-y-1.5 pt-2 border-t border-slate-100">
-                <label className="text-xs font-semibold text-slate-700 block">
-                  Or Add Direct Item to Return (No Invoice Mode)
-                </label>
-                <div className="flex gap-2">
-                  <select
-                    value={manualReturnProduct}
-                    onChange={(e) => setManualReturnProduct(e.target.value)}
-                    className="flex-1 border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs"
-                  >
-                    <option value="">Select product to return...</option>
-                    {productList.map((p) => (
-                      <option key={p._id || p.name} value={p._id || p.name}>
-                        {p.name} ({fmt(p.price)})
-                      </option>
-                    ))}
-                  </select>
-                  <Btn
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      const prod = productList.find(
-                        (p) => (p._id || p.name) === manualReturnProduct
-                      );
-                      if (prod) {
-                        setReturnItems((prev) => [
-                          ...prev,
-                          {
-                            productId: prod._id,
-                            name: prod.name,
-                            sku: prod.sku,
-                            price: prod.price,
-                            qty: 1,
-                            returnQty: 1,
-                            selected: true,
-                          },
-                        ]);
-                      }
-                    }}
-                  >
-                    Add
-                  </Btn>
-                </div>
-              </div>
-            )}
-
-            {/* Items list for Return */}
-            {returnItems.length > 0 && (
-              <div className="space-y-2 pt-2 border-t border-slate-100">
-                <p className="text-xs font-bold text-slate-700 dark:text-slate-300">
-                  Select Items & Return Quantities:
-                </p>
-                <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
-                  {returnItems.map((item, idx) => (
-                    <div
-                      key={idx}
-                      className="flex items-center justify-between p-2.5 bg-slate-50 dark:bg-slate-800 rounded-xl text-xs border border-slate-200 dark:border-slate-700"
-                    >
-                      <div className="flex items-center gap-2">
-                        {txSettings?.allowPartialReturn !== false && (
-                          <input
-                            type="checkbox"
-                            checked={item.selected}
-                            onChange={(e) => {
-                              const checked = e.target.checked;
-                              setReturnItems((prev) =>
-                                prev.map((it, i) =>
-                                  i === idx ? { ...it, selected: checked } : it
-                                )
-                              );
-                            }}
-                            className="rounded text-blue-600 focus:ring-blue-500"
-                          />
-                        )}
-                        <div>
-                          <p className="font-semibold text-slate-900 dark:text-white">
-                            {item.name}
-                          </p>
-                          <p className="text-[10px] text-slate-400 font-mono">
-                            @{fmt(item.price)}
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs text-slate-500">Return Qty:</span>
-                        {txSettings?.allowPartialReturn !== false ? (
-                          <input
-                            type="number"
-                            min={1}
-                            max={item.qty || 999}
-                            value={item.returnQty}
-                            onChange={(e) => {
-                              const val = Math.max(1, Number(e.target.value) || 1);
-                              setReturnItems((prev) =>
-                                prev.map((it, i) =>
-                                  i === idx ? { ...it, returnQty: val } : it
-                                )
-                              );
-                            }}
-                            className="w-16 border border-slate-300 rounded px-1.5 py-0.5 text-xs font-mono font-bold text-right"
-                          />
-                        ) : (
-                          <span className="font-mono font-bold">
-                            {item.qty || 1} (Full)
-                          </span>
-                        )}
-                        <span className="font-mono font-bold text-rose-600 min-w-[60px] text-right">
-                          {fmt((item.price || 0) * (item.returnQty || 1))}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Passcode input if requireReturnPasscode is enabled */}
-            {txSettings?.requireReturnPasscode && (
-              <div className="space-y-1 pt-2 border-t border-slate-100">
-                <label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
-                  <Lock className="w-3.5 h-3.5 text-amber-600" />
-                  Authorization Passcode / Password (Required)
-                </label>
-                <div className="relative">
-                  <input
-                    type={showReturnPasscode ? "text" : "password"}
-                    value={returnPasscode}
-                    onChange={(e) => setReturnPasscode(e.target.value)}
-                    className="w-full border border-amber-300 bg-amber-50/40 rounded-lg px-3 py-2 pr-10 text-xs outline-none focus:ring-2 focus:ring-amber-500 font-mono"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowReturnPasscode(!showReturnPasscode)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-amber-600/70 hover:text-amber-700 focus:outline-none"
-                    tabIndex="-1"
-                  >
-                    {showReturnPasscode ? (
-                      <EyeOff className="w-4 h-4" />
-                    ) : (
-                      <Eye className="w-4 h-4" />
-                    )}
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* Reason & Refund Mode */}
-            <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-100">
-              <div className="space-y-1">
-                <label className="text-xs font-semibold text-slate-700">
-                  Return Reason
-                </label>
-                <input
-                  type="text"
-                  value={returnReason}
-                  onChange={(e) => setReturnReason(e.target.value)}
-                  className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs"
-                />
-              </div>
-              <div className="space-y-1">
-                <label className="text-xs font-semibold text-slate-700">
-                  Refund Method
-                </label>
-                <select
-                  value={returnPaymentMode}
-                  onChange={(e) => setReturnPaymentMode(e.target.value)}
-                  className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs"
-                >
-                  {["Cash", "UPI", "Bank Transfer", "Credit Note"].map((m) => (
-                    <option key={m} value={m}>
-                      {m}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            {returnError && (
-              <div className="text-xs text-rose-600 bg-rose-50 border border-rose-200 p-2.5 rounded-xl font-medium">
-                {returnError}
-              </div>
-            )}
-
-            {/* Action Buttons */}
-            <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
-              <Btn
-                variant="ghost"
-                size="sm"
-                onClick={() => setShowReturnModal(false)}
-              >
-                Cancel
-              </Btn>
-              <Btn
-                variant="danger"
-                size="md"
-                onClick={handleProcessSalesReturn}
-                disabled={processingReturn || returnItems.length === 0}
-              >
-                {processingReturn ? "Processing..." : "Confirm & Process Return"}
-              </Btn>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* ── PAYMENT COLLECTION MODAL ── */}
       {paymentModalOpen && (
         <Modal
@@ -2802,6 +2442,7 @@ export default function POSScreen() {
           </div>
         </Modal>
       )}
+
     </div>
   );
 }

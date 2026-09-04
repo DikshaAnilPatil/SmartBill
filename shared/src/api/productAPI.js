@@ -43,6 +43,15 @@ export const createProduct = (payload) =>
   });
 
 /**
+ * Bulk create/import products in one fast request.
+ * @param {Array<object>} products
+ * @param {object} [options] - e.g. { mode: "upsert" | "update_stock" | "create_only", stockMode: "replace" | "add" }
+ * @returns {{ message: string, count: number, createdCount: number, updatedCount: number, products: Array }}
+ */
+export const bulkCreateProducts = (products, options = {}) =>
+  axiosClient.post("/products/bulk", { products, ...options }).then((res) => res.data);
+
+/**
  * Update an existing product.
  * @param {string} id
  * @param {object} payload updated product fields

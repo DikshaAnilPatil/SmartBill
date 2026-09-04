@@ -35,5 +35,15 @@ export const recordPurchasePayment = (id, paymentData = {}) =>
 
 export const markPurchaseAsPaid = recordPurchasePayment;
 
+/**
+ * Delete a purchase record and revert its inventory stock and supplier balance.
+ * @param {string} id
+ * @returns {{ message: string }}
+ */
+export const deletePurchaseAPI = (id) =>
+  axiosClient.delete(`/purchases/${id}`).then((res) => res.data);
+
+export const deletePurchase = deletePurchaseAPI;
+
 
 
