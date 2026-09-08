@@ -6,8 +6,11 @@ const orderItemSchema = new mongoose.Schema(
     name: { type: String, default: "" },
     sku: { type: String, default: "" },
     price: { type: Number, default: 0 },
+    cost: { type: Number, default: 0 },
     qty: { type: Number, default: 1 },
     discount: { type: Number, default: 0 },
+    gstRate: { type: Number, default: 0 },
+    gst: { type: Number, default: 0 },
     amount: { type: Number, default: 0 },
   },
   { _id: false },
@@ -25,6 +28,7 @@ const orderSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "Customer",
       default: null,
+      index: true,
     },
     customerName: {
       type: String,
@@ -42,22 +46,27 @@ const orderSchema = new mongoose.Schema(
     subtotal: {
       type: Number,
       default: 0,
+      min: 0,
     },
     gstRate: {
       type: Number,
       default: 0,
+      min: 0,
     },
     gst: {
       type: Number,
       default: 0,
+      min: 0,
     },
     totalOrderValue: {
       type: Number,
       default: 0,
+      min: 0,
     },
     amountPaid: {
       type: Number,
       default: 0,
+      min: 0,
     },
     balanceDue: {
       type: Number,
@@ -98,10 +107,12 @@ const orderSchema = new mongoose.Schema(
     discount: {
       type: Number,
       default: 0,
+      min: 0,
     },
     cashDiscount: {
       type: Number,
       default: 0,
+      min: 0,
     },
     date: {
       type: Date,
@@ -118,5 +129,11 @@ const orderSchema = new mongoose.Schema(
 );
 
 orderSchema.index({ invoiceNo: 1, ownerId: 1 }, { unique: true });
+orderSchema.index({ ownerId: 1, createdAt: -1 });
+orderSchema.index({ ownerId: 1, status: 1 });
+orderSchema.index({ ownerId: 1, customerId: 1 });
+orderSchema.index({ ownerId: 1, date: -1 });
 
-export default mongoose.model("Order", orderSchema);
+const Order = mongoose.models.Order || mongoose.model("Order", orderSchema);
+
+export default Order;

@@ -7,6 +7,7 @@ import { NotificationProvider } from "@shared/context/NotificationContext.jsx";
 import { useCustomization } from "@shared/hooks/useCustomization.js";
 import { setUserToStorage } from "@shared/utils/userUtils.js";
 import { AccountingProvider } from "@shared/context/AccountingContext.jsx";
+import { getAdminUrl, getLandingUrl } from "@shared/utils/urlUtils.js";
 
 const APP_PAGES = [
   "dashboard",
@@ -119,10 +120,8 @@ function AppRoutes() {
   }, []);
 
   const handleLogin = (r, u) => {
-    if (r === "superadmin") {
-      localStorage.removeItem("smartbill_token");
-      localStorage.removeItem("smartbill_user");
-      setUser(null);
+    if (isAdminRole(r)) {
+      window.location.href = getAdminUrl("/app");
       return;
     }
     setRole(r);
@@ -144,7 +143,7 @@ function AppRoutes() {
   };
 
   const navAuth = useCallback((v) => {
-    if (v === "landing") window.location.href = "http://localhost:5173/";
+    if (v === "landing") window.location.href = getLandingUrl();
     else navigate(`/${v}`);
   }, [navigate]);
 
@@ -155,10 +154,15 @@ function AppRoutes() {
     else navigate(`/app/${targetPage}`);
   }, [navigate]);
 
-  if (role === "superadmin" && location.pathname.startsWith("/app")) {
-     localStorage.removeItem("smartbill_token");
-     localStorage.removeItem("smartbill_user");
-     return <Navigate to="/login" replace />;
+  const isAdminRole = (r) => {
+    if (!r) return false;
+    const norm = String(r).toLowerCase().replace(/[-_\s]/g, "");
+    return norm.includes("admin") || norm === "superadmin" || norm === "support" || norm === "billingadmin";
+  };
+
+  if (isAdminRole(role) && location.pathname.startsWith("/app")) {
+     window.location.href = getAdminUrl("/app");
+     return null;
   }
 
   return (
@@ -169,6 +173,10 @@ function AppRoutes() {
         <Route path="/login" element={<AuthScreen view="login" onNav={navAuth} onLogin={handleLogin} />} />
         <Route path="/register" element={<AuthScreen view="register" onNav={navAuth} onLogin={handleLogin} />} />
         <Route path="/forgot" element={<AuthScreen view="forgot" onNav={navAuth} />} />
+        <Route path="/pos" element={<Navigate to="/app/pos" replace />} />
+        <Route path="/sales" element={<Navigate to="/app/pos" replace />} />
+        <Route path="/billing" element={<Navigate to="/app/pos" replace />} />
+        <Route path="/sales-billing" element={<Navigate to="/app/pos" replace />} />
         <Route path="/app" element={<AppShell role={role} user={user} onLogout={handleLogout} page={page} onNav={navApp} />} />
         <Route path="/app/:pageKey" element={<AppShell role={role} user={user} onLogout={handleLogout} page={page} onNav={navApp} />} />
         <Route path="*" element={<Navigate to="/login" replace />} />

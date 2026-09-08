@@ -9,12 +9,17 @@ const customerSchema = new mongoose.Schema(
       index: true,
     },
 
+    userId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      index: true,
+    },
+
     name: {
       type: String,
       required: true,
       trim: true,
     },
-
 
     phone: {
       type: String,
@@ -56,6 +61,7 @@ const customerSchema = new mongoose.Schema(
     creditLimit: {
       type: Number,
       default: 0,
+      min: 0,
     },
 
     shippingAddress: {
@@ -72,11 +78,13 @@ const customerSchema = new mongoose.Schema(
     totalOrderValue: {
       type: Number,
       default: 0,
+      min: 0,
     },
 
     totalPaid: {
       type: Number,
       default: 0,
+      min: 0,
     },
 
     balance: {
@@ -87,6 +95,7 @@ const customerSchema = new mongoose.Schema(
     invoices: {
       type: Number,
       default: 0,
+      min: 0,
     },
 
     status: {
@@ -100,10 +109,23 @@ const customerSchema = new mongoose.Schema(
   }
 );
 
-// Customer name must be unique for each business owner.
-customerSchema.index(
-  { ownerId: 1, name: 1 },
-  { unique: true }
-);
+// Compound indexes for tenant-isolated querying & search
+// Note: name is NOT unique so distinct customers can share common names
+customerSchema.index({ ownerId: 1, createdAt: -1 });
+customerSchema.index({ ownerId: 1, name: 1 });
+customerSchema.index({ ownerId: 1, phone: 1 });
+customerSchema.index({ ownerId: 1, status: 1 });
 
-export default mongoose.model("Customer", customerSchema);
+const Customer = mongoose.models.Customer || mongoose.model("Customer", customerSchema);
+
+// Self-healing migration to drop the harmful legacy unique index on name if present
+Customer.collection.indexes().then((indexes) => {
+  const legacyUniqueIndex = indexes.find((idx) => idx.name === "ownerId_1_name_1" && idx.unique);
+  if (legacyUniqueIndex) {
+    Customer.collection.dropIndex("ownerId_1_name_1").catch((err) => {
+      console.warn("Could not drop legacy customer unique index:", err.message);
+    });
+  }
+}).catch(() => {});
+
+export default Customer;

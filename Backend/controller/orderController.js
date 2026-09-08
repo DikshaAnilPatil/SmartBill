@@ -1,29 +1,21 @@
 import Order from "../models/Order.js";
 import Customer from "../models/Customer.js";
-import Product from "../models/productModel.js";
+import Product from "../models/Product.js";
 import InvoiceSettings from "../models/InvoiceSettings.js";
 import TransactionSettings from "../models/TransactionSettings.js";
-import User from "../models/User.js";
 import AccountingSettings from "../models/AccountingSettings.js";
-import { getCashBalance } from "../utils/accountingUtils.js";
-import bcrypt from "bcrypt";
 import mongoose from "mongoose";
 import { createNotification } from "../services/notificationService.js";
 import { sendInvoiceEmail } from "../utils/emailService.js";
 
 // ================= HELPERS =================
-// Generate a collision-safe invoice number for the given owner.
-// Keeps retrying with the next sequential number whenever the previous
-// candidate collides with an existing (unique) invoice number.
 const generateInvoiceNo = async (ownerId) => {
-  // Fetch settings
   let settings = await InvoiceSettings.findOne({ userId: ownerId });
-  
-  // Default values
+
   let prefix = "INV";
   let startingNumber = 1;
   let financialYearWise = true;
-  
+
   if (settings) {
     prefix = settings.invoicePrefix || "INV";
     startingNumber = settings.startingNumber != null ? settings.startingNumber : 1;
@@ -46,35 +38,27 @@ const generateInvoiceNo = async (ownerId) => {
       endYear = currentYear;
     }
     yearStr = `/${String(startYear).slice(-2)}-${String(endYear).slice(-2)}`;
-  } else {
-    // If not financial year wise, just use the current year or nothing. We will use just a dash.
-    yearStr = ""; 
   }
 
   const count = await Order.countDocuments({ ownerId });
   let candidate = count + startingNumber;
   let invoiceNo = `${prefix}${yearStr}-${String(candidate).padStart(4, "0")}`;
 
-  // Guard against rapid/duplicate creation races on the unique index.
   for (let attempt = 0; attempt < 20; attempt++) {
-    // Check if exists for this owner
     const existing = await Order.exists({ invoiceNo, ownerId });
     if (!existing) return invoiceNo;
     candidate += 1;
     invoiceNo = `${prefix}${yearStr}-${String(candidate).padStart(4, "0")}`;
   }
 
-  // Fall back to a timestamp-based suffix to guarantee uniqueness.
   return `${prefix}${yearStr}-${Date.now()}`;
 };
 
 // ================= CREATE ORDER =================
-// Creates an order and automatically updates the customer's running totals:
-//   totalOrderValue += orderTotal
-//   totalPaid        += amountPaid
-//   balance          = totalOrderValue - totalPaid
-//   invoices         += 1
 export const createOrder = async (req, res) => {
+  const effectiveOwnerId = req.user.ownerId || req.user._id;
+  const actualUserId = req.user.actualUserId || req.user._id;
+
   let session = null;
   let useTransaction = true;
 
@@ -82,10 +66,23 @@ export const createOrder = async (req, res) => {
     session = await Order.startSession();
     session.startTransaction();
   } catch (err) {
-    // Standalone MongoDB without replica set does not support transactions.
     session = null;
     useTransaction = false;
   }
+
+  const decrementedItems = []; // Track stock changes for rollback in non-replica set mode
+
+  const rollbackStock = async () => {
+    for (const item of decrementedItems) {
+      try {
+        await Product.findByIdAndUpdate(item.productId, {
+          $inc: { stock: item.quantity },
+        });
+      } catch (rollbackErr) {
+        console.error("Stock rollback error for product", item.productId, rollbackErr.message);
+      }
+    }
+  };
 
   const abortSession = async () => {
     if (session && useTransaction) {
@@ -93,6 +90,8 @@ export const createOrder = async (req, res) => {
         await session.abortTransaction();
       } catch (e) {}
       session.endSession();
+    } else {
+      await rollbackStock();
     }
   };
 
@@ -108,97 +107,71 @@ export const createOrder = async (req, res) => {
       customerId = null,
       customerName = "Walk-in Customer",
       items = [],
-      subtotal = 0,
-      gstRate = 0,
-      gst = 0,
-      discount = 0,
       cashDiscount = 0,
-      totalOrderValue = 0,
       amountPaid = 0,
       paymentMode = "Cash",
+      splitPayments = [],
     } = req.body;
 
-    if (!items || items.length === 0) {
+    if (!items || !Array.isArray(items) || items.length === 0) {
       await abortSession();
-      return res
-        .status(400)
-        .json({ message: "Order must contain at least one item." });
+      return res.status(400).json({ message: "Order must contain at least one item." });
     }
 
-    // Load user's transaction settings
-    const txSettings = await TransactionSettings.findOne({
-      userId: req.user._id,
-    }).lean();
+    // Load business settings for transaction & accounting limits
+    const [txSettings, accountingSettings] = await Promise.all([
+      TransactionSettings.findOne({ userId: effectiveOwnerId }).lean(),
+      AccountingSettings.findOne({ userId: effectiveOwnerId }).lean(),
+    ]);
 
-    const accountingSettings = await AccountingSettings.findOne({ userId: req.user._id }).lean();
     const trackCogs = accountingSettings?.trackCogs === true;
-
     const allowNegativeStock = txSettings?.allowNegativeStock === true;
     const allowDiscount = txSettings?.allowDiscount !== false;
-    const maxDiscountPercent = Number(txSettings?.maximumDiscount || 100);
+    const maxDiscountPercent = Number.isFinite(Number(txSettings?.maximumDiscount))
+      ? Number(txSettings.maximumDiscount)
+      : 100;
 
-    // Validate discount limit
-    if (!allowDiscount) {
-      for (const item of items) {
-        if (Number(item.discount) > 0) {
-          await abortSession();
-          return res.status(400).json({
-            message: `Discounts are disabled in Transaction Settings.`,
-          });
-        }
-      }
-    } else if (Number.isFinite(maxDiscountPercent) && maxDiscountPercent < 100) {
-      for (const item of items) {
-        const itemDisc = Number(item.discount) || 0;
-        if (itemDisc > maxDiscountPercent) {
-          await abortSession();
-          return res.status(400).json({
-            message: `Discount of ${itemDisc}% on "${item.name}" exceeds the maximum allowed limit of ${maxDiscountPercent}%.`,
-          });
-        }
-      }
-    }
-
-    const total = Number(totalOrderValue) || 0;
-    const paid = Number(amountPaid) || 0;
-    const balanceDue = Math.max(0, total - paid);
-
-    const status = paid <= 0 ? "Due" : paid >= total ? "Paid" : "Partial";
-
+    const processedItems = [];
+    let computedSubtotal = 0;
+    let computedTotalDiscount = 0;
+    let computedTotalGst = 0;
     let calculatedTotalCogs = 0;
 
-    // Decrease inventory before creating the order. Auto-create product if not yet in database.
-    for (const item of items) {
-      const quantity = Number(item.qty);
+    const queryOptions = session ? { session } : {};
+
+    // ─────────────────────────────────────────────────────────────────
+    // Authoritative Server-Side Item Resolution & Calculations
+    // ─────────────────────────────────────────────────────────────────
+    for (const rawItem of items) {
+      const quantity = Number(rawItem.qty);
       if (!Number.isInteger(quantity) || quantity <= 0) {
         await abortSession();
         return res.status(400).json({
-          message: "Each item quantity must be a positive whole number.",
+          message: `Invalid quantity for item "${rawItem.name || "Product"}". Quantity must be a positive whole number.`,
         });
       }
 
+      // Build product identifiers scoped to current tenant
       const productIdentifiers = [];
-      if (item.sku && String(item.sku).trim()) {
-        const cleanSku = String(item.sku).trim();
+      if (rawItem.productId && mongoose.isValidObjectId(rawItem.productId)) {
+        productIdentifiers.push({ _id: rawItem.productId });
+      }
+      if (rawItem.sku && String(rawItem.sku).trim()) {
+        const cleanSku = String(rawItem.sku).trim();
         productIdentifiers.push({
           sku: new RegExp(`^${cleanSku.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i"),
         });
       }
-      if (item.productId && mongoose.isValidObjectId(item.productId)) {
-        productIdentifiers.push({ _id: item.productId });
-      }
-      if (item.name && String(item.name).trim()) {
-        const cleanName = String(item.name).trim();
+      if (rawItem.name && String(rawItem.name).trim()) {
+        const cleanName = String(rawItem.name).trim();
         productIdentifiers.push({
           name: new RegExp(`^${cleanName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i"),
         });
       }
 
       const ownershipFilter = {
-        $or: [{ userId: req.user._id }, { ownerId: req.user._id }],
+        $or: [{ userId: effectiveOwnerId }, { ownerId: effectiveOwnerId }],
       };
-
-      const queryOptions = session ? { session } : {};
 
       let product = null;
       if (productIdentifiers.length > 0) {
@@ -209,63 +182,22 @@ export const createOrder = async (req, res) => {
         );
       }
 
-      if (!product) {
-        // Auto-create product if missing so invoice generation always succeeds
-        const itemSku =
-          item.sku && String(item.sku).trim()
-            ? String(item.sku).trim().toUpperCase()
-            : `SKU-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+      let unitPrice = 0;
+      let unitCost = 0;
+      let itemGstRate = 0;
+      let itemName = rawItem.name || "Product";
+      let itemSku = rawItem.sku || "";
 
-        const initialStock = allowNegativeStock ? -quantity : 0;
+      if (product) {
+        // Authoritative pricing from database
+        unitPrice = Number(product.price) || 0;
+        unitCost = Number(product.cost) || 0;
+        itemGstRate = Number(product.gst) || 0;
+        itemName = product.name;
+        itemSku = product.sku;
 
-        const createProductOptions = session ? { session } : {};
-        try {
-          const createdProductDocs = await Product.create(
-            [
-              {
-                userId: req.user._id,
-                name: item.name || "Product",
-                sku: itemSku,
-                category: item.category || "General",
-                supplier: item.supplier || "General Supplier",
-                cost: Number(item.price) || 0,
-                price: Number(item.price) || 0,
-                gst: Number(item.gst) || 0,
-                stock: initialStock,
-                minStock: 10,
-                unit: "Piece",
-                status: "Active",
-              },
-            ],
-            createProductOptions
-          );
-          product = createdProductDocs[0];
-        } catch (createErr) {
-          // If SKU unique constraint collided, query existing product by SKU
-          product = await Product.findOne(
-            { userId: req.user._id, sku: itemSku },
-            null,
-            queryOptions
-          );
-        }
-      } else {
-        // Check stock constraint if negative stock is NOT allowed
-        if (!allowNegativeStock && (product.stock || 0) < quantity) {
-          await abortSession();
-          return res.status(400).json({
-            message: `Insufficient stock for "${product.name}". Available: ${product.stock || 0}, Requested: ${quantity}. (Negative stock is disabled in Transaction Settings)`,
-          });
-        }
-
-        if (allowNegativeStock) {
-          // Decrement stock allowing negative values
-          await Product.findOneAndUpdate(
-            { _id: product._id },
-            { $inc: { stock: -quantity } },
-            { new: true, ...queryOptions }
-          );
-        } else {
-          // Decrement stock ensuring non-negative
+        // Atomic inventory reduction
+        if (!allowNegativeStock) {
           const updatedProduct = await Product.findOneAndUpdate(
             { _id: product._id, stock: { $gte: quantity } },
             { $inc: { stock: -quantity } },
@@ -273,113 +205,228 @@ export const createOrder = async (req, res) => {
           );
 
           if (!updatedProduct) {
-            await Product.findOneAndUpdate(
-              { _id: product._id },
-              { stock: 0 },
-              { new: true, ...queryOptions }
-            );
+            await abortSession();
+            return res.status(400).json({
+              message: `Insufficient stock for "${product.name}". Available: ${product.stock || 0}, Requested: ${quantity}.`,
+            });
           }
+        } else {
+          await Product.findOneAndUpdate(
+            { _id: product._id },
+            { $inc: { stock: -quantity } },
+            { new: true, ...queryOptions }
+          );
+        }
+        decrementedItems.push({ productId: product._id, quantity });
+      } else {
+        // Auto-create product for custom/POS items without falsifying cost data
+        unitPrice = Math.max(0, Number(rawItem.price) || 0);
+        // Do NOT set cost equal to selling price to preserve margin tracking
+        unitCost = Number(rawItem.cost) != null && !isNaN(Number(rawItem.cost))
+          ? Math.max(0, Number(rawItem.cost))
+          : 0;
+        itemGstRate = Math.max(0, Number(rawItem.gstRate || rawItem.gst) || 0);
+        itemSku = rawItem.sku && String(rawItem.sku).trim()
+          ? String(rawItem.sku).trim().toUpperCase()
+          : `SKU-${Date.now().toString(36).toUpperCase()}-${Math.floor(100 + Math.random() * 900)}`;
+
+        const initialStock = allowNegativeStock ? -quantity : 0;
+
+        try {
+          const createdDocs = await Product.create(
+            [
+              {
+                userId: actualUserId,
+                ownerId: effectiveOwnerId,
+                name: itemName,
+                sku: itemSku,
+                category: rawItem.category || "General",
+                supplier: rawItem.supplier || "",
+                cost: unitCost,
+                price: unitPrice,
+                gst: itemGstRate,
+                stock: initialStock,
+                minStock: 10,
+                unit: rawItem.unit || "Piece",
+                status: "Active",
+              },
+            ],
+            queryOptions
+          );
+          product = createdDocs[0];
+          decrementedItems.push({ productId: product._id, quantity });
+        } catch (createErr) {
+          product = await Product.findOne(
+            { ownerId: effectiveOwnerId, sku: itemSku },
+            null,
+            queryOptions
+          );
         }
       }
 
-      if (trackCogs && product) {
-        calculatedTotalCogs += (Number(product.cost) || 0) * quantity;
+      // Validate & compute item discount
+      let itemDiscountPercent = Math.max(0, Number(rawItem.discount) || 0);
+      if (!allowDiscount && itemDiscountPercent > 0) {
+        await abortSession();
+        return res.status(400).json({ message: "Discounts are disabled in Transaction Settings." });
       }
+      if (itemDiscountPercent > maxDiscountPercent) {
+        await abortSession();
+        return res.status(400).json({
+          message: `Discount of ${itemDiscountPercent}% on "${itemName}" exceeds maximum allowed limit of ${maxDiscountPercent}%.`,
+        });
+      }
+
+      // Server-side authoritative line item arithmetic
+      const lineBase = Math.round(unitPrice * quantity * 100) / 100;
+      const lineDiscountAmount = Math.round(((lineBase * itemDiscountPercent) / 100) * 100) / 100;
+      const lineTaxable = Math.max(0, lineBase - lineDiscountAmount);
+      const lineGstAmount = Math.round(((lineTaxable * itemGstRate) / 100) * 100) / 100;
+      const lineTotal = Math.round((lineTaxable + lineGstAmount) * 100) / 100;
+
+      computedSubtotal += lineBase;
+      computedTotalDiscount += lineDiscountAmount;
+      computedTotalGst += lineGstAmount;
+
+      if (trackCogs) {
+        calculatedTotalCogs += unitCost * quantity;
+      }
+
+      processedItems.push({
+        productId: product ? product._id : null,
+        name: itemName,
+        sku: itemSku,
+        price: unitPrice,
+        cost: unitCost,
+        qty: quantity,
+        discount: itemDiscountPercent,
+        gstRate: itemGstRate,
+        gst: lineGstAmount,
+        amount: lineTotal,
+      });
     }
 
-    // Generate a unique invoice number.
-    const invoiceNo = await generateInvoiceNo(req.user._id);
+    // Additional cash/order-level discount validation
+    const validCashDiscount = Math.max(0, Number(cashDiscount) || 0);
+    if (!allowDiscount && validCashDiscount > 0) {
+      await abortSession();
+      return res.status(400).json({ message: "Discounts are disabled in Transaction Settings." });
+    }
+    if (validCashDiscount > computedSubtotal) {
+      await abortSession();
+      return res.status(400).json({ message: "Cash discount cannot exceed the order subtotal." });
+    }
 
-    const createOptions = session ? { session } : {};
+    computedTotalDiscount += validCashDiscount;
 
+    // Server-side authoritative grand total
+    const authoritativeTotal = Math.max(
+      0,
+      Math.round((computedSubtotal - computedTotalDiscount + computedTotalGst) * 100) / 100
+    );
+
+    const paid = Math.max(0, Number(amountPaid) || 0);
+    const balanceDue = Math.max(0, Math.round((authoritativeTotal - paid) * 100) / 100);
+    const status = paid <= 0 ? "Due" : paid >= authoritativeTotal ? "Paid" : "Partial";
+
+    // Generate collision-safe invoice number
+    const invoiceNo = await generateInvoiceNo(effectiveOwnerId);
+
+    // Create Order in MongoDB
     const orderDocs = await Order.create(
       [
         {
-          ownerId: req.user._id,
-          customerId: customerId || null,
+          ownerId: effectiveOwnerId,
+          customerId: customerId && mongoose.isValidObjectId(customerId) ? customerId : null,
           customerName: customerName || "Walk-in Customer",
           invoiceNo,
-          items,
-          subtotal: Number(subtotal) || 0,
-          gstRate: Number(gstRate) || 0,
-          gst: Number(gst) || 0,
-          discount: Number(discount) || 0,
-          cashDiscount: Number(cashDiscount) || 0,
-          totalOrderValue: total,
+          items: processedItems,
+          subtotal: Math.round(computedSubtotal * 100) / 100,
+          gstRate: processedItems.length === 1 ? processedItems[0].gstRate : 0,
+          gst: Math.round(computedTotalGst * 100) / 100,
+          discount: Math.round(computedTotalDiscount * 100) / 100,
+          cashDiscount: validCashDiscount,
+          totalOrderValue: authoritativeTotal,
           amountPaid: paid,
           balanceDue,
-          paymentMode,
-          splitPayments: Array.isArray(req.body.splitPayments) ? req.body.splitPayments : [],
+          paymentMode: paymentMode || "Cash",
+          splitPayments: Array.isArray(splitPayments) ? splitPayments : [],
           status,
           totalCogs: trackCogs ? calculatedTotalCogs : 0,
         },
       ],
-      createOptions
+      queryOptions
     );
 
     const newOrder = orderDocs[0];
 
-    // Update the customer's running totals atomically if customer exists.
+    // ─────────────────────────────────────────────────────────────────
+    // Atomic Customer Balance Update
+    // ─────────────────────────────────────────────────────────────────
     let targetCustomer = null;
-
     if (customerId && mongoose.isValidObjectId(customerId)) {
       targetCustomer = await Customer.findOne(
-        {
-          _id: customerId,
-          $or: [{ userId: req.user._id }, { ownerId: req.user._id }],
-        },
+        { _id: customerId, ownerId: effectiveOwnerId },
         null,
-        createOptions
+        queryOptions
       );
-    }
-
-    if (!targetCustomer && customerName && customerName !== "Walk-in Customer") {
+    } else if (customerName && customerName !== "Walk-in Customer") {
       const cleanCustomerName = String(customerName).trim();
       targetCustomer = await Customer.findOne(
         {
-          $or: [{ userId: req.user._id }, { ownerId: req.user._id }],
+          ownerId: effectiveOwnerId,
           name: new RegExp(`^${cleanCustomerName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i"),
         },
         null,
-        createOptions
+        queryOptions
       );
     }
 
     if (targetCustomer) {
-      targetCustomer.totalOrderValue = (targetCustomer.totalOrderValue || 0) + total;
-      targetCustomer.totalPaid = (targetCustomer.totalPaid || 0) + paid;
-      targetCustomer.invoices = (targetCustomer.invoices || 0) + 1;
-      targetCustomer.balance = targetCustomer.totalOrderValue - targetCustomer.totalPaid;
-      await targetCustomer.save(createOptions);
+      const balanceChange = authoritativeTotal - paid;
+      await Customer.findByIdAndUpdate(
+        targetCustomer._id,
+        {
+          $inc: {
+            totalOrderValue: authoritativeTotal,
+            totalPaid: paid,
+            invoices: 1,
+            balance: balanceChange,
+          },
+        },
+        queryOptions
+      );
 
-      newOrder.customerId = targetCustomer._id;
-      await newOrder.save(createOptions);
+      if (!newOrder.customerId) {
+        newOrder.customerId = targetCustomer._id;
+        await newOrder.save(queryOptions);
+      }
     }
 
     await commitSession();
 
-    // Trigger Real-Time Notification for New Sale
+    // Trigger Real-Time Notification & Alerts
     try {
       await createNotification({
-        ownerId: req.user._id,
-        userId: req.user.actualUserId || req.user._id,
+        ownerId: effectiveOwnerId,
+        userId: actualUserId,
         title: `New Sale: ${newOrder.invoiceNo}`,
-        message: `Sale invoice ${newOrder.invoiceNo} for ₹${total.toLocaleString("en-IN")} generated for ${customerName} (${paymentMode}).`,
+        message: `Sale invoice ${newOrder.invoiceNo} for ₹${authoritativeTotal.toLocaleString("en-IN")} generated for ${customerName} (${paymentMode}).`,
         type: "success",
         category: "sale",
         link: "pos",
         metadata: {
           orderId: newOrder._id,
           invoiceNo: newOrder.invoiceNo,
-          total,
+          total: authoritativeTotal,
           amountPaid: paid,
           customerName,
           status,
         },
       });
 
-      // Check remaining stock for products in order and emit instant alerts if low
-      for (const item of items) {
+      // Stock threshold alerts
+      for (const item of processedItems) {
         if (item.productId && mongoose.isValidObjectId(item.productId)) {
           const updatedProd = await Product.findById(item.productId).lean();
           if (updatedProd) {
@@ -387,7 +434,7 @@ export const createOrder = async (req, res) => {
             const minStock = Number(updatedProd.minStock ?? 10);
             if (stock <= 0) {
               await createNotification({
-                ownerId: req.user._id,
+                ownerId: effectiveOwnerId,
                 title: `Out of Stock: ${updatedProd.name}`,
                 message: `${updatedProd.name} is now out of stock following invoice ${newOrder.invoiceNo}.`,
                 type: "error",
@@ -397,7 +444,7 @@ export const createOrder = async (req, res) => {
               });
             } else if (stock <= minStock) {
               await createNotification({
-                ownerId: req.user._id,
+                ownerId: effectiveOwnerId,
                 title: `Low Stock: ${updatedProd.name}`,
                 message: `${updatedProd.name} is down to ${stock} ${updatedProd.unit || "units"} (Minimum: ${minStock}).`,
                 type: "warning",
@@ -413,14 +460,14 @@ export const createOrder = async (req, res) => {
       console.error("Order notification creation error:", notifErr.message);
     }
 
-    // Dispatch Invoice Email (checks SuperAdmin active/inactive setting in MongoDB)
+    // Dispatch Invoice Email asynchronously
     try {
       const recipientEmail = targetCustomer?.email || req.user?.email;
       if (recipientEmail) {
         sendInvoiceEmail({
           toEmail: recipientEmail,
           invoiceNo: newOrder.invoiceNo,
-          amount: `₹${total.toLocaleString("en-IN")}`,
+          amount: `₹${authoritativeTotal.toLocaleString("en-IN")}`,
           userName: customerName,
           businessName: req.user.businessName || "Smart Bill",
         }).catch((err) => console.error("Invoice email trigger error:", err.message));
@@ -435,24 +482,96 @@ export const createOrder = async (req, res) => {
     });
   } catch (error) {
     await abortSession();
-
     console.error("CREATE ORDER ERROR:", error.message);
-    if (error.stack) console.error(error.stack);
-
     return res.status(500).json({
       message: error.message || "Failed to create order.",
     });
   }
 };
 
-// ================= LIST ORDERS =================
+// ================= LIST ORDERS WITH PAGINATION =================
 export const getOrders = async (req, res) => {
   try {
-    const orders = await Order.find({ ownerId: req.user._id })
-      .sort({ createdAt: -1 })
-      .lean();
+    const ownerId = req.user.ownerId || req.user._id;
+    const {
+      page,
+      limit,
+      search,
+      status,
+      customerId,
+      startDate,
+      endDate,
+      sortBy = "createdAt",
+      sortOrder = "desc",
+    } = req.query;
 
-    return res.status(200).json({ message: "OK", orders });
+    const query = { ownerId };
+
+    if (status && status !== "All") {
+      query.status = status;
+    }
+
+    if (customerId && mongoose.isValidObjectId(customerId)) {
+      query.customerId = customerId;
+    }
+
+    if (search && String(search).trim()) {
+      const cleanSearch = String(search).trim();
+      query.$or = [
+        { invoiceNo: new RegExp(cleanSearch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i") },
+        { customerName: new RegExp(cleanSearch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i") },
+      ];
+    }
+
+    if (startDate || endDate) {
+      query.createdAt = {};
+      if (startDate) query.createdAt.$gte = new Date(startDate);
+      if (endDate) {
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+        query.createdAt.$lte = end;
+      }
+    }
+
+    const sortOption = {
+      [sortBy]: sortOrder === "asc" ? 1 : -1,
+    };
+
+    // If explicit pagination requested
+    if (page !== undefined || limit !== undefined) {
+      const pageNum = Math.max(1, parseInt(page, 10) || 1);
+      const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
+      const skip = (pageNum - 1) * limitNum;
+
+      const [orders, total] = await Promise.all([
+        Order.find(query).sort(sortOption).skip(skip).limit(limitNum).lean(),
+        Order.countDocuments(query),
+      ]);
+
+      return res.status(200).json({
+        message: "OK",
+        orders,
+        pagination: {
+          total,
+          page: pageNum,
+          limit: limitNum,
+          totalPages: Math.ceil(total / limitNum),
+        },
+      });
+    }
+
+    // Default: Return standard ordered list with total count for full backward compatibility
+    const orders = await Order.find(query).sort(sortOption).lean();
+    return res.status(200).json({
+      message: "OK",
+      orders,
+      pagination: {
+        total: orders.length,
+        page: 1,
+        limit: orders.length,
+        totalPages: 1,
+      },
+    });
   } catch (error) {
     console.error("GET ORDERS ERROR:", error.message);
     return res.status(500).json({ message: "Failed to fetch orders." });
@@ -462,9 +581,10 @@ export const getOrders = async (req, res) => {
 // ================= GET SINGLE ORDER =================
 export const getOrder = async (req, res) => {
   try {
+    const ownerId = req.user.ownerId || req.user._id;
     const order = await Order.findOne({
       _id: req.params.id,
-      ownerId: req.user._id,
+      ownerId,
     }).lean();
 
     if (!order) {

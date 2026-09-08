@@ -1,19 +1,94 @@
 import Purchase from "../models/Purchase.js";
-import Product from "../models/productModel.js";
+import Product from "../models/Product.js";
 import Supplier from "../models/Supplier.js";
 import AccountingSettings from "../models/AccountingSettings.js";
 import { getCashBalance } from "../utils/accountingUtils.js";
 import mongoose from "mongoose";
 import { createNotification } from "../services/notificationService.js";
 
-// ================= LIST PURCHASES =================
+// ================= LIST PURCHASES WITH PAGINATION =================
 export const getPurchases = async (req, res) => {
   try {
-    const purchases = await Purchase.find({ ownerId: req.user._id })
-      .sort({ createdAt: -1 })
-      .lean();
+    const ownerId = req.user.ownerId || req.user._id;
+    const {
+      page,
+      limit,
+      search,
+      paymentStatus,
+      supplierId,
+      startDate,
+      endDate,
+      sortBy = "createdAt",
+      sortOrder = "desc",
+    } = req.query;
 
-    return res.status(200).json({ message: "OK", purchases });
+    const query = { ownerId };
+
+    if (paymentStatus && paymentStatus !== "All") {
+      query.paymentStatus = paymentStatus;
+    }
+
+    if (supplierId && mongoose.isValidObjectId(supplierId)) {
+      query.supplierId = supplierId;
+    }
+
+    if (search && String(search).trim()) {
+      const cleanSearch = String(search).trim();
+      const escaped = cleanSearch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      query.$or = [
+        { supplierName: new RegExp(escaped, "i") },
+        { supplierInvoiceNo: new RegExp(escaped, "i") },
+        { purchaseOrderNo: new RegExp(escaped, "i") },
+      ];
+    }
+
+    if (startDate || endDate) {
+      query.purchaseDate = {};
+      if (startDate) query.purchaseDate.$gte = new Date(startDate);
+      if (endDate) {
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+        query.purchaseDate.$lte = end;
+      }
+    }
+
+    const sortOption = {
+      [sortBy]: sortOrder === "asc" ? 1 : -1,
+    };
+
+    if (page !== undefined || limit !== undefined) {
+      const pageNum = Math.max(1, parseInt(page, 10) || 1);
+      const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
+      const skip = (pageNum - 1) * limitNum;
+
+      const [purchases, total] = await Promise.all([
+        Purchase.find(query).sort(sortOption).skip(skip).limit(limitNum).lean(),
+        Purchase.countDocuments(query),
+      ]);
+
+      return res.status(200).json({
+        message: "OK",
+        purchases,
+        pagination: {
+          total,
+          page: pageNum,
+          limit: limitNum,
+          totalPages: Math.ceil(total / limitNum),
+        },
+      });
+    }
+
+    const purchases = await Purchase.find(query).sort(sortOption).lean();
+    return res.status(200).json({
+      message: "OK",
+      purchases,
+      pagination: {
+        total: purchases.length,
+        page: 1,
+        limit: purchases.length,
+        totalPages: 1,
+      },
+    });
   } catch (error) {
     console.error("GET PURCHASES ERROR:", error.message);
     return res.status(500).json({ message: "Failed to fetch purchases." });
@@ -23,9 +98,10 @@ export const getPurchases = async (req, res) => {
 // ================= GET SINGLE PURCHASE =================
 export const getPurchaseById = async (req, res) => {
   try {
+    const ownerId = req.user.ownerId || req.user._id;
     const purchase = await Purchase.findOne({
       _id: req.params.id,
-      ownerId: req.user._id,
+      ownerId,
     }).lean();
 
     if (!purchase) {
@@ -42,6 +118,9 @@ export const getPurchaseById = async (req, res) => {
 // ================= CREATE PURCHASE =================
 export const createPurchase = async (req, res) => {
   try {
+    const ownerId = req.user.ownerId || req.user._id;
+    const actualUserId = req.user.actualUserId || req.user._id;
+
     const {
       supplierId,
       supplierName,
@@ -57,11 +136,9 @@ export const createPurchase = async (req, res) => {
       paymentStatus = "Unpaid",
       paymentMethod = "Cash",
       amountPaid = 0,
-      remainingAmount = 0,
       notes = "",
     } = req.body;
 
-    // 1. Validations
     if (!supplierName || !String(supplierName).trim()) {
       return res.status(400).json({ message: "Supplier name is required." });
     }
@@ -75,6 +152,10 @@ export const createPurchase = async (req, res) => {
     }
 
     const validatedItems = [];
+    let calculatedSubtotal = 0;
+    let calculatedGstTotal = 0;
+    let calculatedDiscountTotal = 0;
+
     for (const item of items) {
       const pName = String(item.productName || item.product || "").trim();
       const qty = Number(item.quantity || item.qty) || 0;
@@ -95,11 +176,15 @@ export const createPurchase = async (req, res) => {
         return res.status(400).json({ message: `Discount for "${pName}" cannot exceed the item amount.` });
       }
 
-      const itemAmount = qty * rate - disc;
-      const gstAmount = itemAmount * (gstR / 100);
+      const itemAmount = Math.round((qty * rate - disc) * 100) / 100;
+      const gstAmount = Math.round((itemAmount * (gstR / 100)) * 100) / 100;
+
+      calculatedSubtotal += qty * rate;
+      calculatedDiscountTotal += disc;
+      calculatedGstTotal += gstAmount;
 
       validatedItems.push({
-        productId: item.productId || item.id || null,
+        productId: item.productId && mongoose.isValidObjectId(item.productId) ? item.productId : null,
         productName: pName,
         quantity: qty,
         unit: item.unit || "pcs",
@@ -107,75 +192,87 @@ export const createPurchase = async (req, res) => {
         gstRate: gstR,
         gstAmount,
         discount: disc,
-        itemAmount,
+        itemAmount: itemAmount + gstAmount,
       });
     }
 
-    const numTotal = Number(totalAmount) || 0;
-    const numPaid = Number(amountPaid) || 0;
+    const computedGrandTotal = Math.max(
+      0,
+      Math.round((calculatedSubtotal - calculatedDiscountTotal + calculatedGstTotal) * 100) / 100
+    );
 
-    if (numPaid < 0) {
-      return res.status(400).json({ message: "Amount paid cannot be negative." });
-    }
-    if (numPaid > numTotal) {
+    const numPaid = Math.max(0, Number(amountPaid) || 0);
+
+    if (numPaid > computedGrandTotal) {
       return res.status(400).json({ message: "Amount paid cannot exceed total purchase amount." });
     }
 
     let finalPaid = 0;
-    let finalRemaining = numTotal;
+    let finalRemaining = computedGrandTotal;
 
     if (paymentStatus === "Paid") {
-      finalPaid = numTotal;
+      finalPaid = computedGrandTotal;
       finalRemaining = 0;
     } else if (paymentStatus === "Partially Paid") {
       finalPaid = numPaid;
-      finalRemaining = Math.max(0, numTotal - numPaid);
+      finalRemaining = Math.max(0, Math.round((computedGrandTotal - numPaid) * 100) / 100);
     } else {
       finalPaid = 0;
-      finalRemaining = numTotal;
+      finalRemaining = computedGrandTotal;
     }
 
     const finalPaymentMethod = ["Paid", "Partially Paid"].includes(paymentStatus) ? paymentMethod : "Cash";
 
     // Enforce Strict Negative Cash Rule
     if (finalPaid > 0 && finalPaymentMethod === "Cash") {
-      const settings = await AccountingSettings.findOne({ userId: req.user._id }).lean();
+      const settings = await AccountingSettings.findOne({ userId: ownerId }).lean();
       if (settings?.strictNegativeCash) {
-        const cashBalance = await getCashBalance(req.user._id);
+        const cashBalance = await getCashBalance(ownerId);
         if (cashBalance - finalPaid < 0) {
           return res.status(400).json({ 
-            message: `Strict Negative Cash Rule is enabled. Your cash balance is ${cashBalance}, which is insufficient for this ${finalPaid} payment.`
+            message: `Strict Negative Cash Rule is enabled. Your cash balance is ₹${cashBalance}, which is insufficient for this ₹${finalPaid} payment.`
           });
         }
       }
     }
 
     // 2. Create Purchase Record
+    const initialPaymentHistory = finalPaid > 0 ? [{
+      amount: finalPaid,
+      paymentMethod: finalPaymentMethod,
+      date: new Date(purchaseDate),
+      referenceNo: "",
+      notes: "Initial payment on purchase creation",
+    }] : [];
+
     const newPurchase = await Purchase.create({
-      ownerId: req.user._id,
-      supplierId: supplierId || null,
+      ownerId,
+      supplierId: supplierId && mongoose.isValidObjectId(supplierId) ? supplierId : null,
       supplierName: String(supplierName).trim(),
       supplierInvoiceNo: String(supplierInvoiceNo).trim(),
       purchaseOrderNo: String(purchaseOrderNo).trim(),
       purchaseDate: new Date(purchaseDate),
       dueDate: dueDate ? new Date(dueDate) : null,
       items: validatedItems,
-      subtotal: Number(subtotal) || 0,
-      gstTotal: Number(gstTotal) || 0,
-      discountTotal: Number(discountTotal) || 0,
-      totalAmount: numTotal,
+      subtotal: Math.round(calculatedSubtotal * 100) / 100,
+      gstTotal: Math.round(calculatedGstTotal * 100) / 100,
+      discountTotal: Math.round(calculatedDiscountTotal * 100) / 100,
+      totalAmount: computedGrandTotal,
       paymentStatus,
       paymentMethod: finalPaymentMethod,
       amountPaid: finalPaid,
       remainingAmount: finalRemaining,
       notes: String(notes).trim(),
+      receiptUrl: req.body.receiptUrl ? String(req.body.receiptUrl) : "",
+      receiptName: req.body.receiptName ? String(req.body.receiptName) : "",
+      paymentHistory: initialPaymentHistory,
     });
 
-    // 3. Inventory Integration: Increment stock for purchased products
+    // 3. Inventory Integration: Atomically increment stock for purchased products
     for (const item of validatedItems) {
       let product = null;
       const ownershipFilter = {
-        $or: [{ userId: req.user._id }, { ownerId: req.user._id }],
+        $or: [{ userId: ownerId }, { ownerId }],
       };
 
       if (item.productId && mongoose.isValidObjectId(item.productId)) {
@@ -194,21 +291,23 @@ export const createPurchase = async (req, res) => {
       }
 
       if (product) {
-        product.stock = (Number(product.stock) || 0) + Number(item.quantity);
+        const updateFields = {
+          $inc: { stock: Number(item.quantity) },
+        };
         if (item.purchaseRate > 0) {
-          product.cost = Number(item.purchaseRate);
+          updateFields.$set = { cost: Number(item.purchaseRate) };
         }
-        await product.save();
+        await Product.findByIdAndUpdate(product._id, updateFields);
       } else {
         // Auto-create product in inventory if it does not exist yet
         await Product.create({
-          userId: req.user._id,
-          ownerId: req.user._id,
+          userId: actualUserId,
+          ownerId,
           name: String(item.productName).trim(),
           sku: `PRD-${Date.now().toString().slice(-6)}`,
           category: "General",
           cost: Number(item.purchaseRate) || 0,
-          price: (Number(item.purchaseRate) || 0) * 1.2,
+          price: Math.round(((Number(item.purchaseRate) || 0) * 1.2) * 100) / 100,
           stock: Number(item.quantity) || 0,
           unit: item.unit || "Piece",
           gst: Number(item.gstRate) || 0,
@@ -217,32 +316,32 @@ export const createPurchase = async (req, res) => {
       }
     }
 
-    // 4. Supplier Balance Integration: Increase supplier payable balance by remaining unpaid amount
-    let supplierDoc = null;
-    if (supplierId) {
-      supplierDoc = await Supplier.findOne({ _id: supplierId, ownerId: req.user._id });
-    }
-    if (!supplierDoc) {
-      supplierDoc = await Supplier.findOne({ name: String(supplierName).trim(), ownerId: req.user._id });
-    }
-
-    if (supplierDoc) {
-      supplierDoc.balance = (Number(supplierDoc.balance) || 0) + finalRemaining;
-      await supplierDoc.save();
+    // 4. Supplier Balance Integration: Atomically increase supplier payable balance
+    if (finalRemaining > 0) {
+      if (supplierId && mongoose.isValidObjectId(supplierId)) {
+        await Supplier.findByIdAndUpdate(supplierId, {
+          $inc: { balance: finalRemaining },
+        });
+      } else if (supplierName) {
+        await Supplier.findOneAndUpdate(
+          { name: String(supplierName).trim(), ownerId },
+          { $inc: { balance: finalRemaining } }
+        );
+      }
     }
 
     try {
       await createNotification({
-        ownerId: req.user._id,
-        userId: req.user.actualUserId || req.user._id,
+        ownerId,
+        userId: actualUserId,
         title: `Purchase Recorded: #${newPurchase.supplierInvoiceNo || newPurchase.purchaseOrderNo || "Bill"}`,
-        message: `Purchase of ₹${numTotal.toLocaleString("en-IN")} from ${supplierName} recorded (${paymentStatus}).`,
+        message: `Purchase of ₹${computedGrandTotal.toLocaleString("en-IN")} from ${supplierName} recorded (${paymentStatus}).`,
         type: "info",
         category: "purchase",
         link: "purchase",
         metadata: {
           purchaseId: newPurchase._id,
-          totalAmount: numTotal,
+          totalAmount: computedGrandTotal,
           supplierName,
           paymentStatus,
         },
@@ -252,234 +351,174 @@ export const createPurchase = async (req, res) => {
     }
 
     return res.status(201).json({
-      message: "Purchase saved successfully",
+      message: "Purchase recorded successfully.",
       purchase: newPurchase,
     });
   } catch (error) {
     console.error("CREATE PURCHASE ERROR:", error.message);
-    return res.status(500).json({ message: error.message || "Failed to save purchase." });
+    return res.status(500).json({
+      message: error.message || "Failed to create purchase record.",
+    });
   }
 };
 
-// ================= RECORD PURCHASE PAYMENT =================
+/**
+ * Mark Purchase as Paid / Record Supplier Payment
+ */
 export const markPurchaseAsPaid = async (req, res) => {
   try {
-    const purchase = await Purchase.findOne({
-      _id: req.params.id,
-      ownerId: req.user._id,
-    });
-
+    const ownerId = req.user.ownerId || req.user._id;
+    const purchase = await Purchase.findOne({ _id: req.params.id, ownerId });
     if (!purchase) {
-      return res.status(404).json({
-        message: "Purchase record not found.",
-      });
-    }
-
-    const currentRemaining = Number(purchase.remainingAmount) || 0;
-
-    // If already fully paid and remaining is 0
-    if (purchase.paymentStatus === "Paid" && currentRemaining <= 0) {
-      return res.status(200).json({
-        message: "This purchase has already been fully paid.",
-        purchase,
-      });
+      return res.status(404).json({ message: "Purchase record not found." });
     }
 
     const {
-      amount,
-      paymentMethod = "Cash",
-      paymentDate = new Date(),
+      amountPaid,
+      paymentMethod = "Bank Transfer",
       referenceNo = "",
+      paymentDate,
       notes = "",
-    } = req.body || {};
+      receiptUrl,
+      receiptName,
+    } = req.body;
 
-    // If amount is provided, use it. Otherwise, default to full remaining amount.
-    const payAmount =
-      amount !== undefined && amount !== null && amount !== ""
-        ? Number(amount)
-        : currentRemaining;
-
-    if (!Number.isFinite(payAmount) || payAmount <= 0) {
-      return res.status(400).json({
-        message: "Please enter a valid payment amount greater than 0.",
-      });
+    const payAmount = Number(amountPaid) || purchase.remainingAmount || 0;
+    if (payAmount <= 0) {
+      return res.status(400).json({ message: "Payment amount must be greater than zero." });
     }
 
-    if (payAmount > currentRemaining + 0.01) {
-      return res.status(400).json({
-        message: `Payment amount (₹${payAmount}) cannot exceed the current remaining due (₹${currentRemaining}).`,
-      });
-    }
+    const previousRemaining = purchase.remainingAmount || 0;
+    const newPaidTotal = (purchase.amountPaid || 0) + payAmount;
+    const newRemaining = Math.max(0, (purchase.totalAmount || 0) - newPaidTotal);
+    const newStatus = newRemaining === 0 ? "Paid" : "Partially Paid";
 
-    const newAmountPaid = (Number(purchase.amountPaid) || 0) + payAmount;
-    const newRemaining = Math.max(
-      0,
-      (Number(purchase.totalAmount) || 0) - newAmountPaid
-    );
-    const newStatus = newRemaining <= 0.01 ? "Paid" : "Partially Paid";
-
-    purchase.amountPaid = newAmountPaid;
-    purchase.remainingAmount = newRemaining <= 0.01 ? 0 : newRemaining;
+    purchase.amountPaid = newPaidTotal;
+    purchase.remainingAmount = newRemaining;
     purchase.paymentStatus = newStatus;
     purchase.paymentMethod = paymentMethod;
 
-    if (notes || referenceNo) {
-      const paymentLog = `[Payment on ${new Date(paymentDate).toLocaleDateString("en-IN")}]: ₹${payAmount} via ${paymentMethod}${referenceNo ? ` (Ref: ${referenceNo})` : ""}${notes ? ` - ${notes}` : ""}`;
-      purchase.notes = purchase.notes
-        ? `${purchase.notes}\n${paymentLog}`
-        : paymentLog;
+    if (receiptUrl) {
+      purchase.receiptUrl = String(receiptUrl);
+      if (receiptName) purchase.receiptName = String(receiptName);
     }
+
+    if (!Array.isArray(purchase.paymentHistory)) {
+      purchase.paymentHistory = [];
+    }
+
+    purchase.paymentHistory.push({
+      amount: payAmount,
+      paymentMethod,
+      date: paymentDate ? new Date(paymentDate) : new Date(),
+      referenceNo: String(referenceNo || "").trim(),
+      notes: String(notes || "").trim(),
+    });
 
     await purchase.save();
 
-    // Find the supplier
-    let supplierDoc = null;
-    if (purchase.supplierId) {
-      supplierDoc = await Supplier.findOne({
-        _id: purchase.supplierId,
-        ownerId: req.user._id,
-      });
-    }
-
-    if (!supplierDoc && purchase.supplierName) {
-      supplierDoc = await Supplier.findOne({
-        name: String(purchase.supplierName).trim(),
-        ownerId: req.user._id,
-      });
-    }
-
-    // Reduce supplier payable balance by the exact payment amount
-    if (supplierDoc && payAmount > 0) {
-      supplierDoc.balance = Math.max(
-        0,
-        (Number(supplierDoc.balance) || 0) - payAmount
-      );
-      await supplierDoc.save();
-    }
-
-    // Create notification
-    try {
-      await createNotification({
-        ownerId: req.user._id,
-        userId: req.user.actualUserId || req.user._id,
-        title: `Payment Recorded: #${
-          purchase.supplierInvoiceNo ||
-          purchase.purchaseOrderNo ||
-          "Bill"
-        }`,
-        message: `Payment of ₹${payAmount.toLocaleString("en-IN")} to ${
-          purchase.supplierName
-        } recorded via ${paymentMethod} (${newStatus}).`,
-        type: "success",
-        category: "purchase",
-        link: "purchase",
-        metadata: {
-          purchaseId: purchase._id,
-          paidAmount: payAmount,
-          supplierName: purchase.supplierName,
-          paymentStatus: newStatus,
-        },
-      });
-    } catch (notifErr) {
-      console.error("Purchase payment notification error:", notifErr.message);
+    // Adjust supplier balance
+    if (previousRemaining > newRemaining) {
+      const balanceReduction = previousRemaining - newRemaining;
+      if (purchase.supplierId && mongoose.isValidObjectId(purchase.supplierId)) {
+        await Supplier.findByIdAndUpdate(purchase.supplierId, { $inc: { balance: -balanceReduction } });
+      } else if (purchase.supplierName) {
+        await Supplier.findOneAndUpdate(
+          { name: purchase.supplierName, ownerId },
+          { $inc: { balance: -balanceReduction } }
+        );
+      }
     }
 
     return res.status(200).json({
-      message: `Payment of ₹${payAmount.toLocaleString("en-IN")} recorded successfully (${newStatus}).`,
+      success: true,
+      message: `Payment of ₹${payAmount.toLocaleString("en-IN")} recorded. Status: ${newStatus}.`,
       purchase,
     });
-  } catch (error) {
-    console.error("MARK PURCHASE AS PAID ERROR:", error.message);
-    return res.status(500).json({
-      message: error.message || "Failed to record payment.",
-    });
+  } catch (err) {
+    return res.status(500).json({ message: err.message || "Failed to record payment." });
   }
 };
 
-// ================= DELETE / CANCEL PURCHASE =================
-export const deletePurchase = async (req, res) => {
+/**
+ * Upload / Attach Supplier Receipt or Invoice Image/PDF
+ */
+export const uploadPurchaseReceipt = async (req, res) => {
   try {
-    const purchase = await Purchase.findOne({
-      _id: req.params.id,
-      ownerId: req.user._id,
-    });
+    const ownerId = req.user.ownerId || req.user._id;
+    const { receiptUrl, receiptName = "Supplier Receipt" } = req.body;
+    if (!receiptUrl) {
+      return res.status(400).json({ message: "Receipt file content or URL is required." });
+    }
+
+    const purchase = await Purchase.findOneAndUpdate(
+      { _id: req.params.id, ownerId },
+      { $set: { receiptUrl: String(receiptUrl), receiptName: String(receiptName) } },
+      { returnDocument: "after" }
+    );
 
     if (!purchase) {
       return res.status(404).json({ message: "Purchase record not found." });
     }
 
-    const ownershipFilter = {
-      $or: [{ userId: req.user._id }, { ownerId: req.user._id }],
-    };
+    return res.status(200).json({
+      success: true,
+      message: "Receipt attached successfully.",
+      purchase,
+    });
+  } catch (err) {
+    return res.status(500).json({ message: err.message || "Failed to attach receipt." });
+  }
+};
 
-    // 1. Revert Inventory Stock
+/**
+ * Delete Purchase & Atomically Reverse Stock and Supplier Balance
+ */
+export const deletePurchase = async (req, res) => {
+  try {
+    const ownerId = req.user.ownerId || req.user._id;
+    const purchase = await Purchase.findOne({ _id: req.params.id, ownerId });
+    if (!purchase) {
+      return res.status(404).json({ message: "Purchase record not found." });
+    }
+
+    // Revert inventory stock atomically for each purchase item
     if (Array.isArray(purchase.items)) {
       for (const item of purchase.items) {
-        let product = null;
-        if (item.productId && mongoose.isValidObjectId(item.productId)) {
-          product = await Product.findOne({
-            _id: item.productId,
-            ...ownershipFilter,
-          });
-        }
-        if (!product && item.productName) {
-          const cleanName = String(item.productName).trim();
-          product = await Product.findOne({
-            name: new RegExp(`^${cleanName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i"),
-            ...ownershipFilter,
-          });
-        }
-        if (product) {
-          const qtyToDeduct = Number(item.quantity) || 0;
-          product.stock = Math.max(0, (Number(product.stock) || 0) - qtyToDeduct);
-          await product.save();
+        const qty = Number(item.quantity || item.qty) || 0;
+        if (qty > 0) {
+          if (item.product && mongoose.isValidObjectId(item.product)) {
+            await Product.findByIdAndUpdate(item.product, { $inc: { stock: -qty } });
+          } else if (item.productName) {
+            await Product.findOneAndUpdate(
+              { name: item.productName, ownerId },
+              { $inc: { stock: -qty } }
+            );
+          }
         }
       }
     }
 
-    // 2. Revert Supplier Payable Balance
-    if (Number(purchase.remainingAmount) > 0) {
-      let supplierDoc = null;
-      if (purchase.supplierId) {
-        supplierDoc = await Supplier.findOne({
-          _id: purchase.supplierId,
-          ownerId: req.user._id,
-        });
-      }
-      if (!supplierDoc && purchase.supplierName) {
-        supplierDoc = await Supplier.findOne({
-          name: String(purchase.supplierName).trim(),
-          ownerId: req.user._id,
-        });
-      }
-      if (supplierDoc) {
-        supplierDoc.balance = Math.max(
-          0,
-          (Number(supplierDoc.balance) || 0) - Number(purchase.remainingAmount)
+    // Revert supplier balance
+    const remainingDue = Number(purchase.remainingAmount) || 0;
+    if (remainingDue > 0) {
+      if (purchase.supplierId && mongoose.isValidObjectId(purchase.supplierId)) {
+        await Supplier.findByIdAndUpdate(purchase.supplierId, { $inc: { balance: -remainingDue } });
+      } else if (purchase.supplierName) {
+        await Supplier.findOneAndUpdate(
+          { name: purchase.supplierName, ownerId },
+          { $inc: { balance: -remainingDue } }
         );
-        await supplierDoc.save();
       }
     }
 
-    await Purchase.deleteOne({ _id: purchase._id, ownerId: req.user._id });
-
-    try {
-      await createNotification({
-        ownerId: req.user._id,
-        userId: req.user.actualUserId || req.user._id,
-        title: `Purchase Deleted: #${purchase.supplierInvoiceNo || purchase.purchaseOrderNo || "Bill"}`,
-        message: `Purchase from ${purchase.supplierName} was deleted. Inventory stock was adjusted.`,
-        type: "warning",
-        category: "purchase",
-        link: "purchase",
-      });
-    } catch (_) {}
+    await Purchase.deleteOne({ _id: purchase._id, ownerId });
 
     return res.status(200).json({
-      message: "Purchase record deleted and inventory stock reversed successfully.",
+      success: true,
+      message: "Purchase bill deleted and inventory stock reversed.",
     });
-  } catch (error) {
-    console.error("DELETE PURCHASE ERROR:", error.message);
-    return res.status(500).json({ message: error.message || "Failed to delete purchase." });
+  } catch (err) {
+    return res.status(500).json({ message: err.message || "Failed to delete purchase." });
   }
 };

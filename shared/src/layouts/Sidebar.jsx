@@ -11,8 +11,15 @@ export default function Sidebar({ page, onNav, role, collapsed, onToggle, user }
     normRole === "superadmin" ||
     normRole.includes("admin") ||
     normRole === "support" ||
-    normRole === "billing" ||
-    (!user?.ownerId && normRole !== "owner");
+    normRole === "billingadmin" ||
+    (!user?.ownerId &&
+      normRole !== "owner" &&
+      normRole !== "cashier" &&
+      normRole !== "manager" &&
+      normRole !== "accountant" &&
+      normRole !== "sales" &&
+      normRole !== "billing" &&
+      normRole !== "user");
 
   const displayName = getUserDisplayName(user);
   const displayEmail = user?.email || "admin@smartbill.io";

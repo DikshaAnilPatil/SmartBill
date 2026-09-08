@@ -61,7 +61,7 @@ export const addProduct = async (req, res) => {
       price: Number(price) || 0,
       wholesalePrice: Number(wholesalePrice) || 0,
       minPrice: Number(minPrice) || 0,
-      stock: 0, // Stock starts strictly at 0 and is updated when purchased from supplier
+      stock: Math.max(0, parseInt(stock, 10) || 0),
       minStock: Number(minStock) || 0,
       gst: Number(gst) || 0,
       unit: String(unit || "Piece").trim(),
@@ -332,24 +332,89 @@ export const bulkAddProducts = async (req, res) => {
   }
 };
 
-// Get Products for logged-in user and business
+// Get Products for logged-in user and business with pagination
 export const getProducts = async (req, res) => {
   try {
     const effectiveOwnerId = req.user.ownerId || req.user._id;
     const actualUserId = req.user.actualUserId || req.user._id;
 
-    const products = await Product.find({
+    const {
+      page,
+      limit,
+      search,
+      category,
+      status,
+      sortBy = "createdAt",
+      sortOrder = "desc",
+    } = req.query;
+
+    const query = {
       $or: [
         { ownerId: effectiveOwnerId },
         { userId: effectiveOwnerId },
         { userId: actualUserId },
         { ownerId: actualUserId },
       ],
-    }).sort({ createdAt: -1 });
+    };
 
+    if (status && status !== "All") {
+      query.status = status;
+    }
+
+    if (category && category !== "All") {
+      query.category = category;
+    }
+
+    if (search && String(search).trim()) {
+      const cleanSearch = String(search).trim();
+      const escaped = cleanSearch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      query.$and = [
+        {
+          $or: [
+            { name: new RegExp(escaped, "i") },
+            { sku: new RegExp(escaped, "i") },
+            { category: new RegExp(escaped, "i") },
+          ],
+        },
+      ];
+    }
+
+    const sortOption = {
+      [sortBy]: sortOrder === "asc" ? 1 : -1,
+    };
+
+    if (page !== undefined || limit !== undefined) {
+      const pageNum = Math.max(1, parseInt(page, 10) || 1);
+      const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
+      const skip = (pageNum - 1) * limitNum;
+
+      const [products, total] = await Promise.all([
+        Product.find(query).sort(sortOption).skip(skip).limit(limitNum).lean(),
+        Product.countDocuments(query),
+      ]);
+
+      return res.json({
+        success: true,
+        products,
+        pagination: {
+          total,
+          page: pageNum,
+          limit: limitNum,
+          totalPages: Math.ceil(total / limitNum),
+        },
+      });
+    }
+
+    const products = await Product.find(query).sort(sortOption).lean();
     res.json({
       success: true,
       products,
+      pagination: {
+        total: products.length,
+        page: 1,
+        limit: products.length,
+        totalPages: 1,
+      },
     });
   } catch (error) {
     console.error("GET PRODUCTS ERROR:", error);

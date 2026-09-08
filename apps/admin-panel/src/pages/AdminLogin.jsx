@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Lock, LogIn, Mail, AlertCircle, ShieldCheck, Check } from "lucide-react";
 import { loginUser } from "@shared/api/authAPI";
 import { setUserToStorage } from "@shared/utils/userUtils";
+import { getCrmUrl } from "@shared/utils/urlUtils";
 import { Input, Btn, Toast } from "@shared/components/common/ui";
 
 export default function AdminLogin({ onLogin }) {
@@ -30,16 +31,24 @@ export default function AdminLogin({ onLogin }) {
       }
 
       const loggedInUser = data.user;
-      if (loggedInUser?.role !== "superadmin") {
-        setError("Access denied. Only SuperAdmin accounts can log in to the Admin Portal.");
-        localStorage.removeItem("smartbill_token");
-        localStorage.removeItem("smartbill_user");
+      const isAdminRole = (r) => {
+        if (!r) return false;
+        const norm = String(r).toLowerCase().replace(/[-_\s]/g, "");
+        return norm.includes("admin") || norm === "superadmin" || norm === "support" || norm === "billing";
+      };
+
+      // If a business account (owner, manager, accountant, cashier) logs in here, seamlessly redirect them to CRM!
+      if (!isAdminRole(loggedInUser?.role)) {
+        setToast({ msg: "Business account detected. Redirecting to Business CRM...", type: "success" });
+        setTimeout(() => {
+          window.location.href = getCrmUrl(`/app?token=${encodeURIComponent(data.token)}&user=${encodeURIComponent(JSON.stringify(loggedInUser))}`);
+        }, 500);
         return;
       }
 
       localStorage.setItem("smartbill_token", data.token);
       setUserToStorage(loggedInUser);
-      setToast({ msg: "Login successful", type: "success" });
+      setToast({ msg: "Admin login successful", type: "success" });
       setTimeout(() => {
         onLogin(loggedInUser.role, loggedInUser);
       }, 500);
@@ -103,45 +112,48 @@ export default function AdminLogin({ onLogin }) {
       </div>
 
       {/* Right panel */}
-      <div className="flex-1 flex items-center justify-center p-8 bg-white">
-        <div className="w-full max-w-sm">
-          <h2 className="text-2xl font-bold text-slate-900 mb-1">
-            Admin Portal
-          </h2>
-          <p className="text-sm text-slate-500 mb-6">
-            Sign in to manage the platform
-          </p>
+      <div className="flex-1 flex items-center justify-center p-6 lg:p-12">
+        <div className="w-full max-w-md">
+          <div className="text-center mb-8">
+            <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Admin Portal</h1>
+            <p className="text-slate-500 text-sm mt-1">Sign in to manage the Smart Bill platform</p>
+          </div>
+
+          {error && (
+            <div className="mb-6 p-4 rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm flex items-start gap-3">
+              <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5 text-red-500" />
+              <div>
+                <p className="font-medium text-red-800">Authentication Error</p>
+                <p className="text-red-600 mt-0.5">{error}</p>
+              </div>
+            </div>
+          )}
 
           <form onSubmit={handleLogin} className="space-y-4">
-            {error && (
-              <div className="flex items-center gap-2 bg-red-50 border border-red-200 text-red-600 text-xs rounded-lg px-3 py-2">
-                <AlertCircle className="w-4 h-4 flex-shrink-0" />
-                {error}
-              </div>
-            )}
-
             <Input
-              label="Admin Email"
+              label="Admin Email Address"
+              type="email"
+              placeholder="admin@smartbill.com"
               value={email}
-              onChange={(v) => setEmail(v)}
+              onChange={(val) => setEmail(typeof val === "string" ? val : val?.target?.value ?? "")}
               icon={<Mail className="w-4 h-4" />}
-              placeholder="Enter admin email"
+              required
             />
-            
+
             <Input
               label="Password"
               type="password"
+              placeholder="••••••••"
               value={password}
-              onChange={(v) => setPassword(v)}
+              onChange={(val) => setPassword(typeof val === "string" ? val : val?.target?.value ?? "")}
               icon={<Lock className="w-4 h-4" />}
-              placeholder="Enter your password"
+              required
             />
 
             <Btn
+              type="submit"
               variant="primary"
-              size="lg"
-              onClick={handleLogin}
-              className="w-full justify-center mt-6 !bg-slate-900 hover:!bg-slate-800 focus:ring-slate-900/20"
+              className="w-full justify-center py-2.5 shadow-md shadow-blue-500/10 mt-2"
               disabled={loading}
               icon={
                 loading ? (
@@ -155,10 +167,18 @@ export default function AdminLogin({ onLogin }) {
             </Btn>
           </form>
           
-          <div className="mt-8 text-center">
+          <div className="mt-8 text-center space-y-3">
             <p className="text-xs text-slate-400 font-medium">
               Secure admin access. Authorized personnel only.
             </p>
+            <div className="pt-3 border-t border-slate-200 dark:border-slate-800">
+              <a
+                href={getCrmUrl("/login")}
+                className="text-xs text-blue-600 hover:text-blue-700 font-semibold hover:underline inline-flex items-center gap-1.5"
+              >
+                🏪 Business Owner / Staff? Open Business CRM Login ➔
+              </a>
+            </div>
           </div>
         </div>
       </div>

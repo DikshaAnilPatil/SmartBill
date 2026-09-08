@@ -330,8 +330,12 @@ export function Input({
         )}
         <input
           type={actualType}
-          value={value}
-          onChange={(e) => onChange?.(e.target.value)}
+          value={value ?? ""}
+          onChange={(e) => {
+            if (typeof onChange === "function") {
+              onChange(e.target.value);
+            }
+          }}
           placeholder={placeholder}
           className={`w-full border border-gray-300 rounded-md bg-white text-sm text-gray-900 placeholder:text-gray-400 outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-colors py-2 ${icon ? "pl-9" : "px-3"} ${isPassword ? "pr-10" : "pr-3"} ${error ? "border-red-500 focus:ring-red-500 focus:border-red-500" : ""} ${inputClassName}`}
         />

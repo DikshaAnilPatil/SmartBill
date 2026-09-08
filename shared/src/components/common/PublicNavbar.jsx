@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { BarChart2, X, Menu } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
+import { getCrmUrl } from "../../utils/urlUtils";
 import { Btn } from "./ui";
 
 export default function PublicNavbar({ onNav }) {
@@ -11,7 +12,7 @@ export default function PublicNavbar({ onNav }) {
     if (onNav) {
       onNav(path);
     } else {
-      window.location.href = `http://localhost:5174/${path}`;
+      window.location.href = getCrmUrl(`/${path}`);
     }
   };
 

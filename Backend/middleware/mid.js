@@ -21,8 +21,8 @@ export const protect = async (req, res, next) => {
         .json({ message: "Not authorized, no token provided." });
     }
 
-    let decoded;
     const secret = process.env.JWT_SECRET || "smartbill_secret_key_123";
+    let decoded;
     try {
       decoded = jwt.verify(token, secret);
     } catch (err) {
@@ -41,7 +41,7 @@ export const protect = async (req, res, next) => {
         .json({ message: "Not authorized, user not found." });
     }
 
-    // Superadmin bypasses all additional status checks for performance
+    // Superadmin bypasses maintenance & suspension checks
     if (user.role !== "superadmin") {
       const systemSettings = await SystemSettings.findOne({ key: "global_system_settings" }).lean();
       if (systemSettings?.maintenanceMode) {
@@ -76,12 +76,19 @@ export const protect = async (req, res, next) => {
 
     const effectiveOwnerId = user.ownerId ? user.ownerId : user._id;
 
-    req.user = user.toObject();
-    req.user.actualUserId = user._id;
-    req.user.ownerId = effectiveOwnerId;
-    req.user.effectiveOwnerId = effectiveOwnerId;
-    req.user._id = effectiveOwnerId;
-    req.user.id = effectiveOwnerId.toString();
+    req.user = {
+      actualUserId: user._id,
+      userId: user._id,
+      ownerId: effectiveOwnerId,
+      effectiveOwnerId: effectiveOwnerId,
+      _id: effectiveOwnerId,
+      id: effectiveOwnerId.toString(),
+      email: user.email,
+      role: user.role,
+      businessName: user.businessName || "",
+      businessType: user.businessType || "Retail",
+      permissions: user.permissions || {},
+    };
 
     next();
   } catch (error) {
@@ -100,7 +107,8 @@ export const requirePermission = (moduleKey) => {
       return res.status(401).json({ message: "Authentication required." });
     }
 
-    if (req.user.role === "superadmin") {
+    // SuperAdmin and Owner always have full permission
+    if (req.user.role === "superadmin" || req.user.role === "owner") {
       return next();
     }
 
@@ -108,7 +116,7 @@ export const requirePermission = (moduleKey) => {
     const modPerm = perms[moduleKey];
 
     let hasAccess = true;
-    if (modPerm === false) {
+    if (modPerm === false || modPerm === undefined) {
       hasAccess = false;
     } else if (modPerm && typeof modPerm === "object") {
       if (modPerm.view === false && modPerm.manage === false) {
@@ -122,6 +130,27 @@ export const requirePermission = (moduleKey) => {
       });
     }
 
+    next();
+  };
+};
+
+/**
+ * Role-based authorization middleware
+ */
+export const requireRole = (allowedRoles = []) => {
+  const roles = Array.isArray(allowedRoles) ? allowedRoles : [allowedRoles];
+  return (req, res, next) => {
+    if (!req.user) {
+      return res.status(401).json({ message: "Authentication required." });
+    }
+    const userRole = String(req.user.role || "").toLowerCase().trim();
+    const hasRole = roles.map((r) => String(r).toLowerCase().trim()).includes(userRole);
+
+    if (!hasRole) {
+      return res.status(403).json({
+        message: `Forbidden: Requires one of the following roles: ${roles.join(", ")}`,
+      });
+    }
     next();
   };
 };

@@ -1,5 +1,5 @@
 import express from "express";
-import { authMiddleware } from "../middleware/auth.js";
+import { protect, requirePermission } from "../middleware/mid.js";
 import {
   getEmployees,
   createEmployee,
@@ -10,8 +10,9 @@ import { checkResourceLimit } from "../middleware/checkPlanLimits.js";
 
 const router = express.Router();
 
-// Apply auth middleware to all employee routes
-router.use(authMiddleware);
+// Apply auth and staff management permission check
+router.use(protect);
+router.use(requirePermission("users"));
 
 router.get("/", getEmployees);
 router.post("/", checkResourceLimit("users"), createEmployee);

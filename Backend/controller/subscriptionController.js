@@ -1,11 +1,11 @@
-             import crypto from "crypto";
+import crypto from "crypto";
 import { razorpayInstance } from "../config/razorpay.js";
 import { PLAN_LIMITS } from "../config/plans.js";
 import { getOrUpdateSubscriptionState, getPlanConfig } from "../middleware/checkPlanLimits.js";
 import User from "../models/User.js";
 import Order from "../models/Order.js";
 import Customer from "../models/Customer.js";
-import Product from "../models/productModel.js";
+import Product from "../models/Product.js";
 import { createNotification, notifySuperAdmins } from "../services/notificationService.js";
 import { sendSubscriptionReminderEmail } from "../utils/emailService.js";
 
@@ -170,19 +170,31 @@ export const verifySubscriptionPayment = async (req, res) => {
       isDowngrade,
     } = req.body;
 
-    const keySecret = process.env.RAZORPAY_KEY_SECRET;
-    let isValid = false;
-
-    if (razorpay_signature && keySecret) {
-      const body = razorpay_order_id + "|" + razorpay_payment_id;
-      const expectedSignature = crypto
-        .createHmac("sha256", keySecret)
-        .update(body.toString())
-        .digest("hex");
-      isValid = expectedSignature === razorpay_signature;
-    } else {
-      isValid = Boolean(razorpay_order_id && razorpay_payment_id);
+    // Strict validation: All 3 payment verification fields are mandatory
+    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+      return res.status(400).json({
+        message: "Payment verification failed: razorpay_order_id, razorpay_payment_id, and razorpay_signature are all mandatory.",
+      });
     }
+
+    const keySecret = process.env.RAZORPAY_KEY_SECRET;
+    if (!keySecret) {
+      console.error("Payment verification failed: RAZORPAY_KEY_SECRET is not configured.");
+      return res.status(500).json({ message: "Payment verification service is misconfigured on the server." });
+    }
+
+    const body = `${razorpay_order_id}|${razorpay_payment_id}`;
+    const expectedSignature = crypto
+      .createHmac("sha256", keySecret)
+      .update(body)
+      .digest("hex");
+
+    const expectedBuffer = Buffer.from(expectedSignature, "utf8");
+    const receivedBuffer = Buffer.from(razorpay_signature, "utf8");
+
+    const isValid =
+      expectedBuffer.length === receivedBuffer.length &&
+      crypto.timingSafeEqual(expectedBuffer, receivedBuffer);
 
     if (!isValid) {
       return res.status(400).json({ message: "Invalid payment signature verification failed." });
@@ -195,13 +207,26 @@ export const verifySubscriptionPayment = async (req, res) => {
       return res.status(400).json({ message: "Invalid plan selected" });
     }
 
-    // Find target user
-    let user = req.user ? await User.findById(req.user._id) : null;
+    // Find target user (tenant owner)
+    const targetUserId = req.user ? (req.user.ownerId || req.user._id) : null;
+    let user = targetUserId ? await User.findById(targetUserId) : null;
     if (!user && email) {
-      user = await User.findOne({ email: email.toLowerCase() });
+      user = await User.findOne({ email: String(email).toLowerCase().trim() });
     }
 
     if (user) {
+      // Replay check: ensure payment hasn't already been processed
+      const isDuplicatePayment =
+        user.subscription?.razorpayPaymentId === razorpay_payment_id ||
+        user.subscription?.paymentHistory?.some((p) => p.razorpayPaymentId === razorpay_payment_id);
+
+      if (isDuplicatePayment) {
+        return res.status(409).json({
+          message: "Payment has already been verified and applied.",
+          subscription: user.subscription,
+        });
+      }
+
       const currentPlanKey = user.subscription?.plan || "starter";
       const now = new Date();
       const newPeriodEnd = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
@@ -247,7 +272,7 @@ export const verifySubscriptionPayment = async (req, res) => {
         }
 
         user.subscription = {
-          ...user.subscription.toObject?.() || user.subscription,
+          ...(user.subscription.toObject?.() || user.subscription),
           plan: planKey,
           status: "active",
           currentPeriodStart: now,
@@ -345,7 +370,7 @@ export const verifySubscriptionPayment = async (req, res) => {
       } catch (notifErr) {
         console.error("Guest subscription notification error:", notifErr.message);
       }
-4
+
       res.json({
         success: true,
         message: `Payment successful for ${planName || planKey} plan.`,

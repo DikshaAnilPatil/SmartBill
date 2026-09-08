@@ -8,14 +8,8 @@ import { sendSystemEmail } from "../utils/emailService.js";
 
 const isInternalAdmin = (user) => {
   if (!user) return false;
-  const roleStr = String(user?.role || "").toLowerCase().replace(/[-_\s]/g, "");
-  return (
-    roleStr === "superadmin" ||
-    roleStr.includes("admin") ||
-    roleStr === "support" ||
-    roleStr === "billing" ||
-    (!user?.ownerId && roleStr !== "owner")
-  );
+  const roleStr = String(user?.role || "").toLowerCase().trim();
+  return ["superadmin", "admin", "support", "billing", "super_admin"].includes(roleStr);
 };
 
 /**

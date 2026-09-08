@@ -8,7 +8,9 @@ export const authMiddleware = async (req, res, next) => {
 
     const token = authHeader.startsWith("Bearer ")
       ? authHeader.slice(7)
-      : authHeader;
+      : req.query?.token
+      ? String(req.query.token).trim()
+      : null;
 
     // No token
     if (!token) {
@@ -17,7 +19,6 @@ export const authMiddleware = async (req, res, next) => {
       });
     }
 
-    // JWT_SECRET must be present in .env (or fallback)
     const secret = process.env.JWT_SECRET || "smartbill_secret_key_123";
 
     // Verify token
@@ -25,7 +26,11 @@ export const authMiddleware = async (req, res, next) => {
     try {
       decoded = jwt.verify(token, secret);
     } catch (err) {
-      decoded = jwt.verify(token, "smartbill_secret_key_123`");
+      try {
+        decoded = jwt.verify(token, "smartbill_secret_key_123`");
+      } catch (err2) {
+        throw err;
+      }
     }
 
     const dbUser = await User.findById(decoded.id).select("-password");
@@ -70,22 +75,25 @@ export const authMiddleware = async (req, res, next) => {
 
     // Store logged-in user's information in req.user
     req.user = {
-      id: effectiveOwnerId.toString(),
       actualUserId: dbUser._id,
       userId: dbUser._id,
       ownerId: effectiveOwnerId,
+      effectiveOwnerId: effectiveOwnerId,
       _id: effectiveOwnerId,
+      id: effectiveOwnerId.toString(),
+      email: dbUser.email,
       role: dbUser.role,
+      businessName: dbUser.businessName || "",
       businessType: dbUser.businessType || "Retail",
       permissions: dbUser.permissions || {},
     };
 
     next();
   } catch (error) {
-    console.error("AUTH MIDDLEWARE ERROR:", error.message);
-
     return res.status(401).json({
       message: "Invalid or expired authentication token.",
     });
   }
 };
+
+export default authMiddleware;

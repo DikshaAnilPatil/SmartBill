@@ -23,6 +23,7 @@ import {
 } from "@shared/components/common/ui";
 import { registerUser, loginUser, sendOtp, verifyOtp, verifyLoginOtp, forgotPassword, verifyResetOtp, resetPassword } from "@shared/api/authAPI";
 import { setUserToStorage } from "@shared/utils/userUtils";
+import { getAdminUrl } from "@shared/utils/urlUtils";
 
 const PHONE_PREFIX = "+91 ";
 
@@ -203,10 +204,17 @@ export default function AuthScreen({ view, onNav, onLogin, fixedRole }) {
 
       const loggedInUser = data.user;
 
-      if (loggedInUser?.role === "superadmin" && fixedRole !== "superadmin") {
-        setFormError("Admin credentials cannot be used to log in to the Business Portal. Please use the Admin Portal.");
-        localStorage.removeItem("smartbill_token");
-        localStorage.removeItem("smartbill_user");
+      const isAdmin = (r) => {
+        if (!r) return false;
+        const norm = String(r).toLowerCase().replace(/[-_\s]/g, "");
+        return norm.includes("admin") || norm === "superadmin" || norm === "support" || norm === "billing";
+      };
+
+      if (isAdmin(loggedInUser?.role) && fixedRole !== "superadmin") {
+        showToast("Admin account detected. Redirecting to Admin Panel...", "success");
+        setTimeout(() => {
+          window.location.href = getAdminUrl(`/app?token=${encodeURIComponent(data.token)}&user=${encodeURIComponent(JSON.stringify(loggedInUser))}`);
+        }, 500);
         return;
       }
 

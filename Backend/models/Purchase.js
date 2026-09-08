@@ -58,6 +58,7 @@ const purchaseSchema = new mongoose.Schema(
     supplierId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Supplier",
+      index: true,
     },
     supplierName: {
       type: String,
@@ -87,20 +88,24 @@ const purchaseSchema = new mongoose.Schema(
       type: Number,
       required: true,
       default: 0,
+      min: 0,
     },
     gstTotal: {
       type: Number,
       required: true,
       default: 0,
+      min: 0,
     },
     discountTotal: {
       type: Number,
       default: 0,
+      min: 0,
     },
     totalAmount: {
       type: Number,
       required: true,
       default: 0,
+      min: 0,
     },
     paymentStatus: {
       type: String,
@@ -125,10 +130,32 @@ const purchaseSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
+    receiptUrl: {
+      type: String,
+      default: "",
+    },
+    receiptName: {
+      type: String,
+      default: "",
+    },
+    paymentHistory: [
+      {
+        amount: { type: Number, required: true },
+        paymentMethod: { type: String, default: "Cash" },
+        date: { type: Date, default: Date.now },
+        referenceNo: { type: String, default: "" },
+        notes: { type: String, default: "" },
+      },
+    ],
   },
   {
     timestamps: true,
   }
 );
+
+purchaseSchema.index({ ownerId: 1, createdAt: -1 });
+purchaseSchema.index({ ownerId: 1, purchaseDate: -1 });
+purchaseSchema.index({ ownerId: 1, supplierId: 1 });
+purchaseSchema.index({ ownerId: 1, paymentStatus: 1 });
 
 export default mongoose.models.Purchase || mongoose.model("Purchase", purchaseSchema);

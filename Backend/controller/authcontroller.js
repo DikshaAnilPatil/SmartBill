@@ -407,7 +407,8 @@ export const login = async (req, res) => {
 
 export const getProfile = async (req, res) => {
   try {
-    const user = await User.findById(req.user.id).select("-password");
+    const userId = req.user.actualUserId || req.user.userId || req.user._id;
+    const user = await User.findById(userId).select("-password");
 
     if (!user) {
       return res.status(404).json({
@@ -444,7 +445,7 @@ export const updateProfile = async (req, res) => {
   let userId = null;
 
   try {
-    userId = req.user._id || req.user.id;
+    userId = req.user.actualUserId || req.user.userId || req.user._id;
 
     const currentUserDoc = await User.findById(userId);
     if (!currentUserDoc) {
@@ -452,6 +453,8 @@ export const updateProfile = async (req, res) => {
         message: "User profile not found.",
       });
     }
+
+    const isEmployee = Boolean(currentUserDoc.ownerId);
 
     const {
       firstName,
@@ -465,7 +468,6 @@ export const updateProfile = async (req, res) => {
     // Use provided values or keep existing ones from database
     const resolvedFirstName = firstName !== undefined ? String(firstName).trim() : currentUserDoc.firstName;
     const resolvedLastName = lastName !== undefined ? String(lastName).trim() : (currentUserDoc.lastName || "");
-    const resolvedBusinessName = businessName !== undefined ? String(businessName).trim() : currentUserDoc.businessName;
     const resolvedEmail = email !== undefined ? String(email).trim().toLowerCase() : currentUserDoc.email;
 
     if (!resolvedFirstName) {
@@ -475,11 +477,16 @@ export const updateProfile = async (req, res) => {
       });
     }
 
-    if (!resolvedBusinessName) {
-      return res.status(400).json({
-        message: "Business name is required.",
-        field: "businessName",
-      });
+    // Only owners can set/require business name
+    let resolvedBusinessName = currentUserDoc.businessName;
+    if (!isEmployee) {
+      resolvedBusinessName = businessName !== undefined ? String(businessName).trim() : currentUserDoc.businessName;
+      if (!resolvedBusinessName) {
+        return res.status(400).json({
+          message: "Business name is required.",
+          field: "businessName",
+        });
+      }
     }
 
     if (!resolvedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(resolvedEmail)) {
@@ -494,12 +501,11 @@ export const updateProfile = async (req, res) => {
       normalizedPhone = currentUserDoc.phone || "";
     }
 
-    const normalizedBusinessType = String(businessType ?? currentUserDoc.businessType ?? "Retail").trim() || "Retail";
+    const normalizedBusinessType = isEmployee
+      ? currentUserDoc.businessType
+      : (String(businessType ?? currentUserDoc.businessType ?? "Retail").trim() || "Retail");
 
-    // ----------------------------------------------
     // Check whether email belongs to another user (only if email changed)
-    // ----------------------------------------------
-
     if (resolvedEmail && resolvedEmail !== currentUserDoc.email) {
       const existingEmail = await User.findOne({
         email: resolvedEmail,
@@ -514,69 +520,71 @@ export const updateProfile = async (req, res) => {
       }
     }
 
-    // ----------------------------------------------
-    // Prepare update fields
-    // ----------------------------------------------
-
     updateFields = {
       firstName: resolvedFirstName,
       lastName: resolvedLastName,
-      businessName: resolvedBusinessName,
-      businessType: normalizedBusinessType,
       email: resolvedEmail,
       phone: normalizedPhone,
     };
 
-    const extraFields = [
-      "tagline",
-      "address",
-      "city",
-      "state",
-      "pincode",
-      "country",
-      "gstin",
-      "panNumber",
-      "msmeNumber",
-      "bankName",
-      "accountNumber",
-      "ifscCode",
-      "branchName",
-      "upiId",
-      "invoiceTerms",
-      "invoiceFooter",
-      "logoUrl",
-      "signatureUrl",
-      "twoFactorEnabled",
-    ];
+    if (!isEmployee) {
+      updateFields.businessName = resolvedBusinessName;
+      updateFields.businessType = normalizedBusinessType;
 
-    extraFields.forEach((field) => {
-      if (req.body[field] !== undefined) {
-        updateFields[field] = req.body[field];
-      }
-    });
+      const extraFields = [
+        "tagline",
+        "address",
+        "city",
+        "state",
+        "pincode",
+        "country",
+        "gstin",
+        "panNumber",
+        "msmeNumber",
+        "bankName",
+        "accountNumber",
+        "ifscCode",
+        "branchName",
+        "upiId",
+        "invoiceTerms",
+        "invoiceFooter",
+        "logoUrl",
+        "signatureUrl",
+      ];
 
-    // Sync to BusinessSettings collection
-    try {
-      await BusinessSettings.findOneAndUpdate(
-        { userId },
-        {
-          $set: {
-            businessName: updateFields.businessName,
-            ownerName: `${updateFields.firstName} ${updateFields.lastName}`.trim(),
-            phone: updateFields.phone,
-            email: updateFields.email,
-            businessType: updateFields.businessType,
-            address: updateFields.address || "",
-            city: updateFields.city || "",
-            state: updateFields.state || "",
-            pincode: updateFields.pincode || "",
-            country: updateFields.country || "India",
+      extraFields.forEach((field) => {
+        if (req.body[field] !== undefined) {
+          updateFields[field] = req.body[field];
+        }
+      });
+
+      // Sync to BusinessSettings collection only for business owners
+      try {
+        await BusinessSettings.findOneAndUpdate(
+          { userId },
+          {
+            $set: {
+              businessName: updateFields.businessName,
+              ownerName: `${updateFields.firstName} ${updateFields.lastName}`.trim(),
+              phone: updateFields.phone,
+              email: updateFields.email,
+              businessType: updateFields.businessType,
+              address: updateFields.address || "",
+              city: updateFields.city || "",
+              state: updateFields.state || "",
+              pincode: updateFields.pincode || "",
+              country: updateFields.country || "India",
+            },
           },
-        },
-        { upsert: true, new: true }
-      );
-    } catch (bsErr) {
-      console.warn("Sync to BusinessSettings warning:", bsErr.message);
+          { upsert: true, new: true }
+        );
+      } catch (bsErr) {
+        console.warn("Sync to BusinessSettings warning:", bsErr.message);
+      }
+    }
+
+    if (req.body.twoFactorEnabled !== undefined) {
+      updateFields.twoFactorEnabled = Boolean(req.body.twoFactorEnabled);
     }
 
     const updatedUser = await User.findByIdAndUpdate(
@@ -594,9 +602,12 @@ export const updateProfile = async (req, res) => {
       });
     }
 
-    // Return a new token because profile information
-    // such as businessType may have changed.
-    const authPayload = buildAuthPayload(updatedUser);
+    let ownerUser = null;
+    if (updatedUser.ownerId) {
+      ownerUser = await User.findById(updatedUser.ownerId);
+    }
+
+    const authPayload = buildAuthPayload(updatedUser, ownerUser);
 
     return res.status(200).json({
       message: "Profile updated successfully.",
@@ -701,8 +712,8 @@ export const sendOtp = async (req, res) => {
       expiresAt,
     });
 
-    // Development only
-    console.log(`[OTP] For ${normalizedPhone}: ${otp}`);
+    // Safe audit logging (never log raw OTP codes)
+    console.log(`[OTP] Verification code generated for phone ending in: ...${normalizedPhone.slice(-4)}`);
 
     return res.status(200).json({
       message: "OTP sent successfully.",
@@ -851,7 +862,8 @@ export const forgotPassword = async (req, res) => {
       expiresAt,
     });
 
-    console.log(`[PASSWORD RESET OTP] Generated OTP ${otp} for ${user.email} (${user.phone})`);
+    // Safe audit logging (never log raw OTP codes)
+    console.log(`[PASSWORD RESET OTP] Password reset requested for user: ${user.email || user.phone}`);
 
     // Dispatch Password Reset Email if user has an email
     if (user.email) {
@@ -1106,7 +1118,7 @@ export const resetPassword = async (req, res) => {
 
 export const changePassword = async (req, res) => {
   try {
-    const userId = req.user._id || req.user.id;
+    const userId = req.user.actualUserId || req.user.userId || req.user._id;
     const { currentPassword, newPassword } = req.body;
 
     if (!currentPassword || !newPassword) {

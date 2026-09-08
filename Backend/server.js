@@ -3,7 +3,7 @@ import cors from "cors";
 import "dotenv/config";
 import dns from "node:dns";
 import connectDB from "./config/db.js";
-import authRoutes from "./routes/Auth Routes.js";
+import authRoutes from "./routes/authRoutes.js";
 import customerRoutes from "./routes/customerRoutes.js";
 import orderRoutes from "./routes/orderRoutes.js";
 import expenseRoutes from "./routes/expenseRoutes.js";
@@ -33,6 +33,7 @@ import {
   apiLimiter,
   configuredCors,
 } from "./middleware/security.js";
+import { errorHandler } from "./middleware/errorHandler.js";
 
 const app = express();
 const port = process.env.PORT || 5000;
@@ -108,13 +109,7 @@ app.use((req, res) => {
 });
 
 // Global error handler
-app.use((err, req, res, next) => {
-  console.error("SERVER ERROR:", err.message);
-
-  res.status(err.status || 500).json({
-    message: err.message || "Internal server error",
-  });
-});
+app.use(errorHandler);
 
 app.listen(port, () => {
   console.log(`Server started on port ${port} (http://localhost:${port} and http://127.0.0.1:${port})`);

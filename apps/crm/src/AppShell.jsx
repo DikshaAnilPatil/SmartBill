@@ -145,10 +145,6 @@ export default function AppShell({ role, user, onLogout, page, onNav }) {
 
 
     switch (page) {
-      case "super-dashboard":
-        return <SuperAdminDashboard />;
-      case "businesses":
-        return <BusinessesNew />;
       case "dashboard":
         return <BusinessDashboard onNav={onNav} />;
       case "customers":
@@ -157,8 +153,6 @@ export default function AppShell({ role, user, onLogout, page, onNav }) {
         return <SuppliersScreen />;
       case "products":
         return <ProductsScreen onNav={onNav} />;
-      case "revenue":
-        return <Revenue />;
       case "pos":
       case "sales":
       case "billing":
@@ -175,11 +169,7 @@ export default function AppShell({ role, user, onLogout, page, onNav }) {
       case "users":
         return <UsersScreen user={user} />;
       case "settings":
-        return role === "superadmin" ? (
-          <SuperAdminSettingsScreen />
-        ) : (
-          <SettingsScreen user={user} />
-        );
+        return <SettingsScreen user={user} />;
       case "notifications":
         return <NotificationsScreen onNav={onNav} user={user} role={role} />;
       case "profile":

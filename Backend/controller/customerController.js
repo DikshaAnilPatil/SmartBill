@@ -2,22 +2,80 @@ import Customer from "../models/Customer.js";
 import Order from "../models/Order.js";
 import { createNotification } from "../services/notificationService.js";
 
-// ================= LIST CUSTOMERS =================
+// ================= LIST CUSTOMERS WITH PAGINATION =================
 export const getCustomers = async (req, res) => {
   try {
-    const customers = await Customer.find({
-      ownerId: req.user._id,
-    })
-      .sort({ createdAt: -1 })
-      .lean();
+    const ownerId = req.user.ownerId || req.user._id;
+    const {
+      page,
+      limit,
+      search,
+      category,
+      status,
+      sortBy = "createdAt",
+      sortOrder = "desc",
+    } = req.query;
 
+    const query = { ownerId };
+
+    if (status && status !== "All") {
+      query.status = status;
+    }
+
+    if (category && category !== "All") {
+      query.category = category;
+    }
+
+    if (search && String(search).trim()) {
+      const cleanSearch = String(search).trim();
+      const escaped = cleanSearch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      query.$or = [
+        { name: new RegExp(escaped, "i") },
+        { phone: new RegExp(escaped, "i") },
+        { email: new RegExp(escaped, "i") },
+        { city: new RegExp(escaped, "i") },
+      ];
+    }
+
+    const sortOption = {
+      [sortBy]: sortOrder === "asc" ? 1 : -1,
+    };
+
+    if (page !== undefined || limit !== undefined) {
+      const pageNum = Math.max(1, parseInt(page, 10) || 1);
+      const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
+      const skip = (pageNum - 1) * limitNum;
+
+      const [customers, total] = await Promise.all([
+        Customer.find(query).sort(sortOption).skip(skip).limit(limitNum).lean(),
+        Customer.countDocuments(query),
+      ]);
+
+      return res.status(200).json({
+        message: "OK",
+        customers,
+        pagination: {
+          total,
+          page: pageNum,
+          limit: limitNum,
+          totalPages: Math.ceil(total / limitNum),
+        },
+      });
+    }
+
+    const customers = await Customer.find(query).sort(sortOption).lean();
     return res.status(200).json({
       message: "OK",
       customers,
+      pagination: {
+        total: customers.length,
+        page: 1,
+        limit: customers.length,
+        totalPages: 1,
+      },
     });
   } catch (error) {
     console.error("GET CUSTOMERS ERROR:", error.message);
-
     return res.status(500).json({
       message: "Failed to fetch customers.",
     });
@@ -27,9 +85,10 @@ export const getCustomers = async (req, res) => {
 // ================= GET SINGLE CUSTOMER =================
 export const getCustomer = async (req, res) => {
   try {
+    const ownerId = req.user.ownerId || req.user._id;
     const customer = await Customer.findOne({
       _id: req.params.id,
-      ownerId: req.user._id,
+      ownerId,
     }).lean();
 
     if (!customer) {
@@ -44,7 +103,6 @@ export const getCustomer = async (req, res) => {
     });
   } catch (error) {
     console.error("GET CUSTOMER ERROR:", error.message);
-
     return res.status(500).json({
       message: "Failed to fetch customer.",
     });
@@ -54,9 +112,10 @@ export const getCustomer = async (req, res) => {
 // ================= GET CUSTOMER DETAILS (WITH INVOICES & METRICS) =================
 export const getCustomerDetails = async (req, res) => {
   try {
+    const ownerId = req.user.ownerId || req.user._id;
     const customer = await Customer.findOne({
       _id: req.params.id,
-      ownerId: req.user._id,
+      ownerId,
     }).lean();
 
     if (!customer) {
@@ -67,7 +126,7 @@ export const getCustomerDetails = async (req, res) => {
 
     // Find all orders associated with this customer
     const orders = await Order.find({
-      ownerId: req.user._id,
+      ownerId,
       $or: [
         { customerId: customer._id },
         { customerName: customer.name },
@@ -111,6 +170,9 @@ export const getCustomerDetails = async (req, res) => {
 // ================= CREATE CUSTOMER =================
 export const createCustomer = async (req, res) => {
   try {
+    const ownerId = req.user.ownerId || req.user._id;
+    const actualUserId = req.user.actualUserId || req.user._id;
+
     const {
       name,
       contact,
@@ -131,32 +193,38 @@ export const createCustomer = async (req, res) => {
       });
     }
 
-    const opening = Number(openingBalance) || 0;
+    const cleanPhone = phone ? String(phone).trim() : "";
+    const cleanEmail = email ? String(email).trim().toLowerCase() : "";
 
-    const existing = await Customer.findOne({
-      ownerId: req.user._id,
-      name: String(name).trim(),
-    });
-
-    if (existing) {
-      return res.status(409).json({
-        message: "A customer with this name already exists.",
-        field: "name",
+    // If phone is provided, check for uniqueness within tenant scope
+    if (cleanPhone && cleanPhone.length >= 7) {
+      const existingPhone = await Customer.findOne({
+        ownerId,
+        phone: cleanPhone,
       });
+      if (existingPhone) {
+        return res.status(409).json({
+          message: "A customer with this phone number already exists.",
+          field: "phone",
+        });
+      }
     }
 
+    const opening = Number(openingBalance) || 0;
+
     const customer = await Customer.create({
-      ownerId: req.user._id,
+      ownerId,
+      userId: actualUserId,
       name: String(name).trim(),
       contact: contact || "",
-      phone: phone || "",
-      email: email || "",
-      city: city || "",
-      address: address || "",
-      gst: gst || "",
+      phone: cleanPhone,
+      email: cleanEmail,
+      city: city ? String(city).trim() : "",
+      address: address ? String(address).trim() : "",
+      gst: gst ? String(gst).trim() : "",
       category: category || "Retailer",
       creditLimit: Number(creditLimit) || 0,
-      shippingAddress: shippingAddress || "",
+      shippingAddress: shippingAddress ? String(shippingAddress).trim() : "",
       openingBalance: opening,
       totalOrderValue: 0,
       totalPaid: 0,
@@ -167,8 +235,8 @@ export const createCustomer = async (req, res) => {
 
     try {
       await createNotification({
-        ownerId: req.user._id,
-        userId: req.user.actualUserId || req.user._id,
+        ownerId,
+        userId: actualUserId,
         title: "Customer Added",
         message: `${customer.name} was registered in your customer directory.`,
         type: "info",
@@ -186,9 +254,8 @@ export const createCustomer = async (req, res) => {
     });
   } catch (error) {
     console.error("CREATE CUSTOMER ERROR:", error.message);
-
     return res.status(500).json({
-      message: "Failed to create customer.",
+      message: error.message || "Failed to create customer.",
     });
   }
 };
@@ -196,6 +263,7 @@ export const createCustomer = async (req, res) => {
 // ================= UPDATE CUSTOMER =================
 export const updateCustomer = async (req, res) => {
   try {
+    const ownerId = req.user.ownerId || req.user._id;
     const {
       name,
       contact,
@@ -212,7 +280,7 @@ export const updateCustomer = async (req, res) => {
 
     const customer = await Customer.findOne({
       _id: req.params.id,
-      ownerId: req.user._id,
+      ownerId,
     });
 
     if (!customer) {
@@ -225,41 +293,33 @@ export const updateCustomer = async (req, res) => {
       customer.name = String(name).trim() || customer.name;
     }
 
-    if (contact !== undefined) {
-      customer.contact = contact;
-    }
+    if (contact !== undefined) customer.contact = contact;
 
     if (phone !== undefined) {
-      customer.phone = phone;
+      const cleanPhone = String(phone).trim();
+      if (cleanPhone && cleanPhone !== customer.phone && cleanPhone.length >= 7) {
+        const existingPhone = await Customer.findOne({
+          ownerId,
+          phone: cleanPhone,
+          _id: { $ne: customer._id },
+        });
+        if (existingPhone) {
+          return res.status(409).json({
+            message: "Another customer with this phone number already exists.",
+            field: "phone",
+          });
+        }
+      }
+      customer.phone = cleanPhone;
     }
 
-    if (email !== undefined) {
-      customer.email = email;
-    }
-
-    if (city !== undefined) {
-      customer.city = city;
-    }
-
-    if (address !== undefined) {
-      customer.address = address;
-    }
-
-    if (gst !== undefined) {
-      customer.gst = gst;
-    }
-
-    if (category !== undefined) {
-      customer.category = category;
-    }
-
-    if (creditLimit !== undefined) {
-      customer.creditLimit = Number(creditLimit) || 0;
-    }
-
-    if (shippingAddress !== undefined) {
-      customer.shippingAddress = shippingAddress;
-    }
+    if (email !== undefined) customer.email = String(email).trim().toLowerCase();
+    if (city !== undefined) customer.city = String(city).trim();
+    if (address !== undefined) customer.address = String(address).trim();
+    if (gst !== undefined) customer.gst = String(gst).trim();
+    if (category !== undefined) customer.category = category;
+    if (creditLimit !== undefined) customer.creditLimit = Number(creditLimit) || 0;
+    if (shippingAddress !== undefined) customer.shippingAddress = String(shippingAddress).trim();
 
     if (status !== undefined) {
       customer.status = ["Active", "Inactive"].includes(status)
@@ -275,9 +335,8 @@ export const updateCustomer = async (req, res) => {
     });
   } catch (error) {
     console.error("UPDATE CUSTOMER ERROR:", error.message);
-
     return res.status(500).json({
-      message: "Failed to update customer.",
+      message: error.message || "Failed to update customer.",
     });
   }
 };
@@ -285,9 +344,10 @@ export const updateCustomer = async (req, res) => {
 // ================= DELETE CUSTOMER =================
 export const deleteCustomer = async (req, res) => {
   try {
+    const ownerId = req.user.ownerId || req.user._id;
     const result = await Customer.findOneAndDelete({
       _id: req.params.id,
-      ownerId: req.user._id,
+      ownerId,
     });
 
     if (!result) {
@@ -301,9 +361,8 @@ export const deleteCustomer = async (req, res) => {
     });
   } catch (error) {
     console.error("DELETE CUSTOMER ERROR:", error.message);
-
     return res.status(500).json({
-      message: "Failed to delete customer.",
+      message: error.message || "Failed to delete customer.",
     });
   }
 };

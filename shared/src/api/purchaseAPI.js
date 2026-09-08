@@ -45,5 +45,14 @@ export const deletePurchaseAPI = (id) =>
 
 export const deletePurchase = deletePurchaseAPI;
 
+/**
+ * Upload or attach a receipt image/PDF to a purchase record.
+ * @param {string} id
+ * @param {{ receiptUrl: string, receiptName?: string }} payload
+ * @returns {{ message: string, purchase: object }}
+ */
+export const uploadPurchaseReceipt = (id, payload) =>
+  axiosClient.put(`/purchases/${id}/receipt`, payload).then((res) => res.data);
+
 
 

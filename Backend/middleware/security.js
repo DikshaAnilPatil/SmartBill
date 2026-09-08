@@ -25,21 +25,32 @@ export const securityHeaders = helmet({
 // Stricter limiter for Auth endpoints (Login, Register, Forgot Password)
 export const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 20, // Limit each IP to 20 auth requests per windowMs
+  max: process.env.NODE_ENV === "production" ? 100 : 2000, // Generous limit
   standardHeaders: true,
   legacyHeaders: false,
+  skipSuccessfulRequests: true,
+  skip: (req) => {
+    // Always allow local development and loopback requests without rate limit blocking
+    if (process.env.NODE_ENV !== "production") return true;
+    const ip = req.ip || req.connection?.remoteAddress || "";
+    return ip === "127.0.0.1" || ip === "::1" || ip === "::ffff:127.0.0.1" || ip.includes("localhost");
+  },
   message: {
     message: "Too many authentication attempts from this IP. Please try again after 15 minutes.",
   },
-  skipSuccessfulRequests: false,
 });
 
 // General API limiter for standard operations
 export const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 600, // Limit each IP to 600 requests per windowMs (~40 req/min)
+  max: process.env.NODE_ENV === "production" ? 1000 : 50000,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: (req) => {
+    if (process.env.NODE_ENV !== "production") return true;
+    const ip = req.ip || req.connection?.remoteAddress || "";
+    return ip === "127.0.0.1" || ip === "::1" || ip === "::ffff:127.0.0.1" || ip.includes("localhost");
+  },
   message: {
     message: "API rate limit exceeded. Please slow down your requests.",
   },

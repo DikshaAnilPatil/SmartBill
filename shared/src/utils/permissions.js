@@ -65,6 +65,19 @@ export const ROLE_DEFAULT_PERMISSIONS = {
     users: false,
     settings: false,
   },
+  Sales: {
+    dashboard: true,
+    customers: true,
+    suppliers: false,
+    products: true,
+    pos: true,
+    purchase: false,
+    inventory: true,
+    expenses: false,
+    reports: true,
+    users: false,
+    settings: false,
+  },
 };
 
 /**
@@ -173,6 +186,18 @@ export function hasPermission(user, pageKey) {
   let modResult = null;
 
   switch (pageKey) {
+    case "pos":
+    case "sales":
+    case "billing":
+    case "sales-billing":
+      modResult =
+        checkPerm("pos") ??
+        checkPerm("sales") ??
+        checkPerm("billing") ??
+        checkPerm("salesBilling") ??
+        checkPerm("sales-billing");
+      break;
+
     case "businesses":
     case "vendors":
       modResult = checkPerm("vendors") ?? checkPerm("businesses");
@@ -219,7 +244,7 @@ export function hasPermission(user, pageKey) {
   }
 
   if (roleStr.includes("billing")) {
-    return ["businesses", "vendors", "revenue", "subscriptions", "settings", "offers-coupons"].includes(pageKey);
+    return ["businesses", "vendors", "revenue", "subscriptions", "settings", "offers-coupons", "pos", "sales", "billing", "sales-billing"].includes(pageKey);
   }
 
   const permissions = getUserPermissions(user);
@@ -229,7 +254,12 @@ export function hasPermission(user, pageKey) {
     pageKey === "billing" ||
     pageKey === "sales-billing"
   ) {
-    return Boolean(permissions.pos);
+    return Boolean(
+      permissions.pos ||
+      permissions.sales ||
+      permissions.billing ||
+      permissions["sales-billing"]
+    );
   }
   return Boolean(permissions[pageKey]);
 }

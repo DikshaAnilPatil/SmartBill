@@ -2,23 +2,36 @@ import bcrypt from "bcryptjs";
 import User from "../models/User.js";
 
 /**
- * Seed a default Super Admin account on server startup.
- * This is idempotent — it only creates the admin if one with the given
- * email does not already exist. If the email exists with a different role
- * (e.g. a business owner), it is promoted to superadmin so the admin login
- * always opens the admin panel.
+ * Seed a default Super Admin account from environment variables.
+ * Safe & production-ready:
+ * - Reads credentials strictly from process.env (SUPERADMIN_EMAIL, SUPERADMIN_PASSWORD)
+ * - Zero hardcoded credentials in source code
+ * - Never logs plaintext passwords
+ * - Idempotent
  */
 const seedAdmin = async () => {
-  const adminEmail = "gawaliomkar2005@gmail.com";
-  const adminPassword = "Omkar@2005";
+  const adminEmail = process.env.SUPERADMIN_EMAIL
+    ? String(process.env.SUPERADMIN_EMAIL).trim().toLowerCase()
+    : null;
+  const adminPassword = process.env.SUPERADMIN_PASSWORD
+    ? String(process.env.SUPERADMIN_PASSWORD)
+    : null;
 
   try {
+    // If no superadmin env credentials provided, check if any superadmin already exists
+    if (!adminEmail || !adminPassword) {
+      const existingSuperAdmin = await User.findOne({ role: "superadmin" }).select("email");
+      if (existingSuperAdmin) {
+        console.log(`[SEED] Active Super Admin account verified (${existingSuperAdmin.email}).`);
+      } else {
+        console.log("[SEED] No SUPERADMIN_EMAIL / SUPERADMIN_PASSWORD configured. Skipping initial admin seed.");
+      }
+      return;
+    }
+
     const existing = await User.findOne({ email: adminEmail });
 
     if (existing) {
-      // If the email already exists, we only ensure it has the superadmin
-      // role so the admin panel opens for it. We intentionally do NOT
-      // overwrite the password, so the user's own credentials keep working.
       let changed = false;
       if (existing.role !== "superadmin") {
         existing.role = "superadmin";
@@ -28,36 +41,40 @@ const seedAdmin = async () => {
         existing.businessName = "SmartBill";
         changed = true;
       }
+      if (adminPassword) {
+        existing.password = await bcrypt.hash(adminPassword, 12);
+        changed = true;
+      }
 
       if (changed) {
         await existing.save();
-        console.log(
-          `[SEED] Promoted existing user ${adminEmail} to Super Admin.`,
-        );
+        console.log(`[SEED] Super Admin account synced (${adminEmail}).`);
       } else {
-        console.log(
-          `[SEED] Super Admin already exists (${adminEmail}). Skipping.`,
-        );
+        console.log(`[SEED] Configured Super Admin verified (${adminEmail}).`);
       }
       return;
     }
 
-    const hashedPassword = await bcrypt.hash(adminPassword, 10);
+    const hashedPassword = await bcrypt.hash(adminPassword, 12);
+    const firstName = process.env.SUPERADMIN_FIRST_NAME || "System";
+    const lastName = process.env.SUPERADMIN_LAST_NAME || "Admin";
+    const phone = process.env.SUPERADMIN_PHONE ? String(process.env.SUPERADMIN_PHONE).replace(/\D/g, "") : "9999999999";
 
     await User.create({
-      firstName: "Omkar",
-      lastName: "Gawali",
-      businessName: "SmartBill",
+      firstName,
+      lastName,
+      businessName: "SmartBill Administration",
       email: adminEmail,
-      phone: "8830164600",
+      phone,
       businessType: "Services",
       password: hashedPassword,
       role: "superadmin",
+      status: "Active",
     });
 
-    console.log(`[SEED] Super Admin created: ${adminEmail}`);
+    console.log(`[SEED] Super Admin account created successfully for: ${adminEmail}`);
   } catch (error) {
-    console.error("[SEED] Error creating Super Admin:", error.message);
+    console.error("[SEED] Super Admin seeding error:", error.message);
   }
 };
 

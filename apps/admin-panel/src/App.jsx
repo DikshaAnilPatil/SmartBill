@@ -7,6 +7,7 @@ import { NotificationProvider } from "@shared/context/NotificationContext.jsx";
 import { useCustomization } from "@shared/hooks/useCustomization.js";
 import { setUserToStorage } from "@shared/utils/userUtils.js";
 import { AccountingProvider } from "@shared/context/AccountingContext.jsx";
+import { getCrmUrl, getLandingUrl } from "@shared/utils/urlUtils.js";
 
 function ThemeRouteManager() {
   const location = useLocation();
@@ -79,7 +80,7 @@ function AppRoutes() {
 
   const handleLogin = (r, u) => {
     if (!isAdminRole(r)) {
-       window.location.href = "http://localhost:5174/login";
+       window.location.href = getCrmUrl("/login");
        return;
     }
     setRole(r);
@@ -98,7 +99,7 @@ function AppRoutes() {
   };
 
   const navAuth = useCallback((v) => {
-    if (v === "landing") window.location.href = "http://localhost:5173/";
+    if (v === "landing") window.location.href = getLandingUrl();
     else navigate(`/${v}`);
   }, [navigate]);
 
@@ -109,7 +110,7 @@ function AppRoutes() {
   }, [navigate]);
 
   if (!isAdminRole(role) && location.pathname.startsWith("/app")) {
-     window.location.href = "http://localhost:5174/app";
+     window.location.href = getCrmUrl("/app");
      return null;
   }
 

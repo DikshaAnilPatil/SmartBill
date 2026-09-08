@@ -35,7 +35,7 @@ export const getEmployees = async (req, res) => {
       employees: formattedEmployees,
     });
   } catch (error) {
-    console.error("GET EMPLOYEES ERROR:", error);
+    console.error("GET EMPLOYEES ERROR:", error.message);
     res.status(500).json({
       success: false,
       message: error.message || "Failed to fetch employees.",
@@ -109,6 +109,12 @@ export const createEmployee = async (req, res) => {
     }
     if (!empFirstName) empFirstName = "Employee";
 
+    // Disallow elevating employee to superadmin or owner
+    const cleanRole = String(role || "Cashier").trim();
+    const safeRole = ["superadmin", "owner"].includes(cleanRole.toLowerCase())
+      ? "Cashier"
+      : cleanRole;
+
     const hashedPassword = await bcrypt.hash(password, 10);
     const cleanPhone = String(phone || "").replace(/\D/g, "");
 
@@ -121,7 +127,7 @@ export const createEmployee = async (req, res) => {
       password: hashedPassword,
       businessName: owner.businessName || "",
       businessType: owner.businessType || "Retail",
-      role: role || "Cashier",
+      role: safeRole,
       department: department || "",
       permissions: permissions || {},
       status: status || "Active",
@@ -196,6 +202,15 @@ export const updateEmployee = async (req, res) => {
   try {
     const ownerId = req.user.ownerId || req.user._id;
     const { id } = req.params;
+
+    // Disallow modifying owner through employee route
+    if (String(id) === String(ownerId)) {
+      return res.status(403).json({
+        success: false,
+        message: "Owner account cannot be modified via staff management endpoints.",
+      });
+    }
+
     const {
       name,
       firstName,
@@ -220,7 +235,7 @@ export const updateEmployee = async (req, res) => {
     if (email) {
       const normalizedEmail = String(email).trim().toLowerCase();
       if (normalizedEmail !== employee.email) {
-        const existingEmail = await User.findOne({ email: normalizedEmail });
+        const existingEmail = await User.findOne({ email: normalizedEmail, _id: { $ne: id } });
         if (existingEmail) {
           return res.status(409).json({
             success: false,
@@ -244,7 +259,13 @@ export const updateEmployee = async (req, res) => {
       employee.phone = String(phone).replace(/\D/g, "");
     }
 
-    if (role !== undefined) employee.role = role;
+    if (role !== undefined) {
+      const cleanRole = String(role).trim();
+      if (!["superadmin", "owner"].includes(cleanRole.toLowerCase())) {
+        employee.role = cleanRole;
+      }
+    }
+
     if (department !== undefined) employee.department = department;
     if (permissions !== undefined) employee.permissions = permissions;
     if (status !== undefined) employee.status = status;
@@ -288,7 +309,24 @@ export const updateEmployee = async (req, res) => {
 export const deleteEmployee = async (req, res) => {
   try {
     const ownerId = req.user.ownerId || req.user._id;
+    const actualUserId = req.user.actualUserId || req.user._id;
     const { id } = req.params;
+
+    // Disallow deleting owner
+    if (String(id) === String(ownerId)) {
+      return res.status(403).json({
+        success: false,
+        message: "Forbidden: Cannot delete owner account.",
+      });
+    }
+
+    // Disallow self-deletion
+    if (String(id) === String(actualUserId)) {
+      return res.status(403).json({
+        success: false,
+        message: "Forbidden: You cannot delete your own account.",
+      });
+    }
 
     const result = await User.deleteOne({ _id: id, ownerId });
     if (result.deletedCount === 0) {
