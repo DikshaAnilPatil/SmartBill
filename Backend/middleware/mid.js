@@ -138,17 +138,24 @@ export const requirePermission = (moduleKey) => {
  * Role-based authorization middleware
  */
 export const requireRole = (allowedRoles = []) => {
-  const roles = Array.isArray(allowedRoles) ? allowedRoles : [allowedRoles];
+  const rawRoles = Array.isArray(allowedRoles) ? allowedRoles : [allowedRoles];
+  const normalizedRoles = rawRoles.map((r) => String(r).toLowerCase().replace(/[-_\s]/g, ""));
   return (req, res, next) => {
     if (!req.user) {
       return res.status(401).json({ message: "Authentication required." });
     }
-    const userRole = String(req.user.role || "").toLowerCase().trim();
-    const hasRole = roles.map((r) => String(r).toLowerCase().trim()).includes(userRole);
+    const userRole = String(req.user.role || "").toLowerCase().replace(/[-_\s]/g, "");
+
+    // Superadmin and owner always have full access
+    if (userRole === "superadmin" || userRole === "owner") {
+      return next();
+    }
+
+    const hasRole = normalizedRoles.includes(userRole);
 
     if (!hasRole) {
       return res.status(403).json({
-        message: `Forbidden: Requires one of the following roles: ${roles.join(", ")}`,
+        message: `Forbidden: Requires one of the following roles: ${rawRoles.join(", ")}`,
       });
     }
     next();

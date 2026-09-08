@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import Sidebar from "@shared/layouts/Sidebar";
 import Topbar from "@shared/layouts/Topbar";
 import TrialBanner from "@shared/components/common/TrialBanner";
+import PromotionalBanner from "@shared/components/common/PromotionalBanner";
 import BusinessDashboard from "./pages/dashboard/BusinessDashboard";
 import CustomersScreen from "./pages/commerce/CustomersScreen";
 import SuppliersScreen from "./pages/commerce/SuppliersScreen";
@@ -194,6 +195,7 @@ export default function AppShell({ role, user, onLogout, page, onNav }) {
         onToggle={() => setCollapsed((v) => !v)}
       />
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        <PromotionalBanner isCrm onCtaClick={() => onNav("settings")} />
         <TrialBanner user={user} onNav={onNav} />
         <Topbar
           page={page}

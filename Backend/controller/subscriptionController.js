@@ -6,6 +6,8 @@ import User from "../models/User.js";
 import Order from "../models/Order.js";
 import Customer from "../models/Customer.js";
 import Product from "../models/Product.js";
+import Coupon from "../models/Coupon.js";
+import { calculateDiscount } from "./couponController.js";
 import { createNotification, notifySuperAdmins } from "../services/notificationService.js";
 import { sendSubscriptionReminderEmail } from "../utils/emailService.js";
 
@@ -103,7 +105,7 @@ export const getUpgradePreview = async (req, res) => {
 ───────────────────────────────────────────────────────────── */
 export const createSubscriptionOrder = async (req, res) => {
   try {
-    const { planName, isUpgrade, proratedAmount } = req.body;
+    const { planName, isUpgrade, proratedAmount, couponCode } = req.body;
     const planKey = (planName || "").toLowerCase().replace(/\s*plan\s*/gi, "").trim();
     const planConfig = await getPlanConfig(planKey);
 
@@ -111,12 +113,42 @@ export const createSubscriptionOrder = async (req, res) => {
       return res.status(400).json({ message: "Invalid plan selected" });
     }
 
-    // Use prorated amount if this is a mid-cycle upgrade
-    const chargeAmount = (isUpgrade && proratedAmount != null)
-      ? Math.max(100, Math.round(proratedAmount)) // minimum ₹1 (100 paise)
+    // Base price
+    let baseAmount = (isUpgrade && proratedAmount != null)
+      ? Math.max(100, Math.round(proratedAmount))
       : planConfig.price;
 
-    const amountInPaise = chargeAmount * 100;
+    let appliedCoupon = null;
+    let discountAmount = 0;
+    let finalAmount = baseAmount;
+
+    if (couponCode && typeof couponCode === "string" && couponCode.trim()) {
+      const normalizedCode = couponCode.trim().toUpperCase();
+      const coupon = await Coupon.findOne({ code: normalizedCode, status: "active" });
+
+      if (coupon) {
+        const now = new Date();
+        const isValidDate = (!coupon.startDate || new Date(coupon.startDate) <= now) &&
+                            (!coupon.expiryDate || new Date(coupon.expiryDate) >= now);
+        const hasUsageLeft = coupon.maxUsageCount == null || coupon.usedCount < coupon.maxUsageCount;
+        const matchesPlan = coupon.applicablePlans.includes("all") || coupon.applicablePlans.includes(planKey);
+
+        if (isValidDate && hasUsageLeft && matchesPlan) {
+          const discountRes = calculateDiscount(coupon, baseAmount);
+          discountAmount = discountRes.discountAmount;
+          finalAmount = Math.max(1, discountRes.finalAmount);
+          appliedCoupon = {
+            code: coupon.code,
+            title: coupon.title,
+            discountType: coupon.discountType,
+            discountValue: coupon.discountValue,
+            discountAmount,
+          };
+        }
+      }
+    }
+
+    const amountInPaise = Math.round(finalAmount * 100);
     const keyId = process.env.RAZORPAY_KEY_ID || "rzp_test_TPCMQcPRZqe62i";
 
     try {
@@ -128,6 +160,7 @@ export const createSubscriptionOrder = async (req, res) => {
           planName: planConfig.name,
           userId: req.user ? req.user._id.toString() : "guest",
           isUpgrade: isUpgrade ? "true" : "false",
+          couponCode: appliedCoupon ? appliedCoupon.code : "",
         },
       };
 
@@ -142,7 +175,11 @@ export const createSubscriptionOrder = async (req, res) => {
         planName: planConfig.name,
         isMock: false,
         isUpgrade: !!isUpgrade,
-        proratedCredit: isUpgrade ? (planConfig.price - chargeAmount) : 0,
+        originalAmount: baseAmount,
+        discountAmount,
+        finalAmount,
+        appliedCoupon,
+        proratedCredit: isUpgrade ? (planConfig.price - baseAmount) : 0,
       });
     } catch (rzpErr) {
       console.error("Razorpay API error:", rzpErr.message);
@@ -168,6 +205,7 @@ export const verifySubscriptionPayment = async (req, res) => {
       email,
       isUpgrade,
       isDowngrade,
+      couponCode,
     } = req.body;
 
     // Strict validation: All 3 payment verification fields are mandatory
@@ -296,6 +334,33 @@ export const verifySubscriptionPayment = async (req, res) => {
         };
 
         await user.save();
+
+        if (couponCode && typeof couponCode === "string" && couponCode.trim()) {
+          try {
+            const coupon = await Coupon.findOne({ code: couponCode.trim().toUpperCase() });
+            if (coupon) {
+              const { discountAmount, finalAmount } = calculateDiscount(coupon, planConfig.price);
+              coupon.usedCount = (coupon.usedCount || 0) + 1;
+              if (!coupon.redemptions) coupon.redemptions = [];
+              coupon.redemptions.push({
+                userId: user._id,
+                ownerId: user._id,
+                businessName: user.businessName || `${user.firstName || ""} ${user.lastName || ""}`.trim() || user.email,
+                email: user.email,
+                plan: planKey,
+                originalAmount: planConfig.price,
+                discountAmount,
+                finalAmount,
+                orderId: razorpay_order_id,
+                paymentId: razorpay_payment_id,
+                redeemedAt: now,
+              });
+              await coupon.save();
+            }
+          } catch (couponErr) {
+            console.error("Error recording coupon redemption:", couponErr);
+          }
+        }
 
         try {
           await createNotification({

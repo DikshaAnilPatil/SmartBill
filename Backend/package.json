@@ -7,7 +7,7 @@
   "main": "server.js",
   "type": "module",
   "scripts": {
-    "test": "node --test test/payment.test.js test/billing.test.js test/auth.test.js test/multitenancy.test.js",
+    "test": "node --test test/payment.test.js test/billing.test.js test/auth.test.js test/multitenancy.test.js test/coupon.test.js",
     "start": "node server.js",
     "dev": "nodemon server.js",
     "server": "nodemon server.js"

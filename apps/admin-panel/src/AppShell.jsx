@@ -8,6 +8,7 @@ import SuperAdminDashboard from "./pages/dashboard/SuperAdminDashboard";
 import SuperAdminSettingsScreen from "./pages/admin/SuperAdminSettingsScreen";
 import SubscriptionManagementScreen from "./pages/admin/SubscriptionManagementScreen";
 import AdminRolesScreen from "./pages/admin/AdminRolesScreen";
+import OffersCouponsScreen from "./pages/admin/OffersCouponsScreen";
 import NotificationsScreen from "./pages/users/NotificationsScreen";
 import ProfileScreen from "./pages/settings/ProfileScreen";
 import { useCustomization } from "@shared/hooks/useCustomization";
@@ -147,6 +148,8 @@ export default function AppShell({ role, user, onLogout, page, onNav }) {
         return <Revenue />;
       case "admin-role":
         return <AdminRolesScreen />;
+      case "offers-coupons":
+        return <OffersCouponsScreen />;
       case "subscriptions":
         return <SubscriptionManagementScreen />;
       case "settings":
