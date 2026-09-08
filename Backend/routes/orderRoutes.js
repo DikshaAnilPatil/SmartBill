@@ -5,7 +5,7 @@ import {
   getOrder,
 } from "../controller/orderController.js";
 import { protect } from "../middleware/mid.js";
-import { checkInvoiceLimit } from "../middleware/checkPlanLimits.js";
+import { checkInvoiceLimit, requireFeature } from "../middleware/checkPlanLimits.js";
 
 const router = express.Router();
 

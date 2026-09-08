@@ -786,8 +786,8 @@ export default function SettingsScreen({ user, initialTab, onNav } = {}) {
 
   const PLAN_FEATURES = {
     starter: ["1 business", "2 users", "500 invoices/month", "250 customers", "500 products", "Basic reports and inventory"],
-    pro: ["10 users", "Unlimited invoices", "5,000 customers and 5,000 products", "Advanced and GST reports", "Barcode scanner, export and advanced inventory"],
-    enterprise: ["Unlimited users, invoices, products and customers", "All reports and advanced features", "API access"],
+    pro: ["10 users", "Unlimited invoices", "5,000 customers and 5,000 products", "Advanced and GST reports", "Advanced payment tracking, customization and stock alerts", "Data export"],
+    enterprise: ["Unlimited users, invoices, products and customers", "All reports", "Full payment tracking, customization and stock monitoring", "Data export and all available features"],
   };
 
   function formatINRLocal(amount) {

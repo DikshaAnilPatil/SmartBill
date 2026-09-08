@@ -17,26 +17,28 @@ export default function SubscriptionManagementScreen() {
     basicReports: "Basic Reports",
     advancedReports: "Advanced Reports",
     gstReports: "GST Reports",
-    barcodeScanner: "Barcode Scanner",
     expenses: "Expenses",
     purchaseManagement: "Purchase Management",
     inventory: "Inventory",
-    advancedInventory: "Advanced Inventory",
+    paymentTracking: "Payment Tracking",
+    paymentHistory: "Payment History",
+    invoiceCustomization: "Invoice Customization",
+    stockAlerts: "Stock Alerts",
     dataExport: "Data Export",
-    apiAccess: "API Access",
   };
 
   const defaultFeatures = {
     basicReports: false,
     advancedReports: false,
     gstReports: false,
-    barcodeScanner: false,
     expenses: false,
     purchaseManagement: false,
     inventory: false,
-    advancedInventory: false,
+    paymentTracking: false,
+    paymentHistory: false,
+    invoiceCustomization: false,
+    stockAlerts: false,
     dataExport: false,
-    apiAccess: false,
   };
 
   const limitFields = [

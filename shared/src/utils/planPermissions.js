@@ -11,13 +11,19 @@ export const PLAN_CONFIGS = {
       basicReports: true,
       advancedReports: false,
       gstReports: false,
-      barcodeScanner: false,
       expenses: true,
       purchaseManagement: true,
       inventory: true,
-      advancedInventory: false,
+      paymentTracking: true,
+      paymentHistory: false,
+      advancedPaymentHistory: false,
+      invoiceCustomization: true,
+      advancedInvoiceCustomization: false,
+      unlimitedInvoiceCustomization: false,
+      stockAlerts: true,
+      advancedStockAlerts: false,
+      enhancedStockMonitoring: false,
       dataExport: false,
-      apiAccess: false,
     },
   },
   pro: {
@@ -28,13 +34,19 @@ export const PLAN_CONFIGS = {
       basicReports: true,
       advancedReports: true,
       gstReports: true,
-      barcodeScanner: true,
       expenses: true,
       purchaseManagement: true,
       inventory: true,
-      advancedInventory: true,
+      paymentTracking: true,
+      paymentHistory: true,
+      advancedPaymentHistory: false,
+      invoiceCustomization: true,
+      advancedInvoiceCustomization: true,
+      unlimitedInvoiceCustomization: false,
+      stockAlerts: true,
+      advancedStockAlerts: true,
+      enhancedStockMonitoring: false,
       dataExport: true,
-      apiAccess: false,
     },
   },
   enterprise: {
@@ -45,13 +57,19 @@ export const PLAN_CONFIGS = {
       basicReports: true,
       advancedReports: true,
       gstReports: true,
-      barcodeScanner: true,
       expenses: true,
       purchaseManagement: true,
       inventory: true,
-      advancedInventory: true,
+      paymentTracking: true,
+      paymentHistory: true,
+      advancedPaymentHistory: true,
+      invoiceCustomization: true,
+      advancedInvoiceCustomization: true,
+      unlimitedInvoiceCustomization: true,
+      stockAlerts: true,
+      advancedStockAlerts: true,
+      enhancedStockMonitoring: true,
       dataExport: true,
-      apiAccess: true,
     },
   },
 };
@@ -80,7 +98,7 @@ export function getUserPlan(user) {
  * Superadmin has access to all features.
  *
  * @param {object} user - Authenticated user object
- * @param {string} featureKey - e.g. 'advancedReports', 'gstReports', 'barcodeScanner', 'apiAccess'
+ * @param {string} featureKey - e.g. 'advancedReports', 'paymentTracking', 'stockAlerts'
  * @returns {boolean}
  */
 export function hasPlanFeature(user, featureKey) {
@@ -96,9 +114,13 @@ export function getRequiredPlanForFeature(featureKey) {
   switch (featureKey) {
     case "advancedReports":
     case "gstReports":
-    case "barcodeScanner":
+    case "advancedStockAlerts":
+    case "paymentHistory":
+    case "advancedInvoiceCustomization":
       return "Pro";
-    case "apiAccess":
+    case "advancedPaymentHistory":
+    case "unlimitedInvoiceCustomization":
+    case "enhancedStockMonitoring":
       return "Enterprise";
     default:
       return "Pro";

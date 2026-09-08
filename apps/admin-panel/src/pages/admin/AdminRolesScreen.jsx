@@ -378,13 +378,14 @@ export default function AdminRolesScreen() {
         status: adminToEdit.status
       });
     } else {
+      const defaultAssignableRole = roles.find((r) => r.id !== "super_admin")?.id || "support_admin";
       setEditingAdmin(null);
       setAdminForm({
         name: "",
         email: "",
         password: "Admin@1234",
         department: "Operations",
-        roleId: roles[0]?.id || "support_admin",
+        roleId: defaultAssignableRole,
         status: "Active"
       });
     }
@@ -1220,11 +1221,13 @@ export default function AdminRolesScreen() {
                     onChange={(e) => setAdminForm({ ...adminForm, roleId: e.target.value })}
                     className="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:outline-none"
                   >
-                    {roles.map((r) => (
-                      <option key={r.id} value={r.id}>
-                        {r.name}
-                      </option>
-                    ))}
+                    {roles
+                      .filter((r) => r.id !== "super_admin")
+                      .map((r) => (
+                        <option key={r.id} value={r.id}>
+                          {r.name}
+                        </option>
+                      ))}
                   </select>
                 </div>
 

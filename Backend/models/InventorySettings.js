@@ -32,10 +32,6 @@ const inventorySettingsSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
-    enableBarcodeScanner: {
-      type: Boolean,
-      default: true,
-    },
     preventNegativeStock: {
       type: Boolean,
       default: false,

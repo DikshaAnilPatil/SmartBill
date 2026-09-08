@@ -28,7 +28,7 @@ export default function HelpCenterPage() {
     {
       id: 3,
       title: "Using the POS System for retail checkout",
-      content: "The POS interface is optimized for speed. Connect your barcode scanner and start scanning products; they will be instantly added to the cart. You can apply discounts, select the payment method (Cash/Card/UPI), and print the receipt in one seamless flow."
+      content: "The POS interface is optimized for speed. Add products to the cart, apply discounts, select the payment method (Cash/Card/UPI), and print the receipt in one seamless flow."
     },
     {
       id: 4,

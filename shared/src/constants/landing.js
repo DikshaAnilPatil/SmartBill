@@ -64,7 +64,7 @@ export const PLANS = [
       "Unlimited Invoices",
       "5,000 Customers and 5,000 Products",
       "Advanced and GST Reports",
-      "Barcode scanner and data export",
+      "Advanced payment tracking, customization and stock alerts",
       "Purchase management",
     ],
   },
@@ -79,7 +79,7 @@ export const PLANS = [
       "Unlimited Users",
       "Unlimited invoices, products and customers",
       "All reports and inventory tools",
-      "API Access",
+      "Full payment tracking, customization and stock monitoring",
     ],
   },
 ];

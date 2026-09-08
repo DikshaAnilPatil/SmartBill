@@ -49,21 +49,19 @@ const subscriptionPlanSchema = new mongoose.Schema(
         default: false,
       },
 
-      barcodeScanner: {
-        type: Boolean,
-        default: false,
-      },
-
       expenses: { type: Boolean, default: false },
       purchaseManagement: { type: Boolean, default: false },
       inventory: { type: Boolean, default: false },
-      advancedInventory: { type: Boolean, default: false },
+      paymentTracking: { type: Boolean, default: false },
+      paymentHistory: { type: Boolean, default: false },
+      advancedPaymentHistory: { type: Boolean, default: false },
+      invoiceCustomization: { type: Boolean, default: false },
+      advancedInvoiceCustomization: { type: Boolean, default: false },
+      unlimitedInvoiceCustomization: { type: Boolean, default: false },
+      stockAlerts: { type: Boolean, default: false },
+      advancedStockAlerts: { type: Boolean, default: false },
+      enhancedStockMonitoring: { type: Boolean, default: false },
       dataExport: { type: Boolean, default: false },
-
-      apiAccess: {
-        type: Boolean,
-        default: false,
-      },
 
     },
 

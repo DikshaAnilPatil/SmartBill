@@ -17,11 +17,10 @@ router.get("/", getInventorySettings);
 // PUT /api/settings/inventory
 router.put(
   "/",
-  requireFeatureWhenEnabled("advancedInventory", [
+  requireFeatureWhenEnabled("advancedStockAlerts", [
     "enableSerialTracking",
     "enableBatchTracking",
-    "enableMultiUnit",
-    "enableBarcodeScanner",
+    "preventNegativeStock",
   ]),
   updateInventorySettings,
 );

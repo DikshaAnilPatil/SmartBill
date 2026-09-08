@@ -216,17 +216,19 @@ export const createSubscriptionPlan = async (
 
         gstReports: Boolean(features?.gstReports),
 
-        barcodeScanner:
-          Boolean(features?.barcodeScanner),
-
         expenses: Boolean(features?.expenses),
         purchaseManagement: Boolean(features?.purchaseManagement),
         inventory: Boolean(features?.inventory),
-        advancedInventory: Boolean(features?.advancedInventory),
+        paymentTracking: Boolean(features?.paymentTracking),
+        paymentHistory: Boolean(features?.paymentHistory),
+        advancedPaymentHistory: Boolean(features?.advancedPaymentHistory),
+        invoiceCustomization: Boolean(features?.invoiceCustomization),
+        advancedInvoiceCustomization: Boolean(features?.advancedInvoiceCustomization),
+        unlimitedInvoiceCustomization: Boolean(features?.unlimitedInvoiceCustomization),
+        stockAlerts: Boolean(features?.stockAlerts),
+        advancedStockAlerts: Boolean(features?.advancedStockAlerts),
+        enhancedStockMonitoring: Boolean(features?.enhancedStockMonitoring),
         dataExport: Boolean(features?.dataExport),
-
-        apiAccess:
-          Boolean(features?.apiAccess),
 
       },
 
@@ -366,17 +368,19 @@ export const updateSubscriptionPlan = async (
 
         gstReports: Boolean(features.gstReports),
 
-        barcodeScanner:
-          Boolean(features.barcodeScanner),
-
         expenses: Boolean(features.expenses),
         purchaseManagement: Boolean(features.purchaseManagement),
         inventory: Boolean(features.inventory),
-        advancedInventory: Boolean(features.advancedInventory),
+        paymentTracking: Boolean(features.paymentTracking),
+        paymentHistory: Boolean(features.paymentHistory),
+        advancedPaymentHistory: Boolean(features.advancedPaymentHistory),
+        invoiceCustomization: Boolean(features.invoiceCustomization),
+        advancedInvoiceCustomization: Boolean(features.advancedInvoiceCustomization),
+        unlimitedInvoiceCustomization: Boolean(features.unlimitedInvoiceCustomization),
+        stockAlerts: Boolean(features.stockAlerts),
+        advancedStockAlerts: Boolean(features.advancedStockAlerts),
+        enhancedStockMonitoring: Boolean(features.enhancedStockMonitoring),
         dataExport: Boolean(features.dataExport),
-
-        apiAccess:
-          Boolean(features.apiAccess),
 
       };
     }

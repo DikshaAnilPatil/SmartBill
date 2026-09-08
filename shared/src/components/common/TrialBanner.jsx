@@ -105,6 +105,13 @@ export default function TrialBanner({ user, onNav }) {
   const [loadingPlan, setLoadingPlan] = useState(null);
   const [plansLoading, setPlansLoading] = useState(false);
 
+  const normRole = String(user?.role || "").toLowerCase().replace(/[-_\s]/g, "");
+  const isPlatformAdmin =
+    normRole === "superadmin" ||
+    normRole.includes("admin") ||
+    normRole === "support" ||
+    normRole === "billing";
+
   /*
   |--------------------------------------------------------------------------
   | Get subscription status
@@ -112,7 +119,7 @@ export default function TrialBanner({ user, onNav }) {
   */
 
   useEffect(() => {
-    if (!user || user.role === "superadmin") return;
+    if (!user || isPlatformAdmin) return;
 
     subscriptionAPI
       .getSubscriptionStatus()
@@ -127,7 +134,7 @@ export default function TrialBanner({ user, onNav }) {
           err?.message
         );
       });
-  }, [user]);
+  }, [user, isPlatformAdmin]);
 
   /*
   |--------------------------------------------------------------------------
@@ -162,12 +169,12 @@ export default function TrialBanner({ user, onNav }) {
   };
 
   useEffect(() => {
-    if (!user || user.role === "superadmin") return;
+    if (!user || isPlatformAdmin) return;
 
     fetchPlans();
-  }, [user]);
+  }, [user, isPlatformAdmin]);
 
-  if (!user || user.role === "superadmin") return null;
+  if (!user || isPlatformAdmin) return null;
 
   const trialState = subData?.trialState;
   const subscription =

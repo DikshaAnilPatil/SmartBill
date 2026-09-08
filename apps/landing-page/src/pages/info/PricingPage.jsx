@@ -15,13 +15,19 @@ const FEATURE_LABELS = {
   basicReports: "Basic Reports",
   advancedReports: "Advanced Reports",
   gstReports: "GST Reports",
-  barcodeScanner: "Barcode Scanner",
   expenses: "Expenses",
   purchaseManagement: "Purchase Management",
   inventory: "Inventory",
-  advancedInventory: "Advanced Inventory",
+  paymentTracking: "Payment Tracking",
+  paymentHistory: "Payment History",
+  advancedPaymentHistory: "Advanced Payment History",
+  invoiceCustomization: "Invoice Customization",
+  advancedInvoiceCustomization: "Advanced Invoice Customization",
+  unlimitedInvoiceCustomization: "Unlimited Invoice Customization",
+  stockAlerts: "Stock Alerts",
+  advancedStockAlerts: "Advanced Stock Alerts",
+  enhancedStockMonitoring: "Enhanced Stock Monitoring",
   dataExport: "Data Export",
-  apiAccess: "API Access",
 };
 
 /*

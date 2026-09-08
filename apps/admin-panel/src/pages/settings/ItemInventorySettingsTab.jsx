@@ -49,7 +49,6 @@ export default function ItemInventorySettingsTab() {
     enableSerialTracking: false,
     enableBatchTracking: false,
     enableMultiUnit: true,
-    enableBarcodeScanner: true,
     preventNegativeStock: false,
   });
 
@@ -193,12 +192,6 @@ export default function ItemInventorySettingsTab() {
               description="Assign unique serial numbers to individual units (essential for Electronics)."
               checked={settings.enableSerialTracking}
               onChange={() => handleToggle("enableSerialTracking")}
-            />
-            <CleanToggle
-              title="Barcode Scanner Integration"
-              description="Allow optical barcode scanners to quickly add items directly to invoices."
-              checked={settings.enableBarcodeScanner}
-              onChange={() => handleToggle("enableBarcodeScanner")}
             />
           </div>
         </Section>
