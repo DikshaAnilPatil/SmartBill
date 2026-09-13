@@ -166,6 +166,14 @@ const filtered = supplierList.filter((s) =>
             </div>
             <div className="rounded-xl border border-slate-200 p-4">
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Address
+              </p>
+              <p className="mt-1 text-sm text-slate-700 whitespace-pre-line">
+                {viewSupplier.address || "—"}
+              </p>
+            </div>
+            <div className="rounded-xl border border-slate-200 p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                 Balance Due
               </p>
               <p className="mt-1 text-sm font-semibold text-slate-900">
@@ -406,11 +414,12 @@ const filtered = supplierList.filter((s) =>
                   "Contact",
                   "Phone",
                   "City",
+                  "Address",
                   "Actions",
                 ].map((h) => (
                   <th
                     key={h}
-                    className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide"
+                    className={`text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide ${h === "Address" ? "min-w-[220px]" : ""}`}
                   >
                     {h}
                   </th>
@@ -421,7 +430,7 @@ const filtered = supplierList.filter((s) =>
               {filtered.map((s) => (
                 <tr
                   key={s._id}
-                  className="hover:bg-slate-50 transition-colors group"
+                  className="hover:bg-slate-50 transition-colors group align-top"
                 >
                   <td className="px-5 py-4">
                     <p className="font-medium text-slate-900">{s.name}</p>
@@ -432,6 +441,11 @@ const filtered = supplierList.filter((s) =>
                     {s.phone}
                   </td>
                   <td className="px-5 py-4 text-slate-600">{s.city}</td>
+                  <td className="px-5 py-4 text-slate-600 align-top min-w-[220px] max-w-[260px]">
+                    <span className="block whitespace-pre-line break-words">
+                      {s.address || "—"}
+                    </span>
+                  </td>
                   <td className="px-5 py-4">
                     <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
 
