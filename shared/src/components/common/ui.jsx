@@ -127,16 +127,16 @@ export function FixedPhoneInput({
     if (!raw || !raw.trim()) return "Phone field is required.";
 
     if (!raw.startsWith(PREFIX)) {
-      return "Phone must contain exactly 10 numeric digits.";
+      return "Phone must start with +91 and use a valid Indian 10-digit mobile number.";
     }
 
     const digitsPart = raw.slice(PREFIX.length);
     if (!digitsPart) return "Phone field is required.";
 
-    if (digitsPart.length !== TEN) {
-      return "Phone number must be exactly 10 digits.";
+    const cleanDigits = digitsPart.replace(/\D/g, "");
+    if (cleanDigits.length !== TEN || !/^[6-9]\d{9}$/.test(cleanDigits)) {
+      return "Enter a valid 10-digit Indian mobile number starting with 6, 7, 8, or 9.";
     }
-    if (!/^\d{10}$/.test(digitsPart)) return "Phone number must be numeric.";
 
     return "";
   };

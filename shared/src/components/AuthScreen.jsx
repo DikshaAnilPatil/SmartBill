@@ -145,6 +145,11 @@ export default function AuthScreen({ view, onNav, onLogin, fixedRole }) {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed);
   };
 
+  const isValidIndianMobile = (raw) => {
+    const digits = String(raw ?? "").replace(/\D/g, "");
+    return /^[6-9]\d{9}$/.test(digits);
+  };
+
   const getLoginEmailError = (raw) => {
     const trimmed = String(raw ?? "").trim();
     if (!trimmed) return "Email field is required.";
@@ -164,8 +169,10 @@ export default function AuthScreen({ view, onNav, onLogin, fixedRole }) {
 
     const digitsPart = trimmed.slice(PHONE_PREFIX.length);
     if (!digitsPart) return required ? "Phone field is required." : "";
-    if (!/^\d{10}$/.test(digitsPart)) {
-      return "Phone number must be exactly 10 digits.";
+
+    const cleanDigits = digitsPart.replace(/\D/g, "");
+    if (!/^[6-9]\d{9}$/.test(cleanDigits)) {
+      return "Enter a valid 10-digit Indian mobile number starting with 6, 7, 8, or 9.";
     }
 
     return "";
@@ -391,6 +398,10 @@ export default function AuthScreen({ view, onNav, onLogin, fixedRole }) {
   };
 
   const handleVerifyOtp = async () => {
+    const errPhone = validatePhone(phone);
+    setRegisterPhoneError(errPhone);
+    if (errPhone) return;
+
     const cleanOtp = String(otp ?? "").trim();
     if (!/^\d{6}$/.test(cleanOtp)) {
       setOtpError("Please enter the 6-digit OTP.");

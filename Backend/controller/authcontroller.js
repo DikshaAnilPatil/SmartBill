@@ -93,6 +93,11 @@ const normalizePhone = (raw) => {
   return digits;
 };
 
+const isValidIndianMobile = (raw) => {
+  const digits = String(raw ?? "").replace(/\D/g, "");
+  return /^[6-9]\d{9}$/.test(digits);
+};
+
 // ======================================================
 // REGISTER
 // ======================================================
@@ -138,8 +143,8 @@ export const register = async (req, res) => {
 
     const normalizedPhone = normalizePhone(phone);
 
-    if (!/^\d{10}$/.test(normalizedPhone)) {
-      errors.push("A valid 10-digit phone number is required.");
+    if (!isValidIndianMobile(normalizedPhone)) {
+      errors.push("Enter a valid 10-digit Indian mobile number starting with 6, 7, 8, or 9.");
     }
 
     if (!password || String(password).length < 8) {
@@ -294,7 +299,7 @@ const detectIdentifier = (raw) => {
       ? digits.slice(2)
       : digits;
 
-  if (/^\d{10}$/.test(normalized)) {
+  if (isValidIndianMobile(normalized)) {
     return {
       type: "phone",
       value: normalized,
@@ -311,6 +316,20 @@ export const login = async (req, res) => {
     const { email, phone, password } = req.body;
 
     const rawIdentifier = (email && String(email).trim()) ? String(email).trim() : (phone && String(phone).trim() ? String(phone).trim() : "");
+
+    const identifier = detectIdentifier(rawIdentifier);
+
+    if (identifier.type === "phone" && !isValidIndianMobile(identifier.value)) {
+      return res.status(400).json({
+        message: "Enter a valid 10-digit Indian mobile number starting with 6, 7, 8, or 9.",
+      });
+    }
+
+    if (rawIdentifier && identifier.type === "none" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(rawIdentifier).trim())) {
+      return res.status(400).json({
+        message: "Enter a valid email address or 10-digit Indian mobile number starting with 6, 7, 8, or 9.",
+      });
+    }
 
     if (!rawIdentifier || !password) {
       return res.status(400).json({
@@ -693,9 +712,9 @@ export const sendOtp = async (req, res) => {
 
     const normalizedPhone = normalizePhone(phone);
 
-    if (!/^\d{10}$/.test(normalizedPhone)) {
+    if (!isValidIndianMobile(normalizedPhone)) {
       return res.status(400).json({
-        message: "A valid 10-digit phone number is required.",
+        message: "Enter a valid 10-digit Indian mobile number starting with 6, 7, 8, or 9.",
         field: "phone",
       });
     }
@@ -766,9 +785,9 @@ export const verifyOtp = async (req, res) => {
 
     const normalizedPhone = normalizePhone(phone);
 
-    if (!/^\d{10}$/.test(normalizedPhone)) {
+    if (!isValidIndianMobile(normalizedPhone)) {
       return res.status(400).json({
-        message: "A valid 10-digit phone number is required.",
+        message: "Enter a valid 10-digit Indian mobile number starting with 6, 7, 8, or 9.",
         field: "phone",
       });
     }
@@ -840,7 +859,13 @@ export const forgotPassword = async (req, res) => {
 
     if (identifier.type === "none") {
       return res.status(400).json({
-        message: "A valid email address or 10-digit mobile number is required.",
+        message: "A valid email address or 10-digit Indian mobile number is required.",
+      });
+    }
+
+    if (identifier.type === "phone" && !isValidIndianMobile(identifier.value)) {
+      return res.status(400).json({
+        message: "Enter a valid 10-digit Indian mobile number starting with 6, 7, 8, or 9.",
       });
     }
 
@@ -943,6 +968,12 @@ export const verifyResetOtp = async (req, res) => {
       });
     }
 
+    if (identifier.type === "phone" && !isValidIndianMobile(identifier.value)) {
+      return res.status(400).json({
+        message: "Enter a valid 10-digit Indian mobile number starting with 6, 7, 8, or 9.",
+      });
+    }
+
     let user = null;
     if (identifier.type === "email") {
       user = await User.findOne({
@@ -1038,6 +1069,12 @@ export const resetPassword = async (req, res) => {
     if (identifier.type === "none" || !otp || !newPassword) {
       return res.status(400).json({
         message: "Email or mobile number, 6-digit OTP, and new password are required.",
+      });
+    }
+
+    if (identifier.type === "phone" && !isValidIndianMobile(identifier.value)) {
+      return res.status(400).json({
+        message: "Enter a valid 10-digit Indian mobile number starting with 6, 7, 8, or 9.",
       });
     }
 
