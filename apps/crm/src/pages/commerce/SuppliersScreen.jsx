@@ -29,6 +29,14 @@ import {
   deleteSupplier,
 } from "@shared/api/supplierAPI";
 
+const validateSupplierPhone = (value) => {
+  const digits = String(value ?? "").trim();
+  if (!digits) return "";
+  return /^\d{10}$/.test(digits)
+    ? ""
+    : "Contact number must be exactly 10 digits.";
+};
+
 export default function SuppliersScreen() {
   const [search, setSearch] = useState("");
   const [showModal, setShowModal] = useState(false);
@@ -47,6 +55,8 @@ export default function SuppliersScreen() {
     balance: 0,
     status: "Active",
   });
+  const [formPhoneError, setFormPhoneError] = useState("");
+  const [editPhoneError, setEditPhoneError] = useState("");
   const [toast, setToast] = useState(null);
 
   // Local editable list (so added suppliers appear below in the table)
@@ -204,12 +214,19 @@ const filtered = supplierList.filter((s) =>
                 value={editForm.contact}
                 onChange={(v) => setEditForm((f) => ({ ...f, contact: v }))}
               />
-              <Input
-                label="Phone"
-                icon={<Phone className="w-4 h-4" />}
-                value={editForm.phone}
-                onChange={(v) => setEditForm((f) => ({ ...f, phone: v }))}
-              />
+              <div>
+                <Input
+                  label="Phone"
+                  icon={<Phone className="w-4 h-4" />}
+                  value={editForm.phone}
+                  onChange={(v) => {
+                    const digitsOnly = String(v ?? "").replace(/\D/g, "").slice(0, 10);
+                    setEditForm((f) => ({ ...f, phone: digitsOnly }));
+                    setEditPhoneError(validateSupplierPhone(digitsOnly));
+                  }}
+                  error={editPhoneError}
+                />
+              </div>
             </div>
             <Input
               label="Email"
@@ -256,27 +273,31 @@ const filtered = supplierList.filter((s) =>
               <Btn
                 variant="primary"
                 onClick={async () => {
-                 try {
-  await updateSupplier(editId, {
-    name: editForm.name,
-    contact: editForm.contact,
-    phone: editForm.phone,
-    email: editForm.email,
-    city: editForm.city,
-    address: editForm.address,
-    gst: editForm.gst,
-    status: editForm.status,
-  });
+                  const nextPhoneError = validateSupplierPhone(editForm.phone);
+                  setEditPhoneError(nextPhoneError);
+                  if (nextPhoneError) return;
 
-  await loadSuppliers();
+                  try {
+                    await updateSupplier(editId, {
+                      name: editForm.name,
+                      contact: editForm.contact,
+                      phone: editForm.phone,
+                      email: editForm.email,
+                      city: editForm.city,
+                      address: editForm.address,
+                      gst: editForm.gst,
+                      status: editForm.status,
+                    });
 
-  setShowEditModal(false);
-  setEditId(null);
+                    await loadSuppliers();
 
-  showToast("Supplier updated successfully", "success");
-} catch (err) {
-  console.log(err);
-}
+                    setShowEditModal(false);
+                    setEditId(null);
+
+                    showToast("Supplier updated successfully", "success");
+                  } catch (err) {
+                    console.log(err);
+                  }
                 }}
                 className="flex-1 justify-center"
               >
@@ -301,12 +322,19 @@ const filtered = supplierList.filter((s) =>
                 value={form.contact}
                 onChange={(v) => setForm((f) => ({ ...f, contact: v }))}
               />
-              <Input
-                label="Phone"
-                icon={<Phone className="w-4 h-4" />}
-                value={form.phone}
-                onChange={(v) => setForm((f) => ({ ...f, phone: v }))}
-              />
+              <div>
+                <Input
+                  label="Phone"
+                  icon={<Phone className="w-4 h-4" />}
+                  value={form.phone}
+                  onChange={(v) => {
+                    const digitsOnly = String(v ?? "").replace(/\D/g, "").slice(0, 10);
+                    setForm((f) => ({ ...f, phone: digitsOnly }));
+                    setFormPhoneError(validateSupplierPhone(digitsOnly));
+                  }}
+                  error={formPhoneError}
+                />
+              </div>
             </div>
             <Input
               label="Email"
@@ -348,37 +376,42 @@ const filtered = supplierList.filter((s) =>
               <Btn
                 variant="primary"
                 onClick={async () => {
-  try {
-    await createSupplier({
-      name: form.name,
-      contact: form.contact,
-      phone: form.phone,
-      email: form.email,
-      city: form.city,
-      address: form.address,
-      gst: form.gst,
-    });
+                  const nextPhoneError = validateSupplierPhone(form.phone);
+                  setFormPhoneError(nextPhoneError);
+                  if (nextPhoneError) return;
 
-    await loadSuppliers();
+                  try {
+                    await createSupplier({
+                      name: form.name,
+                      contact: form.contact,
+                      phone: form.phone,
+                      email: form.email,
+                      city: form.city,
+                      address: form.address,
+                      gst: form.gst,
+                    });
 
-    setShowModal(false);
+                    await loadSuppliers();
 
-    setForm({
-      name: "",
-      contact: "",
-      phone: "",
-      email: "",
-      city: "",
-      address: "",
-      gst: "",
-      balanceDue: "0",
-    });
+                    setShowModal(false);
 
-    showToast("Supplier added successfully", "success");
-  } catch (err) {
-    console.log(err);
-  }
-}}
+                    setForm({
+                      name: "",
+                      contact: "",
+                      phone: "",
+                      email: "",
+                      city: "",
+                      address: "",
+                      gst: "",
+                      balanceDue: "0",
+                    });
+                    setFormPhoneError("");
+
+                    showToast("Supplier added successfully", "success");
+                  } catch (err) {
+                    console.log(err);
+                  }
+                }}
                 className="flex-1 justify-center"
               >
                 Save Supplier

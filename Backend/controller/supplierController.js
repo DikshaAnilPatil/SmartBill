@@ -52,6 +52,10 @@ export const createSupplier = async (req, res) => {
       return res.status(400).json({ message: "Supplier name is required." });
     }
 
+    if (phone && !/^\d{10}$/.test(String(phone).trim())) {
+      return res.status(400).json({ message: "Contact number must be exactly 10 digits." });
+    }
+
     const opening = Number(openingBalance) || 0;
 
     const existing = await Supplier.findOne({
@@ -106,6 +110,10 @@ export const createSupplier = async (req, res) => {
 export const updateSupplier = async (req, res) => {
   try {
     const { name, contact, phone, email, city, address, gst, status } = req.body;
+
+    if (phone !== undefined && phone !== null && String(phone).trim() && !/^\d{10}$/.test(String(phone).trim())) {
+      return res.status(400).json({ message: "Contact number must be exactly 10 digits." });
+    }
 
     const supplier = await Supplier.findOne({
       _id: req.params.id,
