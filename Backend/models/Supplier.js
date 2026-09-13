@@ -33,6 +33,11 @@ const supplierSchema = new mongoose.Schema(
       default: "",
     },
 
+    address: {
+      type: String,
+      default: "",
+    },
+
     gst: {
       type: String,
       default: "",

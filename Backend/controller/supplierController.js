@@ -43,6 +43,7 @@ export const createSupplier = async (req, res) => {
       phone,
       email,
       city,
+      address,
       gst,
       openingBalance = 0,
     } = req.body;
@@ -72,6 +73,7 @@ export const createSupplier = async (req, res) => {
       phone: phone || "",
       email: email || "",
       city: city || "",
+      address: address || "",
       gst: gst || "",
       openingBalance: opening,
       balance: opening,
@@ -103,7 +105,7 @@ export const createSupplier = async (req, res) => {
 // ================= UPDATE SUPPLIER =================
 export const updateSupplier = async (req, res) => {
   try {
-    const { name, contact, phone, email, city, gst, status } = req.body;
+    const { name, contact, phone, email, city, address, gst, status } = req.body;
 
     const supplier = await Supplier.findOne({
       _id: req.params.id,
@@ -119,6 +121,7 @@ export const updateSupplier = async (req, res) => {
     if (phone !== undefined) supplier.phone = phone;
     if (email !== undefined) supplier.email = email;
     if (city !== undefined) supplier.city = city;
+    if (address !== undefined) supplier.address = address;
     if (gst !== undefined) supplier.gst = gst;
     if (status !== undefined) {
       supplier.status = ["Active", "Inactive"].includes(status)

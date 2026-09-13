@@ -42,6 +42,7 @@ export default function SuppliersScreen() {
     phone: "",
     email: "",
     city: "",
+    address: "",
     gst: "",
     balance: 0,
     status: "Active",
@@ -57,6 +58,7 @@ export default function SuppliersScreen() {
     phone: "",
     email: "",
     city: "",
+    address: "",
     gst: "",
     balanceDue: "0",
   });
@@ -120,7 +122,7 @@ const filtered = supplierList.filter((s) =>
           <div className="space-y-4">
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                Company Name
+                Firm Name
               </p>
               <p className="mt-1 text-lg font-semibold text-slate-900">
                 {viewSupplier.name}
@@ -184,7 +186,7 @@ const filtered = supplierList.filter((s) =>
         >
           <div className="space-y-4">
             <Input
-              label="Company Name"
+              label="Firm Name"
               value={editForm.name}
               onChange={(v) => setEditForm((f) => ({ ...f, name: v }))}
             />
@@ -219,6 +221,19 @@ const filtered = supplierList.filter((s) =>
                 onChange={(v) => setEditForm((f) => ({ ...f, gst: v }))}
               />
             </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide block mb-1.5">
+                Address
+              </label>
+              <textarea
+                rows={4}
+                value={editForm.address}
+                onChange={(e) =>
+                  setEditForm((f) => ({ ...f, address: e.target.value }))
+                }
+                className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition-colors focus:border-blue-500 focus:ring-2 focus:ring-blue-500/10 resize-none"
+              />
+            </div>
             <div className="flex gap-3 pt-2">
               <Btn
                 variant="outline"
@@ -240,6 +255,7 @@ const filtered = supplierList.filter((s) =>
     phone: editForm.phone,
     email: editForm.email,
     city: editForm.city,
+    address: editForm.address,
     gst: editForm.gst,
     status: editForm.status,
   });
@@ -267,7 +283,7 @@ const filtered = supplierList.filter((s) =>
         <Modal title="Add New Supplier" onClose={() => setShowModal(false)}>
           <div className="space-y-4">
             <Input
-              label="Company Name"
+              label="Firm Name"
               value={form.name}
               onChange={(v) => setForm((f) => ({ ...f, name: v }))}
             />
@@ -302,6 +318,17 @@ const filtered = supplierList.filter((s) =>
                 onChange={(v) => setForm((f) => ({ ...f, gst: v }))}
               />
             </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide block mb-1.5">
+                Address
+              </label>
+              <textarea
+                rows={4}
+                value={form.address}
+                onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))}
+                className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition-colors focus:border-blue-500 focus:ring-2 focus:ring-blue-500/10 resize-none"
+              />
+            </div>
             <div className="flex gap-3 pt-2">
               <Btn
                 variant="outline"
@@ -320,6 +347,7 @@ const filtered = supplierList.filter((s) =>
       phone: form.phone,
       email: form.email,
       city: form.city,
+      address: form.address,
       gst: form.gst,
     });
 
@@ -333,6 +361,7 @@ const filtered = supplierList.filter((s) =>
       phone: "",
       email: "",
       city: "",
+      address: "",
       gst: "",
       balanceDue: "0",
     });
@@ -419,7 +448,8 @@ const filtered = supplierList.filter((s) =>
                             phone: s.phone,
                             email: s.email,
                             city: s.city,
-                            gst: "",
+                            address: s.address || "",
+                            gst: s.gst || "",
                             balance: s.balance,
                             status: s.status,
                           });
