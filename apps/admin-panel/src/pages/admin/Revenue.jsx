@@ -9,7 +9,6 @@ import {
   ChevronDown,
   Download,
   Calendar,
-  Percent,
   CheckCircle,
   Clock,
   AlertTriangle,
@@ -220,7 +219,7 @@ export default function Revenue() {
       )}
 
       {/* Primary KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
         {/* Platform MRR / Subscription Revenue */}
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition">
           <div className="flex items-center justify-between mb-3">
@@ -254,24 +253,6 @@ export default function Revenue() {
           <div className="flex items-center justify-between text-[11px] font-medium text-slate-500 mt-3 pt-3 border-t border-slate-100">
             <span>Orders: <strong className="text-slate-900">{summary.totalOrders || 0}</strong></span>
             <span className="text-emerald-600 font-semibold">Avg ₹{summary.avgOrderValue || 0}/order</span>
-          </div>
-        </div>
-
-        {/* Taxes & GST Collected */}
-        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition">
-          <div className="flex items-center justify-between mb-3">
-            <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
-              <Percent className="w-5 h-5" />
-            </div>
-            <span className="text-[10px] font-bold uppercase tracking-wider text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">
-              GST Collected
-            </span>
-          </div>
-          <p className="text-2xl font-bold text-slate-900 mb-0.5">{fmt(summary.totalTaxCollected)}</p>
-          <p className="text-xs text-slate-500">Total Tax & GST Inflow</p>
-          <div className="flex items-center justify-between text-[11px] font-medium text-slate-500 mt-3 pt-3 border-t border-slate-100">
-            <span>Businesses: <strong className="text-slate-900">{summary.totalBusinesses || 0}</strong></span>
-            <span className="text-blue-600 font-semibold">{summary.paidOrdersCount || 0} Invoices Paid</span>
           </div>
         </div>
 

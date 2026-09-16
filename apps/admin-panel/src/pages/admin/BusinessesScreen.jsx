@@ -11,11 +11,21 @@ export default function BusinessesScreen({ onOpenBusiness }) {
   const [search, setSearch] = useState("");
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [vendorGrouping, setVendorGrouping] = useState(false);
 
   useEffect(() => {
     adminAPI
+      .getVendorSettings()
+      .then((res) => {
+        if (res?.vendorSettings) {
+          setVendorGrouping(Boolean(res.vendorSettings.vendorGrouping));
+        }
+      })
+      .catch(() => {});
+
+    adminAPI
       .getAllBusinesses()
-      .then((res) => setRows(res.data || []))
+      .then((res) => setRows((res.data || []).map(b => ({ ...b, status: "Active" }))))
       .catch((err) => console.error("Error loading businesses:", err))
       .finally(() => setLoading(false));
   }, []);
@@ -70,13 +80,10 @@ export default function BusinessesScreen({ onOpenBusiness }) {
                   "Business Owner",
                   "Email",
                   "Phone Number",
-                  "City",
                   "Subscription Plan",
                   "Joining Date",
-                  "Revenue",
                   "Employees",
                   "Status",
-                  "Actions",
                 ].map((h) => (
                   <th
                     key={h}
@@ -90,14 +97,14 @@ export default function BusinessesScreen({ onOpenBusiness }) {
             <tbody className="divide-y divide-slate-50">
               {loading ? (
                 <tr>
-                  <td colSpan={11} className="py-10 text-center text-slate-500">
+                  <td colSpan={8} className="py-10 text-center text-slate-500">
                     <Loader2 className="w-5 h-5 animate-spin mx-auto text-blue-600 mb-2" />
                     Loading database records...
                   </td>
                 </tr>
               ) : filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={11} className="py-10 text-center text-slate-500">
+                  <td colSpan={8} className="py-10 text-center text-slate-500">
                     No business records found.
                   </td>
                 </tr>
@@ -115,25 +122,14 @@ export default function BusinessesScreen({ onOpenBusiness }) {
                     <td className="px-5 py-4 text-slate-600 font-mono text-xs">
                       {b.ownerPhone}
                     </td>
-                    <td className="px-5 py-4 text-slate-600">{b.ownerCity}</td>
                     <td className="px-5 py-4">
                       <Badge label={b.plan} variant="blue" />
                     </td>
                     <td className="px-5 py-4 text-slate-600 whitespace-nowrap align-top">
                       <div className="w-fit whitespace-nowrap">{b.joined}</div>
                     </td>
-                    <td className="px-5 py-4 font-semibold text-slate-900">
-                      {fmt(b.revenue)}
-                    </td>
                     <td className="px-5 py-4 text-slate-600">{b.users}</td>
                     <td className="px-5 py-4">{statusBadge(b.status)}</td>
-                    <td className="px-5 py-4">
-                      <div className="flex items-center gap-1">
-                        <Btn variant="ghost" size="sm" onClick={() => {}}>
-                          View
-                        </Btn>
-                      </div>
-                    </td>
                   </tr>
                 ))
               )}
