@@ -15,15 +15,6 @@ const expenseSchema = new mongoose.Schema(
       type: String,
       required: true,
       trim: true,
-      enum: [
-        "Rent",
-        "Utilities",
-        "Salaries",
-        "Marketing",
-        "Logistics",
-        "Maintenance",
-        "Other",
-      ],
     },
 
     description: {
@@ -46,13 +37,7 @@ const expenseSchema = new mongoose.Schema(
     paymentMode: {
       type: String,
       required: true,
-      enum: [
-        "Cash",
-        "Bank Transfer",
-        "UPI",
-        "Credit Card",
-        "Cheque",
-      ],
+      trim: true,
     },
 
     reference: {

@@ -4,15 +4,13 @@ import { getUserDisplayName } from "@shared/utils/userUtils";
 import { useCustomization } from "@shared/hooks/useCustomization";
 import { hasPermission } from "@shared/utils/permissions";
 
-export default function Sidebar({ page, onNav, role, collapsed, onToggle, user }) {
+export default function Sidebar({ page, onNav, role, collapsed, onToggle, user, isPlatformAdmin: propsIsPlatformAdmin }) {
   const { t } = useCustomization();
   const normRole = String(role || user?.role || "").toLowerCase().replace(/[-_\s]/g, "");
   const isPlatformAdmin =
-    normRole === "superadmin" ||
-    normRole.includes("admin") ||
-    normRole === "support" ||
-    normRole === "billing" ||
-    (!user?.ownerId && normRole !== "owner");
+    propsIsPlatformAdmin !== undefined
+      ? Boolean(propsIsPlatformAdmin)
+      : normRole === "superadmin";
 
   const displayName = getUserDisplayName(user);
   const displayEmail = user?.email || "admin@smartbill.io";

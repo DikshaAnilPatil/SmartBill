@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import {
   getExpenses,
   createExpense,
+  updateExpense,
+  deleteExpense,
 } from "@shared/api/expenseApi";
 import { useCustomization } from "@shared/hooks/useCustomization";
 
@@ -25,6 +27,8 @@ import {
   CircleCheck,
   AlertCircle,
   ArrowUpRight,
+  Pencil,
+  Trash2,
 } from "lucide-react";
 
 import {
@@ -34,12 +38,24 @@ import {
   Input,
   Modal,
   Select,
+  SearchableSelect,
   Toast,
 } from "@shared/components/common/ui";
+
+const DEFAULT_CATEGORIES = [
+  "Rent",
+  "Utilities",
+  "Salaries",
+  "Marketing",
+  "Logistics",
+  "Maintenance",
+  "Other",
+];
 
 export default function ExpensesScreen() {
   const { formatCurrency, formatDate } = useCustomization();
   const [showModal, setShowModal] = useState(false);
+  const [editingExpenseId, setEditingExpenseId] = useState(null);
   const [expenseList, setExpenseList] = useState([]);
   const [loading, setLoading] = useState(true);
   const [expensePaymentMethods, setExpensePaymentMethods] = useState(() => {
@@ -64,6 +80,50 @@ export default function ExpensesScreen() {
     reference: "",
     status: "Paid",
   });
+
+  const resetForm = () => {
+    setEditingExpenseId(null);
+    setForm({
+      category: "Rent",
+      description: "",
+      amount: "",
+      date: new Date().toISOString().slice(0, 10),
+      paymentMode: "Bank Transfer",
+      reference: "",
+      status: "Paid",
+    });
+  };
+
+  const handleEditExpense = (exp) => {
+    setEditingExpenseId(exp.id || exp._id);
+    let dateStr = new Date().toISOString().slice(0, 10);
+    if (exp.date) {
+      try {
+        dateStr = new Date(exp.date).toISOString().slice(0, 10);
+      } catch (_) {}
+    }
+    setForm({
+      category: exp.category || "Other",
+      description: exp.description || "",
+      amount: exp.amount ? String(exp.amount) : "",
+      date: dateStr,
+      paymentMode: exp.paymentMode || "Bank Transfer",
+      reference: exp.reference || "",
+      status: exp.status || "Paid",
+    });
+    setShowModal(true);
+  };
+
+  const handleDeleteExpense = async (id) => {
+    if (!window.confirm("Are you sure you want to delete this expense?")) return;
+    try {
+      await deleteExpense(id);
+      setExpenseList((prev) => prev.filter((item) => (item.id || item._id) !== id));
+      showToast("Expense deleted successfully", "success");
+    } catch (err) {
+      showToast(err.message || "Unable to delete expense", "error");
+    }
+  };
 
   useEffect(() => {
     const handleUpdate = () => {
@@ -209,16 +269,19 @@ export default function ExpensesScreen() {
         />
       )}
 
-      {/* Add Expense Modal */}
+      {/* Add / Edit Expense Modal */}
       {showModal && (
         <Modal
-          title="Add Expense"
-          onClose={() => setShowModal(false)}
+          title={editingExpenseId ? "Edit Expense" : "Add Expense"}
+          onClose={() => {
+            setShowModal(false);
+            resetForm();
+          }}
         >
           <div className="space-y-4">
 
             {/* Category */}
-            <Select
+            <SearchableSelect
               label="Category"
               value={form.category}
               onChange={(v) =>
@@ -227,15 +290,8 @@ export default function ExpensesScreen() {
                   category: v,
                 }))
               }
-              options={[
-                "Rent",
-                "Utilities",
-                "Salaries",
-                "Marketing",
-                "Logistics",
-                "Maintenance",
-                "Other",
-              ]}
+              options={DEFAULT_CATEGORIES}
+              placeholder="Select or type category..."
             />
 
             {/* Description */}
@@ -327,7 +383,10 @@ export default function ExpensesScreen() {
 
               <Btn
                 variant="outline"
-                onClick={() => setShowModal(false)}
+                onClick={() => {
+                  setShowModal(false);
+                  resetForm();
+                }}
                 className="flex-1 justify-center"
               >
                 Cancel
@@ -339,6 +398,11 @@ export default function ExpensesScreen() {
                   const amountNum = Number(form.amount || 0);
 
                   // Validation
+                  if (!form.category || !form.category.trim()) {
+                    showToast("Category is required", "error");
+                    return;
+                  }
+
                   if (!form.description.trim()) {
                     showToast("Description is required", "error");
                     return;
@@ -350,42 +414,34 @@ export default function ExpensesScreen() {
                   }
 
                   try {
-                    const data = await createExpense({
-                      category: form.category,
+                    const payload = {
+                      category: form.category.trim(),
                       description: form.description.trim(),
                       amount: amountNum,
                       date: form.date,
                       paymentMode: form.paymentMode,
                       reference: form.reference.trim(),
                       status: form.status,
-                    });
+                    };
 
-                    // Add the expense returned by MongoDB
-                    setExpenseList((prev) => [
-                      data.expense,
-                      ...prev,
-                    ]);
+                    if (editingExpenseId) {
+                      const data = await updateExpense(editingExpenseId, payload);
+                      setExpenseList((prev) =>
+                        prev.map((item) =>
+                          (item.id || item._id) === editingExpenseId ? data.expense : item
+                        )
+                      );
+                      showToast("Expense updated successfully", "success");
+                    } else {
+                      const data = await createExpense(payload);
+                      setExpenseList((prev) => [data.expense, ...prev]);
+                      showToast("Expense saved successfully", "success");
+                    }
 
-                    // Close modal
                     setShowModal(false);
-
-                    // Reset form
-                    setForm({
-                      category: "Rent",
-                      description: "",
-                      date: new Date().toISOString().slice(0, 10),
-                      amount: "",
-                      paymentMode: "Bank Transfer",
-                      reference: "",
-                      status: "Paid",
-                    });
-
-                    showToast(
-                      "Expense saved successfully",
-                      "success"
-                    );
+                    resetForm();
                   } catch (error) {
-                    console.error("CREATE EXPENSE ERROR:", error);
+                    console.error("SAVE EXPENSE ERROR:", error);
 
                     showToast(
                       error.message || "Unable to save expense",
@@ -395,7 +451,7 @@ export default function ExpensesScreen() {
                 }}
                 className="flex-1 justify-center"
               >
-                Save Expense
+                {editingExpenseId ? "Update Expense" : "Save Expense"}
               </Btn>
 
             </div>
@@ -492,7 +548,10 @@ export default function ExpensesScreen() {
           <Btn
             variant="primary"
             size="md"
-            onClick={() => setShowModal(true)}
+            onClick={() => {
+              resetForm();
+              setShowModal(true);
+            }}
             icon={<Plus className="w-4 h-4" />}
           >
             Add Expense
@@ -511,6 +570,7 @@ export default function ExpensesScreen() {
                 <th className="px-5 py-3.5">Amount</th>
                 <th className="px-5 py-3.5">Mode</th>
                 <th className="px-5 py-3.5">Status</th>
+                <th className="px-5 py-3.5 text-right">Actions</th>
               </tr>
             </thead>
 
@@ -519,7 +579,7 @@ export default function ExpensesScreen() {
               {expenseList.length === 0 ? (
 
                 <tr key="empty-state">
-                  <td colSpan={6} className="px-5 py-12 text-center">
+                  <td colSpan={7} className="px-5 py-12 text-center">
                     <div className="flex flex-col items-center justify-center max-w-sm mx-auto">
                       <div className="w-12 h-12 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 flex items-center justify-center mb-3.5 border border-slate-200/80 dark:border-slate-700/80">
                         <Receipt className="w-6 h-6" />
@@ -533,7 +593,10 @@ export default function ExpensesScreen() {
                       <Btn
                         variant="primary"
                         size="sm"
-                        onClick={() => setShowModal(true)}
+                        onClick={() => {
+                          resetForm();
+                          setShowModal(true);
+                        }}
                         icon={<Plus className="w-4 h-4" />}
                       >
                         Add Expense
@@ -573,6 +636,27 @@ export default function ExpensesScreen() {
 
                     <td className="px-5 py-4 whitespace-nowrap">
                       {renderStatusBadge(e.status)}
+                    </td>
+
+                    <td className="px-5 py-4 whitespace-nowrap text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleEditExpense(e)}
+                          className="p-1.5 rounded-lg text-slate-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-slate-800 transition-colors"
+                          title="Edit Expense"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteExpense(e.id || e._id)}
+                          className="p-1.5 rounded-lg text-slate-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-slate-800 transition-colors"
+                          title="Delete Expense"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     </td>
 
                   </tr>

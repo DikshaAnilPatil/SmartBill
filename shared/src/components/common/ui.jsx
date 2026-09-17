@@ -11,6 +11,8 @@ import {
   EyeOff,
   Plus,
   Minus,
+  ChevronDown,
+  Check,
 } from "lucide-react";
 
 export function Btn({
@@ -382,6 +384,136 @@ export function Select({ label, value, onChange, options = [] }) {
   );
 }
 
+export function SearchableSelect({
+  label,
+  value,
+  onChange,
+  options = [],
+  placeholder = "Select or type...",
+  className = "",
+  error,
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [inputValue, setInputValue] = useState(value || "");
+  const containerRef = useRef(null);
+
+  useEffect(() => {
+    setInputValue(value || "");
+  }, [value]);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (containerRef.current && !containerRef.current.contains(e.target)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const rawOptions = options.map((o) =>
+    typeof o === "object" && o !== null ? o.value || o.label : o
+  );
+
+  const trimmedInput = inputValue.trim();
+  const filteredOptions = rawOptions.filter((opt) =>
+    String(opt).toLowerCase().includes(trimmedInput.toLowerCase())
+  );
+
+  const isCustomValue =
+    trimmedInput.length > 0 &&
+    !rawOptions.some(
+      (opt) => String(opt).toLowerCase() === trimmedInput.toLowerCase()
+    );
+
+  const handleInputChange = (e) => {
+    const val = e.target.value;
+    setInputValue(val);
+    onChange?.(val);
+    setIsOpen(true);
+  };
+
+  const handleSelectOption = (opt) => {
+    setInputValue(opt);
+    onChange?.(opt);
+    setIsOpen(false);
+  };
+
+  return (
+    <div className={`flex flex-col gap-1.5 relative ${className}`} ref={containerRef}>
+      {label && (
+        <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
+          {label}
+        </label>
+      )}
+      <div className="relative">
+        <input
+          type="text"
+          value={inputValue}
+          onChange={handleInputChange}
+          onFocus={() => setIsOpen(true)}
+          placeholder={placeholder}
+          className={`w-full border border-gray-300 rounded-md bg-white text-sm text-gray-900 placeholder:text-gray-400 outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-colors py-2 pl-3 pr-9 ${
+            error ? "border-red-500 focus:ring-red-500 focus:border-red-500" : ""
+          }`}
+        />
+        <button
+          type="button"
+          onClick={() => setIsOpen((prev) => !prev)}
+          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors p-0.5 focus:outline-none"
+          tabIndex="-1"
+        >
+          <ChevronDown
+            className={`w-4 h-4 transition-transform duration-200 ${
+              isOpen ? "rotate-180" : ""
+            }`}
+          />
+        </button>
+
+        {isOpen && (
+          <div className="absolute z-50 left-0 right-0 mt-1 bg-white border border-gray-200 rounded-md shadow-lg max-h-56 overflow-y-auto py-1 text-sm">
+            {filteredOptions.map((opt) => {
+              const isSelected =
+                String(opt).toLowerCase() === (value || "").toLowerCase();
+              return (
+                <div
+                  key={opt}
+                  onClick={() => handleSelectOption(opt)}
+                  className={`px-3 py-2 cursor-pointer flex items-center justify-between transition-colors ${
+                    isSelected
+                      ? "bg-blue-50 text-blue-600 font-medium"
+                      : "text-gray-700 hover:bg-slate-100"
+                  }`}
+                >
+                  <span>{opt}</span>
+                  {isSelected && <Check className="w-4 h-4 text-blue-600" />}
+                </div>
+              );
+            })}
+
+            {isCustomValue && (
+              <div
+                onClick={() => handleSelectOption(trimmedInput)}
+                className="px-3 py-2 cursor-pointer flex items-center gap-2 border-t border-gray-100 text-blue-600 hover:bg-blue-50 font-medium"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Use custom category "{trimmedInput}"</span>
+              </div>
+            )}
+
+            {filteredOptions.length === 0 && !isCustomValue && (
+              <div className="px-3 py-2 text-xs text-slate-400 text-center">
+                Type a custom category name...
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+      {error && <p className="text-xs text-red-600 mt-0.5">{error}</p>}
+    </div>
+  );
+}
+
 export function StatCard({ label, value, sub, trend, icon, color }) {
   return (
     <Card className="p-5 hover:shadow-md transition-shadow">
@@ -410,7 +542,7 @@ export function StatCard({ label, value, sub, trend, icon, color }) {
   );
 }
 
-export function Modal({ title, onClose, children, className = "max-w-lg" }) {
+export function Modal({ title, onClose, children, className = "max-w-lg", closeOnBackdropClick = false }) {
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (e.key === "Escape" && onClose) {
@@ -424,11 +556,16 @@ export function Modal({ title, onClose, children, className = "max-w-lg" }) {
   return (
     <div
       onClick={(e) => {
-        if (e.target === e.currentTarget && onClose) onClose();
+        if (closeOnBackdropClick && e.target === e.currentTarget && onClose) {
+          onClose();
+        }
       }}
       className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs overflow-y-auto animate-in fade-in duration-150"
     >
-      <div className={`w-full max-h-[90vh] overflow-y-auto bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-2xl animate-in zoom-in-95 duration-150 ${className}`}>
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className={`w-full max-h-[90vh] overflow-y-auto bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-2xl animate-in zoom-in-95 duration-150 ${className}`}
+      >
         <div className="flex items-center justify-between p-5 border-b border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-900 sticky top-0 z-10">
           <h3 className="font-bold text-slate-900 dark:text-white text-lg">{title}</h3>
           <button

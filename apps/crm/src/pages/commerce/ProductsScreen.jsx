@@ -83,6 +83,8 @@ export default function ProductsScreen() {
     loadProducts();
   }, [loadProducts]);
   
+  const [supplierList, setSupplierList] = useState([]);
+
   // Load suppliers dynamically
   useEffect(() => {
     fetchSuppliers()
@@ -109,7 +111,6 @@ export default function ProductsScreen() {
   const [showEditCategoryInput, setShowEditCategoryInput] = useState(false);
   const [showCategoryManager, setShowCategoryManager] = useState(false);
   const [categoryToRemove, setCategoryToRemove] = useState(null);
-  const [supplierList, setSupplierList] = useState([]);
 
   // Persist categories list to localStorage
   useEffect(() => {
