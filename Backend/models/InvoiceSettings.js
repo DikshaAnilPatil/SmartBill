@@ -59,10 +59,51 @@ const invoiceSettingsSchema = new mongoose.Schema(
     signatureUrl: { type: String, default: "" },
     showSignature: { type: Boolean, default: false },
     
-    // Appearance
-    template: { type: String, default: "Classic" }, 
+    // Appearance & Template Customization
+    template: { type: String, default: "classic_gst" }, 
+    defaultTemplate: { type: String, default: "classic_gst" },
     primaryColor: { type: String, default: "#2563eb" },
-    paperSize: { type: String, default: "A4" }, 
+    secondaryColor: { type: String, default: "#64748b" },
+    accentColor: { type: String, default: "#f59e0b" },
+    fontFamily: { type: String, default: "Inter" },
+    fontSize: { type: String, default: "medium" }, // small, medium, large
+    paperSize: { type: String, default: "A4" }, // A4, A5, Thermal 80mm, Thermal 58mm
+    headerLayout: { type: String, default: "standard" }, // standard, split, centered, banner, minimal
+    tableStyle: { type: String, default: "bordered" }, // bordered, striped, minimal, modern_filled
+    borderStyle: { type: String, default: "solid" }, // solid, subtle, rounded, clean
+    
+    // Logo & Header Options
+    showLogo: { type: Boolean, default: true },
+    logoPosition: { type: String, default: "left" }, // left, center, right
+    logoSize: { type: String, default: "medium" }, // small, medium, large
+    
+    // Advanced Section & GST Toggles
+    showPlaceOfSupply: { type: Boolean, default: true },
+    showStateCode: { type: Boolean, default: true },
+    showReverseCharge: { type: Boolean, default: false },
+    showTaxBreakdown: { type: Boolean, default: true },
+    showCess: { type: Boolean, default: false },
+    showAmountInWords: { type: Boolean, default: true },
+    showComputerGeneratedNotice: { type: Boolean, default: true },
+    showPaidAmount: { type: Boolean, default: true },
+    showTotalInWords: { type: Boolean, default: true },
+    showDueDate: { type: Boolean, default: true },
+    showPOReference: { type: Boolean, default: true },
+    
+    // Custom saved presets
+    customTemplates: {
+      type: [
+        {
+          id: { type: String },
+          name: { type: String },
+          template: { type: String },
+          config: { type: mongoose.Schema.Types.Mixed },
+          createdAt: { type: Date, default: Date.now },
+          updatedAt: { type: Date, default: Date.now },
+        },
+      ],
+      default: [],
+    },
   },
   { timestamps: true }
 );
