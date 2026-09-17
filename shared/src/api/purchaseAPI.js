@@ -33,6 +33,15 @@ export const markPurchaseAsPaid = (id) =>
   axiosClient.put(`/purchases/${id}/mark-paid`).then((res) => res.data);
 
 /**
+ * Record a payment installment towards a purchase.
+ * @param {string} id
+ * @param {object} paymentData - { amount, paymentMethod, paymentDate, referenceNo, notes }
+ * @returns {{ message: string, purchase: object }}
+ */
+export const recordPurchasePayment = (id, paymentData) =>
+  axiosClient.put(`/purchases/${id}/pay`, paymentData).then((res) => res.data);
+
+/**
  * Create a purchase return / Debit Note.
  * Deducts stock from inventory and updates supplier balance.
  * @param {object} payload

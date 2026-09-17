@@ -123,19 +123,23 @@ export const createPurchase = async (req, res) => {
 
     let finalPaid = 0;
     let finalRemaining = numTotal;
+    let finalStatus = "Unpaid";
 
-    if (paymentStatus === "Paid") {
+    if (paymentStatus === "Paid" || numPaid >= numTotal) {
       finalPaid = numTotal;
       finalRemaining = 0;
-    } else if (paymentStatus === "Partially Paid") {
+      finalStatus = "Paid";
+    } else if (numPaid > 0) {
       finalPaid = numPaid;
       finalRemaining = Math.max(0, numTotal - numPaid);
+      finalStatus = "Partially Paid";
     } else {
       finalPaid = 0;
       finalRemaining = numTotal;
+      finalStatus = "Unpaid";
     }
 
-    const finalPaymentMethod = ["Paid", "Partially Paid"].includes(paymentStatus) ? paymentMethod : "Cash";
+    const finalPaymentMethod = ["Paid", "Partially Paid"].includes(finalStatus) ? paymentMethod : "Cash";
 
     // Enforce Strict Negative Cash Rule
     if (finalPaid > 0 && finalPaymentMethod === "Cash") {
@@ -149,6 +153,19 @@ export const createPurchase = async (req, res) => {
         }
       }
     }
+
+    const initialPayments =
+      finalPaid > 0
+        ? [
+            {
+              amount: finalPaid,
+              paymentMethod: finalPaymentMethod,
+              paymentDate: new Date(purchaseDate),
+              referenceNo: String(purchaseOrderNo || supplierInvoiceNo || "").trim(),
+              notes: "Initial Purchase Payment",
+            },
+          ]
+        : [];
 
     // 2. Create Purchase Record
     const newPurchase = await Purchase.create({
@@ -164,10 +181,11 @@ export const createPurchase = async (req, res) => {
       gstTotal: Number(gstTotal) || 0,
       discountTotal: Number(discountTotal) || 0,
       totalAmount: numTotal,
-      paymentStatus,
+      paymentStatus: finalStatus,
       paymentMethod: finalPaymentMethod,
       amountPaid: finalPaid,
       remainingAmount: finalRemaining,
+      payments: initialPayments,
       notes: String(notes).trim(),
     });
 
@@ -236,7 +254,7 @@ export const createPurchase = async (req, res) => {
         ownerId: req.user._id,
         userId: req.user.actualUserId || req.user._id,
         title: `Purchase Recorded: #${newPurchase.supplierInvoiceNo || newPurchase.purchaseOrderNo || "Bill"}`,
-        message: `Purchase of ₹${numTotal.toLocaleString("en-IN")} from ${supplierName} recorded (${paymentStatus}).`,
+        message: `Purchase of ₹${numTotal.toLocaleString("en-IN")} from ${supplierName} recorded (${finalStatus === "Paid" ? "Payment Cleared" : `Payment Due: ₹${finalRemaining}`}).`,
         type: "info",
         category: "purchase",
         link: "purchase",
@@ -244,7 +262,7 @@ export const createPurchase = async (req, res) => {
           purchaseId: newPurchase._id,
           totalAmount: numTotal,
           supplierName,
-          paymentStatus,
+          paymentStatus: finalStatus,
         },
       });
     } catch (notifErr) {
@@ -258,6 +276,115 @@ export const createPurchase = async (req, res) => {
   } catch (error) {
     console.error("CREATE PURCHASE ERROR:", error.message);
     return res.status(500).json({ message: error.message || "Failed to save purchase." });
+  }
+};
+
+// ================= RECORD PAYMENT FOR PURCHASE =================
+export const recordPurchasePayment = async (req, res) => {
+  try {
+    const { amount, paymentMethod = "Cash", paymentDate = new Date(), referenceNo = "", notes = "" } = req.body;
+    const payNum = Number(amount);
+
+    if (isNaN(payNum) || payNum <= 0) {
+      return res.status(400).json({ message: "Please provide a valid payment amount greater than 0." });
+    }
+
+    const purchase = await Purchase.findOne({
+      _id: req.params.id,
+      ownerId: req.user._id,
+    });
+
+    if (!purchase) {
+      return res.status(404).json({ message: "Purchase record not found." });
+    }
+
+    const currentDue = Number(purchase.remainingAmount) > 0 
+      ? Number(purchase.remainingAmount)
+      : Math.max(0, Number(purchase.totalAmount || 0) - Number(purchase.amountPaid || 0));
+
+    if (currentDue <= 0 && purchase.paymentStatus === "Paid") {
+      return res.status(400).json({ message: "This purchase order is already fully cleared. No payment is due." });
+    }
+
+    const paymentApplied = Math.min(payNum, currentDue);
+
+    // Enforce Strict Negative Cash Rule
+    if (paymentMethod === "Cash") {
+      const settings = await AccountingSettings.findOne({ userId: req.user._id }).lean();
+      if (settings?.strictNegativeCash) {
+        const cashBalance = await getCashBalance(req.user._id);
+        if (cashBalance - paymentApplied < 0) {
+          return res.status(400).json({
+            message: `Strict Negative Cash Rule is enabled. Your cash balance is ${cashBalance}, which is insufficient for this ${paymentApplied} payment.`
+          });
+        }
+      }
+    }
+
+    const newAmountPaid = (Number(purchase.amountPaid) || 0) + paymentApplied;
+    const newRemainingDue = Math.max(0, (Number(purchase.totalAmount) || 0) - newAmountPaid);
+    const newStatus = newRemainingDue === 0 ? "Paid" : "Partially Paid";
+
+    purchase.amountPaid = newAmountPaid;
+    purchase.remainingAmount = newRemainingDue;
+    purchase.paymentStatus = newStatus;
+    purchase.paymentMethod = paymentMethod;
+
+    if (!Array.isArray(purchase.payments)) {
+      purchase.payments = [];
+    }
+
+    purchase.payments.push({
+      amount: paymentApplied,
+      paymentMethod,
+      paymentDate: new Date(paymentDate),
+      referenceNo: String(referenceNo || "").trim(),
+      notes: String(notes || "").trim(),
+    });
+
+    await purchase.save();
+
+    // Reduce supplier balance
+    let supplierDoc = null;
+    if (purchase.supplierId) {
+      supplierDoc = await Supplier.findOne({ _id: purchase.supplierId, ownerId: req.user._id });
+    }
+    if (!supplierDoc && purchase.supplierName) {
+      supplierDoc = await Supplier.findOne({ name: String(purchase.supplierName).trim(), ownerId: req.user._id });
+    }
+    if (supplierDoc && paymentApplied > 0) {
+      supplierDoc.balance = Math.max(0, (Number(supplierDoc.balance) || 0) - paymentApplied);
+      await supplierDoc.save();
+    }
+
+    // Create Notification
+    try {
+      await createNotification({
+        ownerId: req.user._id,
+        userId: req.user.actualUserId || req.user._id,
+        title: `Payment Recorded: #${purchase.supplierInvoiceNo || purchase.purchaseOrderNo || "Bill"}`,
+        message: `Payment of ₹${paymentApplied.toLocaleString("en-IN")} recorded for ${purchase.supplierName}. Status: ${newStatus === "Paid" ? "Payment Cleared" : `Payment Due: ₹${newRemainingDue}`}`,
+        type: "success",
+        category: "purchase",
+        link: "purchase",
+        metadata: {
+          purchaseId: purchase._id,
+          amountPaid: paymentApplied,
+          remainingAmount: newRemainingDue,
+          paymentStatus: newStatus,
+        },
+      });
+    } catch (notifErr) {
+      console.error("Purchase payment notification error:", notifErr.message);
+    }
+
+    return res.status(200).json({
+      message: newStatus === "Paid" ? "Full payment received. Purchase payment cleared!" : "Payment recorded successfully.",
+      purchase,
+    });
+  } catch (error) {
+    console.error("RECORD PURCHASE PAYMENT ERROR:", error.message);
+    return res.status(500).json({ message: error.message || "Failed to record purchase payment." });
   }
 };
 
@@ -276,19 +403,35 @@ export const markPurchaseAsPaid = async (req, res) => {
     }
 
     // If already paid, no update is required
-    if (purchase.paymentStatus === "Paid") {
+    if (purchase.paymentStatus === "Paid" && Number(purchase.remainingAmount || 0) === 0) {
       return res.status(200).json({
-        message: "Purchase is already marked as paid.",
+        message: "Purchase payment is already fully cleared.",
         purchase,
       });
     }
 
-    const previousRemainingAmount = Number(purchase.remainingAmount) || 0;
+    const previousRemainingAmount = Number(purchase.remainingAmount) > 0
+      ? Number(purchase.remainingAmount)
+      : Math.max(0, (Number(purchase.totalAmount) || 0) - (Number(purchase.amountPaid) || 0));
 
     // Update purchase payment details
     purchase.paymentStatus = "Paid";
     purchase.amountPaid = Number(purchase.totalAmount) || 0;
     purchase.remainingAmount = 0;
+
+    if (!Array.isArray(purchase.payments)) {
+      purchase.payments = [];
+    }
+
+    if (previousRemainingAmount > 0) {
+      purchase.payments.push({
+        amount: previousRemainingAmount,
+        paymentMethod: purchase.paymentMethod || "Cash",
+        paymentDate: new Date(),
+        referenceNo: String(purchase.purchaseOrderNo || purchase.supplierInvoiceNo || "").trim(),
+        notes: "Full payment settlement",
+      });
+    }
 
     await purchase.save();
 
@@ -333,7 +476,7 @@ export const markPurchaseAsPaid = async (req, res) => {
           purchase.totalAmount || 0
         ).toLocaleString("en-IN")} to ${
           purchase.supplierName
-        } has been marked as paid.`,
+        } has been fully cleared.`,
         type: "success",
         category: "purchase",
         link: "purchase",
@@ -352,7 +495,7 @@ export const markPurchaseAsPaid = async (req, res) => {
     }
 
     return res.status(200).json({
-      message: "Purchase marked as paid successfully.",
+      message: "Purchase marked as fully paid & cleared.",
       purchase,
     });
   } catch (error) {

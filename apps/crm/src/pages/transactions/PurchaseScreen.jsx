@@ -13,11 +13,14 @@ import {
   X,
   DollarSign,
   Package,
+  CreditCard,
+  Calendar,
 } from "lucide-react";
 import {
   createPurchase,
   fetchPurchases,
   markPurchaseAsPaid,
+  recordPurchasePayment,
   createPurchaseReturn,
   fetchPurchaseReturns,
 } from "@shared/api/purchaseAPI";
@@ -101,6 +104,19 @@ export default function PurchaseScreen() {
   const [searchHistory, setSearchHistory] = useState("");
   const [filterMonth, setFilterMonth] = useState("");
   const [toast, setToast] = useState(null);
+
+  // Pay Due Modal States (Record Installment or Full Payment on Due Purchase)
+  const [showPayModal, setShowPayModal] = useState(false);
+  const [payingPurchase, setPayingPurchase] = useState(null);
+  const [payAmountInput, setPayAmountInput] = useState("");
+  const [payMethod, setPayMethod] = useState("Cash");
+  const [payDate, setPayDate] = useState(new Date().toISOString().slice(0, 10));
+  const [payRef, setPayRef] = useState("");
+  const [payNotes, setPayNotes] = useState("");
+  const [submittingPayment, setSubmittingPayment] = useState(false);
+
+  // View Purchase Order Modal State
+  const [viewPurchaseModal, setViewPurchaseModal] = useState(null);
 
   // Purchase Return Modal States
   const [showReturnModal, setShowReturnModal] = useState(false);
@@ -399,8 +415,20 @@ export default function PurchaseScreen() {
   const handleMarkAsPaid = async (purchaseId) => {
     try {
       await markPurchaseAsPaid(purchaseId);
-      showToast("Purchase marked as paid successfully!", "success");
+      showToast("Purchase payment marked as fully cleared!", "success");
       await loadData();
+      if (viewPurchaseModal && (viewPurchaseModal._id === purchaseId || viewPurchaseModal.id === purchaseId)) {
+        setViewPurchaseModal((prev) =>
+          prev
+            ? {
+                ...prev,
+                paymentStatus: "Paid",
+                amountPaid: prev.totalAmount,
+                remainingAmount: 0,
+              }
+            : null
+        );
+      }
     } catch (err) {
       console.error("MARK PURCHASE PAID ERROR:", err);
       showToast(
@@ -410,6 +438,65 @@ export default function PurchaseScreen() {
         "error"
       );
     }
+  };
+
+  const openPayModal = (purchase) => {
+    setPayingPurchase(purchase);
+    const due =
+      purchase.remainingAmount !== undefined && purchase.remainingAmount !== null
+        ? Number(purchase.remainingAmount)
+        : Math.max(0, Number(purchase.totalAmount || 0) - Number(purchase.amountPaid || 0));
+    setPayAmountInput(String(due));
+    setPayMethod(purchase.paymentMethod || "Cash");
+    setPayDate(new Date().toISOString().slice(0, 10));
+    setPayRef("");
+    setPayNotes("");
+    setShowPayModal(true);
+  };
+
+  const handleRecordPaymentSubmit = async () => {
+    if (!payingPurchase) return;
+    const amount = Number(payAmountInput);
+    const due =
+      payingPurchase.remainingAmount !== undefined && payingPurchase.remainingAmount !== null
+        ? Number(payingPurchase.remainingAmount)
+        : Math.max(0, Number(payingPurchase.totalAmount || 0) - Number(payingPurchase.amountPaid || 0));
+
+    if (isNaN(amount) || amount <= 0) {
+      showToast("Please enter a valid payment amount greater than 0.", "error");
+      return;
+    }
+    if (amount > due) {
+      showToast(`Payment amount cannot exceed remaining due of ${fmt(due)}.`, "error");
+      return;
+    }
+
+    setSubmittingPayment(true);
+    try {
+      const res = await recordPurchasePayment(payingPurchase._id || payingPurchase.id, {
+        amount,
+        paymentMethod: payMethod,
+        paymentDate: payDate,
+        referenceNo: payRef,
+        notes: payNotes,
+      });
+      showToast(res.message || "Payment recorded successfully!", "success");
+      setShowPayModal(false);
+      setPayingPurchase(null);
+      await loadData();
+      if (viewPurchaseModal && (viewPurchaseModal._id === payingPurchase._id || viewPurchaseModal.id === payingPurchase.id)) {
+        setViewPurchaseModal(res.purchase || null);
+      }
+    } catch (err) {
+      console.error("RECORD PAYMENT ERROR:", err);
+      showToast(err.response?.data?.message || err.message || "Failed to record payment.", "error");
+    } finally {
+      setSubmittingPayment(false);
+    }
+  };
+
+  const openViewPurchaseModal = (purchase) => {
+    setViewPurchaseModal(purchase);
   };
 
   // ─────────────────────────────────────────────────────────────
@@ -1052,13 +1139,36 @@ export default function PurchaseScreen() {
                   <select
                     value={paymentStatus}
                     onChange={(e) => setPaymentStatus(e.target.value)}
-                    className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-900 dark:text-white outline-none focus:border-blue-500"
+                    className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-900 dark:text-white outline-none focus:border-blue-500 font-medium"
                   >
-                    <option value="Unpaid">Unpaid (Credit)</option>
-                    <option value="Partially Paid">Partially Paid</option>
-                    <option value="Paid">Fully Paid</option>
+                    <option value="Unpaid">Payment Due (Credit / Unpaid)</option>
+                    <option value="Partially Paid">Partially Paid (Advance / Installment)</option>
+                    <option value="Paid">Fully Paid (Clear Payment)</option>
                   </select>
                 </div>
+
+                {/* Status Indicator Banner */}
+                {paymentStatus === "Unpaid" && (
+                  <div className="bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/60 rounded-lg p-2.5 flex items-center justify-between text-xs">
+                    <span className="text-red-700 dark:text-red-300 font-medium flex items-center gap-1.5">
+                      <DollarSign className="w-3.5 h-3.5" /> Total Payment Due:
+                    </span>
+                    <span className="font-mono font-bold text-red-700 dark:text-red-300">
+                      {fmt(totalAmount)}
+                    </span>
+                  </div>
+                )}
+
+                {paymentStatus === "Paid" && (
+                  <div className="bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900/60 rounded-lg p-2.5 flex items-center justify-between text-xs">
+                    <span className="text-emerald-700 dark:text-emerald-300 font-medium flex items-center gap-1.5">
+                      <Check className="w-3.5 h-3.5" /> Full Payment:
+                    </span>
+                    <span className="font-mono font-bold text-emerald-700 dark:text-emerald-300">
+                      {fmt(totalAmount)} (Cleared)
+                    </span>
+                  </div>
+                )}
 
                 {/* Payment Method */}
                 {paymentStatus !== "Unpaid" && (
@@ -1084,7 +1194,7 @@ export default function PurchaseScreen() {
                 {paymentStatus === "Partially Paid" && (
                   <div className="bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-lg p-3 space-y-2">
                     <label className="block text-xs font-medium text-slate-700 dark:text-slate-300">
-                      Amount Paid (₹) *
+                      Amount Paid Now (₹) *
                     </label>
                     <input
                       type="text"
@@ -1094,13 +1204,14 @@ export default function PurchaseScreen() {
                         const val = e.target.value.replace(/[^0-9.]/g, "");
                         setAmountPaidInput(val);
                       }}
+                      placeholder="Enter advance amount..."
                       className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-600 rounded px-2.5 py-1.5 text-xs text-slate-900 dark:text-white font-mono outline-none focus:border-blue-500"
                     />
                     <div className="flex justify-between text-xs font-semibold pt-1 border-t border-slate-200 dark:border-slate-700">
                       <span className="text-slate-600 dark:text-slate-400">
-                        Remaining:
+                        Remaining Payment Due:
                       </span>
-                      <span className="font-mono text-red-600 dark:text-red-400">
+                      <span className="font-mono font-bold text-red-600 dark:text-red-400">
                         {fmt(remainingAmount)}
                       </span>
                     </div>
@@ -1195,10 +1306,9 @@ export default function PurchaseScreen() {
                     <th className="px-4 py-3">Invoice / PO No.</th>
                     <th className="px-4 py-3">Date</th>
                     <th className="px-4 py-3">Items</th>
-                    <th className="px-4 py-3 text-right">Subtotal</th>
-                    <th className="px-4 py-3 text-right">GST</th>
                     <th className="px-4 py-3 text-right">Total Amount</th>
-                    <th className="px-4 py-3 text-center">Status</th>
+                    <th className="px-4 py-3 text-right">Paid Amount</th>
+                    <th className="px-4 py-3 text-center">Payment Status</th>
                     <th className="px-4 py-3 text-right">Remaining Due</th>
                     <th className="px-4 py-3 text-center">Actions</th>
                   </tr>
@@ -1223,10 +1333,14 @@ export default function PurchaseScreen() {
                     const itemCount = Array.isArray(purchase.items)
                       ? purchase.items.length
                       : purchase.items || 0;
+                    const totAmt = Number(purchase.totalAmount || purchase.total || 0);
+                    const paidAmt = Number(purchase.amountPaid || 0);
                     const remAmt =
-                      purchase.remainingAmount !== undefined
-                        ? purchase.remainingAmount
-                        : 0;
+                      purchase.remainingAmount !== undefined && purchase.remainingAmount !== null
+                        ? Number(purchase.remainingAmount)
+                        : Math.max(0, totAmt - paidAmt);
+                    const isFullyPaid = remAmt === 0 || (purchase.paymentStatus === "Paid" && remAmt === 0);
+                    const isPartiallyPaid = remAmt > 0 && paidAmt > 0;
 
                     return (
                       <tr
@@ -1234,13 +1348,23 @@ export default function PurchaseScreen() {
                         className="hover:bg-slate-50 dark:hover:bg-slate-800/30"
                       >
                         <td className="px-4 py-3 font-medium text-slate-900 dark:text-white">
-                          {suppName}
+                          <button
+                            onClick={() => openViewPurchaseModal(purchase)}
+                            className="text-left font-semibold hover:text-blue-600 hover:underline cursor-pointer"
+                          >
+                            {suppName}
+                          </button>
                         </td>
                         <td className="px-4 py-3 font-mono text-xs text-blue-600 dark:text-blue-400">
-                          {invNo}
-                          {poNo && (
-                            <span className="text-slate-400 ml-1">{poNo}</span>
-                          )}
+                          <button
+                            onClick={() => openViewPurchaseModal(purchase)}
+                            className="hover:underline cursor-pointer font-mono text-left"
+                          >
+                            {invNo}
+                            {poNo && (
+                              <span className="text-slate-400 ml-1">{poNo}</span>
+                            )}
+                          </button>
                         </td>
                         <td className="px-4 py-3 text-slate-500 dark:text-slate-400 font-mono">
                           {dateStr}
@@ -1248,55 +1372,89 @@ export default function PurchaseScreen() {
                         <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
                           {itemCount} item{itemCount !== 1 ? "s" : ""}
                         </td>
-                        <td className="px-4 py-3 font-mono text-slate-700 dark:text-slate-300 text-right">
-                          {fmt(purchase.subtotal || 0)}
-                        </td>
-                        <td className="px-4 py-3 font-mono text-emerald-600 dark:text-emerald-400 text-right">
-                          {fmt(purchase.gstTotal || purchase.gst || 0)}
-                        </td>
                         <td className="px-4 py-3 font-bold text-slate-900 dark:text-white font-mono text-right">
-                          {fmt(purchase.totalAmount || purchase.total || 0)}
+                          {fmt(totAmt)}
+                        </td>
+                        <td className="px-4 py-3 font-semibold text-emerald-600 dark:text-emerald-400 font-mono text-right">
+                          {fmt(paidAmt)}
                         </td>
                         <td className="px-4 py-3 text-center">
-                          <span
-                            className={`inline-block px-2 py-0.5 rounded text-[11px] font-medium border ${
-                              purchase.paymentStatus === "Paid"
-                                ? "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800"
-                                : purchase.paymentStatus === "Partially Paid"
-                                ? "bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800"
-                                : "bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300 border-red-200 dark:border-red-800"
-                            }`}
-                          >
-                            {purchase.paymentStatus || "Unpaid"}
-                          </span>
+                          {isFullyPaid ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                              <Check className="w-3 h-3 text-emerald-600" />
+                              <span>Payment Cleared</span>
+                            </span>
+                          ) : isPartiallyPaid ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                              <AlertTriangle className="w-3 h-3 text-amber-600" />
+                              <span>Partially Paid</span>
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800">
+                              <DollarSign className="w-3 h-3 text-red-600" />
+                              <span>Payment Due</span>
+                            </span>
+                          )}
                         </td>
                         <td className="px-4 py-3 font-mono text-xs font-semibold text-right">
                           {remAmt > 0 ? (
-                            <span className="text-red-600 dark:text-red-400">
-                              {fmt(remAmt)}
-                            </span>
+                            <div>
+                              <span className="text-red-600 dark:text-red-400 font-bold">
+                                {fmt(remAmt)} Due
+                              </span>
+                              {purchase.dueDate && (
+                                <div className="text-[10px] text-slate-400 font-normal">
+                                  Due: {new Date(purchase.dueDate).toISOString().slice(0, 10)}
+                                </div>
+                              )}
+                            </div>
                           ) : (
-                            <span className="text-emerald-600 dark:text-emerald-400">
-                              Cleared
+                            <span className="text-emerald-600 dark:text-emerald-400 font-bold">
+                              ✓ Cleared
                             </span>
                           )}
                         </td>
                         <td className="px-4 py-3 text-center">
                           <div className="flex items-center justify-center gap-1.5">
+                            {/* View Order / Receipt Details */}
+                            <button
+                              type="button"
+                              onClick={() => openViewPurchaseModal(purchase)}
+                              className="inline-flex items-center gap-1 px-2 py-1.5 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-200 text-[11px] font-semibold transition-colors cursor-pointer"
+                              title="View Purchase Order details and payment history"
+                            >
+                              <Eye className="w-3 h-3 text-slate-600 dark:text-slate-400" />
+                              <span>View</span>
+                            </button>
+
                             {/* Return / Debit Note Button */}
                             <button
                               type="button"
                               onClick={() =>
                                 openReturnModalForPurchase(purchase)
                               }
-                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md bg-amber-50 hover:bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:hover:bg-amber-900/60 dark:text-amber-300 text-[11px] font-semibold transition-colors border border-amber-200 dark:border-amber-800 cursor-pointer"
+                              className="inline-flex items-center gap-1 px-2 py-1.5 rounded-md bg-amber-50 hover:bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:hover:bg-amber-900/60 dark:text-amber-300 text-[11px] font-semibold transition-colors border border-amber-200 dark:border-amber-800 cursor-pointer"
                               title="Return damaged or faulty items to supplier"
                             >
                               <RotateCcw className="w-3 h-3 text-amber-600" />
-                              <span>Return Items</span>
+                              <span>Return</span>
                             </button>
 
-                            {purchase.paymentStatus !== "Paid" && (
+                            {/* Pay Due / Record Payment Button */}
+                            {!isFullyPaid && (
+                              <button
+                                type="button"
+                                onClick={() => openPayModal(purchase)}
+                                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-semibold transition-colors cursor-pointer shadow-sm"
+                                title="Pay due amount (installment or full)"
+                              >
+                                <CreditCard className="w-3 h-3" />
+                                <span>Pay Due</span>
+                              </button>
+                            )}
+
+                            {/* Quick Mark Full Paid Button */}
+                            {!isFullyPaid && (
                               <button
                                 type="button"
                                 onClick={() =>
@@ -1304,11 +1462,11 @@ export default function PurchaseScreen() {
                                     purchase._id || purchase.id
                                   )
                                 }
-                                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-semibold transition-colors cursor-pointer"
-                                title="Mark purchase as paid"
+                                className="inline-flex items-center gap-1 px-2 py-1.5 rounded-md bg-blue-50 hover:bg-blue-100 text-blue-700 dark:bg-blue-950/50 dark:hover:bg-blue-900/60 dark:text-blue-300 text-[11px] font-semibold transition-colors border border-blue-200 dark:border-blue-800 cursor-pointer"
+                                title="Mark entire remaining balance as paid"
                               >
-                                <Check className="w-3 h-3" />
-                                <span>Paid</span>
+                                <Check className="w-3 h-3 text-blue-600" />
+                                <span>Clear Full</span>
                               </button>
                             )}
                           </div>
@@ -2097,6 +2255,475 @@ export default function PurchaseScreen() {
                   </p>
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL: RECORD PAYMENT FOR DUE PURCHASE ── */}
+      {showPayModal && payingPurchase && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-md w-full border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-150">
+            {/* Modal Header */}
+            <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-800/60">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
+                  <CreditCard className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-900 dark:text-white text-sm">
+                    Record Purchase Payment
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    {payingPurchase.supplierName || "Supplier"} • Invoice #{payingPurchase.supplierInvoiceNo || payingPurchase.purchaseOrderNo || "Bill"}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  setShowPayModal(false);
+                  setPayingPurchase(null);
+                }}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-5 space-y-4">
+              {/* Financial Balance Overview */}
+              <div className="bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/70 rounded-xl p-3.5 space-y-2">
+                <div className="flex justify-between text-xs text-slate-600 dark:text-slate-400">
+                  <span>Total Purchase Bill:</span>
+                  <span className="font-mono font-semibold text-slate-900 dark:text-white">
+                    {fmt(payingPurchase.totalAmount || 0)}
+                  </span>
+                </div>
+                <div className="flex justify-between text-xs text-slate-600 dark:text-slate-400">
+                  <span>Already Paid:</span>
+                  <span className="font-mono font-semibold text-emerald-600 dark:text-emerald-400">
+                    {fmt(payingPurchase.amountPaid || 0)}
+                  </span>
+                </div>
+                <div className="flex justify-between text-xs font-bold pt-2 border-t border-slate-200 dark:border-slate-700">
+                  <span className="text-red-600 dark:text-red-400">
+                    Current Outstanding Due:
+                  </span>
+                  <span className="font-mono text-sm text-red-600 dark:text-red-400">
+                    {fmt(
+                      payingPurchase.remainingAmount !== undefined && payingPurchase.remainingAmount !== null
+                        ? payingPurchase.remainingAmount
+                        : Math.max(0, (payingPurchase.totalAmount || 0) - (payingPurchase.amountPaid || 0))
+                    )}
+                  </span>
+                </div>
+              </div>
+
+              {/* Quick Fill Full Due */}
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  Payment Amount (₹) *
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const due =
+                      payingPurchase.remainingAmount !== undefined && payingPurchase.remainingAmount !== null
+                        ? Number(payingPurchase.remainingAmount)
+                        : Math.max(0, Number(payingPurchase.totalAmount || 0) - Number(payingPurchase.amountPaid || 0));
+                    setPayAmountInput(String(due));
+                  }}
+                  className="text-[11px] font-semibold text-blue-600 hover:text-blue-700 hover:underline cursor-pointer"
+                >
+                  Pay Full Due ({fmt(
+                    payingPurchase.remainingAmount !== undefined && payingPurchase.remainingAmount !== null
+                      ? payingPurchase.remainingAmount
+                      : Math.max(0, (payingPurchase.totalAmount || 0) - (payingPurchase.amountPaid || 0))
+                  )})
+                </button>
+              </div>
+
+              <div className="relative">
+                <span className="absolute left-3 top-2.5 text-sm font-bold text-slate-400">
+                  ₹
+                </span>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={payAmountInput}
+                  onChange={(e) => {
+                    const val = e.target.value.replace(/[^0-9.]/g, "");
+                    setPayAmountInput(val);
+                  }}
+                  placeholder="0.00"
+                  className="w-full pl-8 pr-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-sm font-mono font-bold text-slate-900 dark:text-white outline-none focus:border-emerald-500"
+                  autoFocus
+                />
+              </div>
+
+              {/* Payment Mode */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  Payment Mode
+                </label>
+                <select
+                  value={payMethod}
+                  onChange={(e) => setPayMethod(e.target.value)}
+                  className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-xs text-slate-900 dark:text-white outline-none focus:border-emerald-500"
+                >
+                  {purchasePaymentMethods.map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Payment Date & Reference */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    Payment Date
+                  </label>
+                  <input
+                    type="date"
+                    value={payDate}
+                    onChange={(e) => setPayDate(e.target.value)}
+                    className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-xs text-slate-900 dark:text-white outline-none focus:border-emerald-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    Ref / UTR / Cheque #
+                  </label>
+                  <input
+                    type="text"
+                    value={payRef}
+                    onChange={(e) => setPayRef(e.target.value)}
+                    placeholder="Optional ref..."
+                    className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-xs text-slate-900 dark:text-white outline-none focus:border-emerald-500"
+                  />
+                </div>
+              </div>
+
+              {/* Notes */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  Remarks / Notes
+                </label>
+                <input
+                  type="text"
+                  value={payNotes}
+                  onChange={(e) => setPayNotes(e.target.value)}
+                  placeholder="e.g. Part payment for stock clearance..."
+                  className="w-full px-3 py-1.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-xs text-slate-900 dark:text-white outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              {/* Action Buttons */}
+              <div className="pt-2 flex items-center justify-end gap-2.5 border-t border-slate-200 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowPayModal(false);
+                    setPayingPurchase(null);
+                  }}
+                  className="px-4 py-2 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleRecordPaymentSubmit}
+                  disabled={submittingPayment}
+                  className="px-5 py-2 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm flex items-center gap-1.5 transition-colors disabled:opacity-50 cursor-pointer"
+                >
+                  {submittingPayment ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Saving Payment...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-3.5 h-3.5" />
+                      <span>Record & Clear Payment</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL: VIEW PURCHASE ORDER & PAYMENT HISTORY ── */}
+      {viewPurchaseModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-2xl w-full border border-slate-200 dark:border-slate-800 shadow-2xl max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in duration-150">
+            {/* Modal Header */}
+            <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-800/60 flex-shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 flex items-center justify-center border border-blue-200 dark:border-blue-800">
+                  <FileText className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-900 dark:text-white text-sm">
+                    Purchase Order Details
+                  </h3>
+                  <p className="text-[11px] text-slate-500 font-mono">
+                    #{viewPurchaseModal.supplierInvoiceNo || viewPurchaseModal.purchaseOrderNo || "PO-Bill"}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => window.print()}
+                  className="p-1.5 rounded-lg text-slate-500 hover:text-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-semibold flex items-center gap-1"
+                  title="Print Purchase Order"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  <span>Print</span>
+                </button>
+                <button
+                  onClick={() => setViewPurchaseModal(null)}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Scrollable Content */}
+            <div className="p-5 overflow-y-auto space-y-5 text-xs">
+              {/* Supplier & Date Info */}
+              <div className="grid grid-cols-2 gap-4 bg-slate-50 dark:bg-slate-800/40 p-3.5 rounded-xl border border-slate-200 dark:border-slate-700/70">
+                <div>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">
+                    Supplier
+                  </p>
+                  <p className="font-bold text-slate-900 dark:text-white text-sm">
+                    {viewPurchaseModal.supplierName || "Supplier"}
+                  </p>
+                  {viewPurchaseModal.purchaseOrderNo && (
+                    <p className="text-slate-500 mt-0.5">
+                      PO Reference: <span className="font-mono font-medium">{viewPurchaseModal.purchaseOrderNo}</span>
+                    </p>
+                  )}
+                </div>
+                <div className="text-right">
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">
+                    Dates
+                  </p>
+                  <p className="text-slate-700 dark:text-slate-300">
+                    Purchase: <span className="font-mono font-semibold">{viewPurchaseModal.purchaseDate ? new Date(viewPurchaseModal.purchaseDate).toISOString().slice(0, 10) : "-"}</span>
+                  </p>
+                  {viewPurchaseModal.dueDate && (
+                    <p className="text-slate-500 mt-0.5">
+                      Payment Due: <span className="font-mono font-semibold text-red-600 dark:text-red-400">{new Date(viewPurchaseModal.dueDate).toISOString().slice(0, 10)}</span>
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {/* Payment Status Banner */}
+              {(() => {
+                const tot = Number(viewPurchaseModal.totalAmount || 0);
+                const paid = Number(viewPurchaseModal.amountPaid || 0);
+                const rem =
+                  viewPurchaseModal.remainingAmount !== undefined && viewPurchaseModal.remainingAmount !== null
+                    ? Number(viewPurchaseModal.remainingAmount)
+                    : Math.max(0, tot - paid);
+                const isCleared = rem === 0;
+
+                return (
+                  <div
+                    className={`p-4 rounded-xl border flex flex-wrap items-center justify-between gap-3 ${
+                      isCleared
+                        ? "bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800/80"
+                        : paid > 0
+                        ? "bg-amber-50 dark:bg-amber-950/40 border-amber-200 dark:border-amber-800/80"
+                        : "bg-red-50 dark:bg-red-950/40 border-red-200 dark:border-red-800/80"
+                    }`}
+                  >
+                    <div>
+                      <div className="flex items-center gap-1.5">
+                        {isCleared ? (
+                          <Check className="w-4 h-4 text-emerald-600 dark:text-emerald-400 font-bold" />
+                        ) : (
+                          <DollarSign className="w-4 h-4 text-red-600 dark:text-red-400 font-bold" />
+                        )}
+                        <span
+                          className={`font-bold text-sm ${
+                            isCleared
+                              ? "text-emerald-800 dark:text-emerald-300"
+                              : paid > 0
+                              ? "text-amber-800 dark:text-amber-300"
+                              : "text-red-800 dark:text-red-300"
+                          }`}
+                        >
+                          {isCleared
+                            ? "PAYMENT CLEARED (FULLY PAID)"
+                            : paid > 0
+                            ? `PARTIALLY PAID (${fmt(rem)} DUE)`
+                            : `PAYMENT DUE (${fmt(rem)})`}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-1">
+                        Total Bill: <span className="font-mono font-semibold">{fmt(tot)}</span> • Paid: <span className="font-mono font-semibold text-emerald-600">{fmt(paid)}</span> • Remaining Due: <span className="font-mono font-bold text-red-600">{fmt(rem)}</span>
+                      </p>
+                    </div>
+
+                    {!isCleared && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          openPayModal(viewPurchaseModal);
+                        }}
+                        className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-semibold text-xs shadow-sm flex items-center gap-1.5 transition-colors cursor-pointer"
+                      >
+                        <CreditCard className="w-3.5 h-3.5" />
+                        <span>Pay Outstanding Due</span>
+                      </button>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* Items Table */}
+              <div>
+                <h4 className="font-bold text-slate-800 dark:text-slate-200 mb-2">
+                  Purchased Items
+                </h4>
+                <table className="w-full text-left border-collapse border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden">
+                  <thead>
+                    <tr className="bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 font-semibold border-b border-slate-200 dark:border-slate-700">
+                      <th className="p-2 border-r border-slate-200 dark:border-slate-700 w-8 text-center">#</th>
+                      <th className="p-2 border-r border-slate-200 dark:border-slate-700">Product</th>
+                      <th className="p-2 border-r border-slate-200 dark:border-slate-700 text-center w-16">Qty</th>
+                      <th className="p-2 border-r border-slate-200 dark:border-slate-700 text-right w-20">Rate</th>
+                      <th className="p-2 border-r border-slate-200 dark:border-slate-700 text-center w-14">GST</th>
+                      <th className="p-2 text-right w-24">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
+                    {(viewPurchaseModal.items || []).map((it, idx) => (
+                      <tr key={idx} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/30">
+                        <td className="p-2 text-center border-r border-slate-200 dark:border-slate-700 text-slate-400 font-mono">
+                          {idx + 1}
+                        </td>
+                        <td className="p-2 border-r border-slate-200 dark:border-slate-700 font-medium text-slate-900 dark:text-white">
+                          {it.productName || it.product || "Product"}
+                        </td>
+                        <td className="p-2 text-center border-r border-slate-200 dark:border-slate-700 font-mono">
+                          {it.quantity || it.qty} {it.unit || "pcs"}
+                        </td>
+                        <td className="p-2 text-right border-r border-slate-200 dark:border-slate-700 font-mono">
+                          {fmt(it.purchaseRate || it.rate || 0)}
+                        </td>
+                        <td className="p-2 text-center border-r border-slate-200 dark:border-slate-700 font-mono text-slate-500">
+                          {it.gstRate || 0}%
+                        </td>
+                        <td className="p-2 text-right font-mono font-semibold text-slate-900 dark:text-white">
+                          {fmt(
+                            (it.itemAmount !== undefined
+                              ? it.itemAmount + (it.gstAmount || 0)
+                              : (Number(it.quantity || it.qty || 1) * Number(it.purchaseRate || it.rate || 0)) *
+                                (1 + Number(it.gstRate || 0) / 100))
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Financial Totals */}
+              <div className="flex justify-end">
+                <div className="w-64 space-y-1.5 border border-slate-200 dark:border-slate-700 rounded-xl p-3 bg-slate-50 dark:bg-slate-800/40">
+                  <div className="flex justify-between text-slate-600 dark:text-slate-400">
+                    <span>Subtotal:</span>
+                    <span className="font-mono font-semibold text-slate-900 dark:text-white">
+                      {fmt(viewPurchaseModal.subtotal || 0)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-slate-600 dark:text-slate-400">
+                    <span>GST Total:</span>
+                    <span className="font-mono font-semibold text-emerald-600">
+                      +{fmt(viewPurchaseModal.gstTotal || 0)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-xs font-bold text-slate-900 dark:text-white pt-2 border-t border-slate-300 dark:border-slate-700">
+                    <span>Grand Total:</span>
+                    <span className="font-mono text-blue-600 dark:text-blue-400 text-sm">
+                      {fmt(viewPurchaseModal.totalAmount || 0)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Payment History Log */}
+              <div>
+                <h4 className="font-bold text-slate-800 dark:text-slate-200 mb-2 flex items-center gap-1.5">
+                  <CreditCard className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Payment Transactions & History</span>
+                </h4>
+                {Array.isArray(viewPurchaseModal.payments) && viewPurchaseModal.payments.length > 0 ? (
+                  <table className="w-full text-left border-collapse border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden">
+                    <thead>
+                      <tr className="bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 font-semibold border-b border-slate-200 dark:border-slate-700">
+                        <th className="p-2 border-r border-slate-200 dark:border-slate-700">Date</th>
+                        <th className="p-2 border-r border-slate-200 dark:border-slate-700">Mode</th>
+                        <th className="p-2 border-r border-slate-200 dark:border-slate-700">Ref / Note</th>
+                        <th className="p-2 text-right">Amount Paid</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
+                      {viewPurchaseModal.payments.map((p, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/30">
+                          <td className="p-2 border-r border-slate-200 dark:border-slate-700 font-mono text-slate-600 dark:text-slate-300">
+                            {p.paymentDate ? new Date(p.paymentDate).toISOString().slice(0, 10) : "-"}
+                          </td>
+                          <td className="p-2 border-r border-slate-200 dark:border-slate-700 font-medium">
+                            {p.paymentMethod || "Cash"}
+                          </td>
+                          <td className="p-2 border-r border-slate-200 dark:border-slate-700 text-slate-500">
+                            {p.referenceNo ? `#${p.referenceNo} ` : ""}
+                            {p.notes || "-"}
+                          </td>
+                          <td className="p-2 text-right font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                            {fmt(p.amount || 0)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                ) : Number(viewPurchaseModal.amountPaid || 0) > 0 ? (
+                  <div className="p-3 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 rounded-lg flex justify-between items-center text-xs">
+                    <span className="text-emerald-800 dark:text-emerald-300 font-medium">
+                      Initial Paid Amount ({viewPurchaseModal.paymentMethod || "Cash"}):
+                    </span>
+                    <span className="font-mono font-bold text-emerald-700 dark:text-emerald-300">
+                      {fmt(viewPurchaseModal.amountPaid)}
+                    </span>
+                  </div>
+                ) : (
+                  <div className="p-3 bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-500 text-center text-xs">
+                    No payments have been recorded yet. Full balance of {fmt(viewPurchaseModal.totalAmount || 0)} is currently Due.
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-3.5 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/60 flex items-center justify-end flex-shrink-0">
+              <button
+                type="button"
+                onClick={() => setViewPurchaseModal(null)}
+                className="px-4 py-2 rounded-lg text-xs font-semibold bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-100 transition-colors"
+              >
+                Close
+              </button>
             </div>
           </div>
         </div>
