@@ -103,6 +103,7 @@ export default function PurchaseScreen() {
 
   const [searchHistory, setSearchHistory] = useState("");
   const [filterMonth, setFilterMonth] = useState("");
+  const [historyStatusFilter, setHistoryStatusFilter] = useState("all"); // "all" | "due" | "partial" | "cleared"
   const [toast, setToast] = useState(null);
 
   // Pay Due Modal States (Record Installment or Full Payment on Due Purchase)
@@ -733,7 +734,7 @@ export default function PurchaseScreen() {
   // Filtered purchases for History tab
   const filteredPurchases = useMemo(() => {
     return purchaseList.filter((purchase) => {
-      const q = searchHistory.toLowerCase();
+      const q = searchHistory.toLowerCase().trim();
       const inv = (
         purchase.supplierInvoiceNo ||
         purchase.invoiceNo ||
@@ -746,9 +747,11 @@ export default function PurchaseScreen() {
         ""
       ).toLowerCase();
       const po = (purchase.purchaseOrderNo || "").toLowerCase();
+      const hasItem = (purchase.items || []).some((it) =>
+        (it.productName || it.product || "").toLowerCase().includes(q)
+      );
 
-      const searchMatch =
-        inv.includes(q) || supp.includes(q) || po.includes(q);
+      const searchMatch = !q || inv.includes(q) || supp.includes(q) || po.includes(q) || hasItem;
 
       let dateMatch = true;
       if (filterMonth) {
@@ -756,9 +759,66 @@ export default function PurchaseScreen() {
         dateMatch = pDate.startsWith(filterMonth);
       }
 
-      return searchMatch && dateMatch;
+      const tot = Number(purchase.totalAmount || purchase.total || 0);
+      const paid = Number(purchase.amountPaid || 0);
+      const rem =
+        purchase.remainingAmount !== undefined && purchase.remainingAmount !== null
+          ? Number(purchase.remainingAmount)
+          : Math.max(0, tot - paid);
+
+      const isCleared = rem === 0 || (purchase.paymentStatus === "Paid" && rem === 0);
+      const isPartial = rem > 0 && paid > 0;
+      const isDue = rem > 0 && paid === 0;
+
+      let statusMatch = true;
+      if (historyStatusFilter === "due") statusMatch = isDue;
+      else if (historyStatusFilter === "partial") statusMatch = isPartial;
+      else if (historyStatusFilter === "cleared") statusMatch = isCleared;
+
+      return searchMatch && dateMatch && statusMatch;
     });
-  }, [purchaseList, searchHistory, filterMonth]);
+  }, [purchaseList, searchHistory, filterMonth, historyStatusFilter]);
+
+  // Summary Metrics for Purchase History Tab
+  const historyStats = useMemo(() => {
+    let totalPurchasesAmount = 0;
+    let totalPaidAmount = 0;
+    let totalDueAmount = 0;
+    let dueCount = 0;
+    let partialCount = 0;
+    let clearedCount = 0;
+
+    purchaseList.forEach((p) => {
+      const tot = Number(p.totalAmount || p.total || 0);
+      const paid = Number(p.amountPaid || 0);
+      const rem =
+        p.remainingAmount !== undefined && p.remainingAmount !== null
+          ? Number(p.remainingAmount)
+          : Math.max(0, tot - paid);
+
+      totalPurchasesAmount += tot;
+      totalPaidAmount += paid;
+      totalDueAmount += rem;
+
+      if (rem === 0 || p.paymentStatus === "Paid") {
+        clearedCount += 1;
+      } else if (paid > 0) {
+        partialCount += 1;
+      } else {
+        dueCount += 1;
+      }
+    });
+
+    return {
+      totalPurchasesAmount,
+      totalPaidAmount,
+      totalDueAmount,
+      totalCount: purchaseList.length,
+      dueCount,
+      partialCount,
+      clearedCount,
+    };
+  }, [purchaseList]);
 
   // Filtered purchase returns
   const filteredReturns = useMemo(() => {
@@ -1257,227 +1317,374 @@ export default function PurchaseScreen() {
         </div>
       )}
 
-      {/* ── TAB 2: PURCHASE HISTORY ── */}
+      {/* ── TAB 2: PURCHASE HISTORY (SPACIOUS & MODERN) ── */}
       {activeTab === "history" && (
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden shadow-sm">
-          {/* Search bar & Filter */}
-          <div className="p-3.5 border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3">
-            <div className="relative flex-1 min-w-[240px] max-w-sm">
-              <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
-              <input
-                value={searchHistory}
-                onChange={(e) => setSearchHistory(e.target.value)}
-                placeholder="Search invoice or supplier..."
-                className="w-full pl-9 pr-3 py-1.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-xs text-slate-900 dark:text-white placeholder-slate-400 outline-none focus:border-blue-500"
-              />
+        <div className="space-y-5">
+          {/* Top KPI Metrics Overview */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            {/* Total Purchases Card */}
+            <div className="bg-white dark:bg-slate-900 p-4.5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex items-center gap-4">
+              <div className="w-12 h-12 rounded-xl bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 flex items-center justify-center border border-blue-200 dark:border-blue-800/80 flex-shrink-0">
+                <FileText className="w-6 h-6" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-medium text-slate-500 dark:text-slate-400">
+                  Total Purchases ({historyStats.totalCount} Orders)
+                </p>
+                <p className="text-xl font-extrabold text-slate-900 dark:text-white font-mono mt-0.5 truncate">
+                  {fmt(historyStats.totalPurchasesAmount)}
+                </p>
+              </div>
             </div>
 
-            <div className="flex items-center gap-2">
-              <label className="text-xs font-semibold text-slate-500 whitespace-nowrap">
-                Filter By Month:
-              </label>
-              <input
-                type="month"
-                value={filterMonth}
-                onChange={(e) => setFilterMonth(e.target.value)}
-                className="px-2 py-1.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-xs text-slate-900 dark:text-white outline-none focus:border-blue-500"
-              />
-              {filterMonth && (
-                <button
-                  onClick={() => setFilterMonth("")}
-                  className="text-xs text-blue-600 hover:underline whitespace-nowrap"
-                >
-                  Clear
-                </button>
-              )}
+            {/* Total Paid Card */}
+            <div className="bg-white dark:bg-slate-900 p-4.5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex items-center gap-4">
+              <div className="w-12 h-12 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 flex items-center justify-center border border-emerald-200 dark:border-emerald-800/80 flex-shrink-0">
+                <Check className="w-6 h-6" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-medium text-slate-500 dark:text-slate-400">
+                  Total Amount Paid ({historyStats.clearedCount} Cleared)
+                </p>
+                <p className="text-xl font-extrabold text-emerald-600 dark:text-emerald-400 font-mono mt-0.5 truncate">
+                  {fmt(historyStats.totalPaidAmount)}
+                </p>
+              </div>
+            </div>
+
+            {/* Total Due / Payables Card */}
+            <div className="bg-white dark:bg-slate-900 p-4.5 rounded-2xl border border-red-200/80 dark:border-red-900/60 bg-red-50/20 dark:bg-red-950/10 shadow-sm flex items-center gap-4">
+              <div className="w-12 h-12 rounded-xl bg-red-100 dark:bg-red-950/70 text-red-600 dark:text-red-400 flex items-center justify-center border border-red-200 dark:border-red-800 flex-shrink-0">
+                <DollarSign className="w-6 h-6" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-medium text-red-600/90 dark:text-red-400">
+                  Outstanding Due ({historyStats.dueCount + historyStats.partialCount} Pending)
+                </p>
+                <p className="text-xl font-extrabold text-red-600 dark:text-red-400 font-mono mt-0.5 truncate">
+                  {fmt(historyStats.totalDueAmount)}
+                </p>
+              </div>
             </div>
           </div>
 
-          {filteredPurchases.length === 0 ? (
-            <div className="py-12 text-center text-slate-500 dark:text-slate-400 text-xs">
-              No purchase records found.
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs text-left">
-                <thead>
-                  <tr className="border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 text-slate-600 dark:text-slate-400 font-semibold">
-                    <th className="px-4 py-3">Supplier</th>
-                    <th className="px-4 py-3">Invoice / PO No.</th>
-                    <th className="px-4 py-3">Date</th>
-                    <th className="px-4 py-3">Items</th>
-                    <th className="px-4 py-3 text-right">Total Amount</th>
-                    <th className="px-4 py-3 text-right">Paid Amount</th>
-                    <th className="px-4 py-3 text-center">Payment Status</th>
-                    <th className="px-4 py-3 text-right">Remaining Due</th>
-                    <th className="px-4 py-3 text-center">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {filteredPurchases.map((purchase) => {
-                    const suppName =
-                      purchase.supplierName || purchase.supplier || "Supplier";
-                    const invNo =
-                      purchase.supplierInvoiceNo ||
-                      purchase.invoiceNo ||
-                      purchase._id ||
-                      "-";
-                    const poNo = purchase.purchaseOrderNo
-                      ? ` (${purchase.purchaseOrderNo})`
-                      : "";
-                    const dateStr = purchase.purchaseDate
-                      ? new Date(purchase.purchaseDate)
-                          .toISOString()
-                          .slice(0, 10)
-                      : purchase.date || "-";
-                    const itemCount = Array.isArray(purchase.items)
-                      ? purchase.items.length
-                      : purchase.items || 0;
-                    const totAmt = Number(purchase.totalAmount || purchase.total || 0);
-                    const paidAmt = Number(purchase.amountPaid || 0);
-                    const remAmt =
-                      purchase.remainingAmount !== undefined && purchase.remainingAmount !== null
-                        ? Number(purchase.remainingAmount)
-                        : Math.max(0, totAmt - paidAmt);
-                    const isFullyPaid = remAmt === 0 || (purchase.paymentStatus === "Paid" && remAmt === 0);
-                    const isPartiallyPaid = remAmt > 0 && paidAmt > 0;
+          {/* Main Table Container */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-sm">
+            {/* Search, Filter Pills & Month Picker */}
+            <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3 bg-slate-50/50 dark:bg-slate-900/50">
+              {/* Search input */}
+              <div className="relative flex-1 min-w-[260px] max-w-md">
+                <Search className="w-4 h-4 absolute left-3.5 top-3 text-slate-400" />
+                <input
+                  value={searchHistory}
+                  onChange={(e) => setSearchHistory(e.target.value)}
+                  placeholder="Search by supplier, invoice #, PO #, product..."
+                  className="w-full pl-10 pr-3.5 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-white placeholder-slate-400 outline-none focus:border-blue-500 shadow-sm"
+                />
+                {searchHistory && (
+                  <button
+                    onClick={() => setSearchHistory("")}
+                    className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
 
-                    return (
-                      <tr
-                        key={purchase._id || purchase.id}
-                        className="hover:bg-slate-50 dark:hover:bg-slate-800/30"
-                      >
-                        <td className="px-4 py-3 font-medium text-slate-900 dark:text-white">
-                          <button
-                            onClick={() => openViewPurchaseModal(purchase)}
-                            className="text-left font-semibold hover:text-blue-600 hover:underline cursor-pointer"
-                          >
-                            {suppName}
-                          </button>
-                        </td>
-                        <td className="px-4 py-3 font-mono text-xs text-blue-600 dark:text-blue-400">
-                          <button
-                            onClick={() => openViewPurchaseModal(purchase)}
-                            className="hover:underline cursor-pointer font-mono text-left"
-                          >
-                            {invNo}
-                            {poNo && (
-                              <span className="text-slate-400 ml-1">{poNo}</span>
-                            )}
-                          </button>
-                        </td>
-                        <td className="px-4 py-3 text-slate-500 dark:text-slate-400 font-mono">
-                          {dateStr}
-                        </td>
-                        <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
-                          {itemCount} item{itemCount !== 1 ? "s" : ""}
-                        </td>
-                        <td className="px-4 py-3 font-bold text-slate-900 dark:text-white font-mono text-right">
-                          {fmt(totAmt)}
-                        </td>
-                        <td className="px-4 py-3 font-semibold text-emerald-600 dark:text-emerald-400 font-mono text-right">
-                          {fmt(paidAmt)}
-                        </td>
-                        <td className="px-4 py-3 text-center">
-                          {isFullyPaid ? (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
-                              <Check className="w-3 h-3 text-emerald-600" />
-                              <span>Payment Cleared</span>
-                            </span>
-                          ) : isPartiallyPaid ? (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
-                              <AlertTriangle className="w-3 h-3 text-amber-600" />
-                              <span>Partially Paid</span>
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800">
-                              <DollarSign className="w-3 h-3 text-red-600" />
-                              <span>Payment Due</span>
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 font-mono text-xs font-semibold text-right">
-                          {remAmt > 0 ? (
-                            <div>
-                              <span className="text-red-600 dark:text-red-400 font-bold">
-                                {fmt(remAmt)} Due
+              {/* Status Filter Buttons */}
+              <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl">
+                <button
+                  type="button"
+                  onClick={() => setHistoryStatusFilter("all")}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                    historyStatusFilter === "all"
+                      ? "bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm"
+                      : "text-slate-600 dark:text-slate-400 hover:text-slate-900"
+                  }`}
+                >
+                  All ({historyStats.totalCount})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setHistoryStatusFilter("due")}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                    historyStatusFilter === "due"
+                      ? "bg-red-600 text-white shadow-sm"
+                      : "text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40"
+                  }`}
+                >
+                  Due ({historyStats.dueCount})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setHistoryStatusFilter("partial")}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                    historyStatusFilter === "partial"
+                      ? "bg-amber-500 text-white shadow-sm"
+                      : "text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/40"
+                  }`}
+                >
+                  Partial ({historyStats.partialCount})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setHistoryStatusFilter("cleared")}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                    historyStatusFilter === "cleared"
+                      ? "bg-emerald-600 text-white shadow-sm"
+                      : "text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40"
+                  }`}
+                >
+                  Cleared ({historyStats.clearedCount})
+                </button>
+              </div>
+
+              {/* Month Picker */}
+              <div className="flex items-center gap-2">
+                <input
+                  type="month"
+                  value={filterMonth}
+                  onChange={(e) => setFilterMonth(e.target.value)}
+                  className="px-3 py-1.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-white outline-none focus:border-blue-500 shadow-sm"
+                />
+                {filterMonth && (
+                  <button
+                    onClick={() => setFilterMonth("")}
+                    className="text-xs text-blue-600 dark:text-blue-400 font-semibold hover:underline"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Table or Empty State */}
+            {filteredPurchases.length === 0 ? (
+              <div className="py-16 text-center space-y-3">
+                <div className="w-12 h-12 rounded-2xl bg-slate-100 dark:bg-slate-800 text-slate-400 flex items-center justify-center mx-auto">
+                  <Search className="w-6 h-6" />
+                </div>
+                <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">
+                  No matching purchase orders found
+                </p>
+                <p className="text-xs text-slate-500 dark:text-slate-400 max-w-sm mx-auto">
+                  Try adjusting your search terms or status filter to see other purchase records.
+                </p>
+                {(searchHistory || filterMonth || historyStatusFilter !== "all") && (
+                  <button
+                    onClick={() => {
+                      setSearchHistory("");
+                      setFilterMonth("");
+                      setHistoryStatusFilter("all");
+                    }}
+                    className="text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline pt-1 cursor-pointer"
+                  >
+                    Reset all filters
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="border-b border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-800/60 text-slate-500 dark:text-slate-400 text-[11px] font-bold uppercase tracking-wider">
+                      <th className="px-5 py-3.5">Supplier & Bill Info</th>
+                      <th className="px-5 py-3.5">Purchase Date</th>
+                      <th className="px-5 py-3.5 text-right">Total Bill</th>
+                      <th className="px-5 py-3.5 text-right">Paid Amount</th>
+                      <th className="px-5 py-3.5">Status & Remaining Due</th>
+                      <th className="px-5 py-3.5 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
+                    {filteredPurchases.map((purchase) => {
+                      const suppName =
+                        purchase.supplierName || purchase.supplier || "Supplier";
+                      const invNo =
+                        purchase.supplierInvoiceNo ||
+                        purchase.invoiceNo ||
+                        purchase._id ||
+                        "-";
+                      const poNo = purchase.purchaseOrderNo || "";
+                      const dateStr = purchase.purchaseDate
+                        ? new Date(purchase.purchaseDate).toLocaleDateString("en-IN", {
+                            day: "numeric",
+                            month: "short",
+                            year: "numeric",
+                          })
+                        : purchase.date || "-";
+                      const dueDateStr = purchase.dueDate
+                        ? new Date(purchase.dueDate).toLocaleDateString("en-IN", {
+                            day: "numeric",
+                            month: "short",
+                            year: "numeric",
+                          })
+                        : null;
+                      const itemCount = Array.isArray(purchase.items)
+                        ? purchase.items.length
+                        : purchase.items || 0;
+                      const totAmt = Number(purchase.totalAmount || purchase.total || 0);
+                      const paidAmt = Number(purchase.amountPaid || 0);
+                      const remAmt =
+                        purchase.remainingAmount !== undefined && purchase.remainingAmount !== null
+                          ? Number(purchase.remainingAmount)
+                          : Math.max(0, totAmt - paidAmt);
+                      const isFullyPaid = remAmt === 0 || (purchase.paymentStatus === "Paid" && remAmt === 0);
+                      const isPartiallyPaid = remAmt > 0 && paidAmt > 0;
+
+                      return (
+                        <tr
+                          key={purchase._id || purchase.id}
+                          className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors"
+                        >
+                          {/* Column 1: Supplier & Bill Info */}
+                          <td className="px-5 py-4">
+                            <button
+                              onClick={() => openViewPurchaseModal(purchase)}
+                              className="text-left font-bold text-slate-900 dark:text-white text-sm hover:text-blue-600 dark:hover:text-blue-400 hover:underline cursor-pointer block"
+                            >
+                              {suppName}
+                            </button>
+                            <div className="flex items-center gap-2 mt-1 text-xs text-slate-500 font-mono">
+                              <span className="bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded text-[11px] font-semibold text-slate-700 dark:text-slate-300">
+                                #{invNo}
                               </span>
-                              {purchase.dueDate && (
-                                <div className="text-[10px] text-slate-400 font-normal">
-                                  Due: {new Date(purchase.dueDate).toISOString().slice(0, 10)}
-                                </div>
+                              {poNo && (
+                                <span className="text-slate-400 text-[11px]">
+                                  PO: {poNo}
+                                </span>
                               )}
                             </div>
-                          ) : (
-                            <span className="text-emerald-600 dark:text-emerald-400 font-bold">
-                              ✓ Cleared
+                          </td>
+
+                          {/* Column 2: Dates */}
+                          <td className="px-5 py-4 text-xs">
+                            <span className="font-semibold text-slate-800 dark:text-slate-200 block">
+                              {dateStr}
                             </span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-center">
-                          <div className="flex items-center justify-center gap-1.5">
-                            {/* View Order / Receipt Details */}
-                            <button
-                              type="button"
-                              onClick={() => openViewPurchaseModal(purchase)}
-                              className="inline-flex items-center gap-1 px-2 py-1.5 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-200 text-[11px] font-semibold transition-colors cursor-pointer"
-                              title="View Purchase Order details and payment history"
-                            >
-                              <Eye className="w-3 h-3 text-slate-600 dark:text-slate-400" />
-                              <span>View</span>
-                            </button>
+                            {dueDateStr ? (
+                              <span className="text-[11px] font-medium text-amber-600 dark:text-amber-400 block mt-0.5">
+                                Due: {dueDateStr}
+                              </span>
+                            ) : (
+                              <span className="text-[11px] text-slate-400 block mt-0.5">
+                                No Due Date
+                              </span>
+                            )}
+                          </td>
 
-                            {/* Return / Debit Note Button */}
-                            <button
-                              type="button"
-                              onClick={() =>
-                                openReturnModalForPurchase(purchase)
-                              }
-                              className="inline-flex items-center gap-1 px-2 py-1.5 rounded-md bg-amber-50 hover:bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:hover:bg-amber-900/60 dark:text-amber-300 text-[11px] font-semibold transition-colors border border-amber-200 dark:border-amber-800 cursor-pointer"
-                              title="Return damaged or faulty items to supplier"
-                            >
-                              <RotateCcw className="w-3 h-3 text-amber-600" />
-                              <span>Return</span>
-                            </button>
+                          {/* Column 3: Total Bill & Items */}
+                          <td className="px-5 py-4 text-right">
+                            <div className="font-bold text-slate-900 dark:text-white font-mono text-sm">
+                              {fmt(totAmt)}
+                            </div>
+                            <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                              {itemCount} item{itemCount !== 1 ? "s" : ""}
+                              {purchase.gstTotal > 0 && ` • GST ${fmt(purchase.gstTotal)}`}
+                            </div>
+                          </td>
 
-                            {/* Pay Due / Record Payment Button */}
-                            {!isFullyPaid && (
+                          {/* Column 4: Paid Amount */}
+                          <td className="px-5 py-4 text-right">
+                            <div className="font-bold text-emerald-600 dark:text-emerald-400 font-mono text-sm">
+                              {fmt(paidAmt)}
+                            </div>
+                            <div className="text-[10px] text-slate-400 font-medium uppercase mt-0.5">
+                              {purchase.paymentMethod || "Cash"}
+                            </div>
+                          </td>
+
+                          {/* Column 5: Status & Remaining Due */}
+                          <td className="px-5 py-4">
+                            <div>
+                              {isFullyPaid ? (
+                                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                                  <Check className="w-3.5 h-3.5 text-emerald-600" />
+                                  <span>Payment Cleared</span>
+                                </span>
+                              ) : isPartiallyPaid ? (
+                                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                                  <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+                                  <span>Partially Paid</span>
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-red-50 dark:bg-red-950/50 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800">
+                                  <DollarSign className="w-3.5 h-3.5 text-red-600" />
+                                  <span>Payment Due</span>
+                                </span>
+                              )}
+
+                              <div className="mt-1 text-xs">
+                                {remAmt > 0 ? (
+                                  <span className="font-mono font-bold text-red-600 dark:text-red-400">
+                                    {fmt(remAmt)} Due
+                                  </span>
+                                ) : (
+                                  <span className="font-mono text-slate-400 text-[11px]">
+                                    ₹0.00 Due
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </td>
+
+                          {/* Column 6: Actions */}
+                          <td className="px-5 py-4 text-right">
+                            <div className="inline-flex items-center justify-end gap-2">
+                              {/* Prominent Pay Due Button if amount is unpaid/partial */}
+                              {!isFullyPaid && (
+                                <button
+                                  type="button"
+                                  onClick={() => openPayModal(purchase)}
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold shadow-sm transition-all cursor-pointer"
+                                  title="Pay due amount (partial or full)"
+                                >
+                                  <CreditCard className="w-3.5 h-3.5" />
+                                  <span>Pay Due</span>
+                                </button>
+                              )}
+
+                              {/* View Details Icon Button */}
                               <button
                                 type="button"
-                                onClick={() => openPayModal(purchase)}
-                                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-semibold transition-colors cursor-pointer shadow-sm"
-                                title="Pay due amount (installment or full)"
+                                onClick={() => openViewPurchaseModal(purchase)}
+                                className="p-1.5 rounded-lg border border-slate-200 hover:border-slate-300 bg-white hover:bg-slate-100 text-slate-700 dark:bg-slate-800 dark:border-slate-700 dark:hover:bg-slate-700 dark:text-slate-200 text-xs font-semibold transition-colors cursor-pointer"
+                                title="View Purchase Order & Payment Details"
                               >
-                                <CreditCard className="w-3 h-3" />
-                                <span>Pay Due</span>
+                                <Eye className="w-4 h-4 text-slate-600 dark:text-slate-300" />
                               </button>
-                            )}
 
-                            {/* Quick Mark Full Paid Button */}
-                            {!isFullyPaid && (
+                              {/* Return Items Icon Button */}
                               <button
                                 type="button"
-                                onClick={() =>
-                                  handleMarkAsPaid(
-                                    purchase._id || purchase.id
-                                  )
-                                }
-                                className="inline-flex items-center gap-1 px-2 py-1.5 rounded-md bg-blue-50 hover:bg-blue-100 text-blue-700 dark:bg-blue-950/50 dark:hover:bg-blue-900/60 dark:text-blue-300 text-[11px] font-semibold transition-colors border border-blue-200 dark:border-blue-800 cursor-pointer"
-                                title="Mark entire remaining balance as paid"
+                                onClick={() => openReturnModalForPurchase(purchase)}
+                                className="p-1.5 rounded-lg border border-amber-200 hover:border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:border-amber-800 dark:hover:bg-amber-900/60 dark:text-amber-300 text-xs font-semibold transition-colors cursor-pointer"
+                                title="Return damaged items to supplier"
                               >
-                                <Check className="w-3 h-3 text-blue-600" />
-                                <span>Clear Full</span>
+                                <RotateCcw className="w-4 h-4 text-amber-600" />
                               </button>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
+
+                              {/* Quick Clear Button if Due */}
+                              {!isFullyPaid && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleMarkAsPaid(purchase._id || purchase.id)}
+                                  className="p-1.5 rounded-lg border border-blue-200 hover:border-blue-300 bg-blue-50 hover:bg-blue-100 text-blue-700 dark:bg-blue-950/50 dark:border-blue-800 dark:hover:bg-blue-900/60 dark:text-blue-300 text-xs font-semibold transition-colors cursor-pointer"
+                                  title="Mark 100% full balance as cleared"
+                                >
+                                  <Check className="w-4 h-4 text-blue-600" />
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
