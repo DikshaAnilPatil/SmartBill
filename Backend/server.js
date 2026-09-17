@@ -28,6 +28,7 @@ import paymentSettingsRoutes from "./routes/paymentSettingsRoutes.js";
 import subscriptionPlanRoutes from "./routes/subscriptionPlanRoutes.js";
 import inventorySettingsRoutes from "./routes/inventorySettingsRoutes.js";
 import subscriptionPublicRoutes from "./routes/subscriptionPublicRoutes.js";
+import cashVoucherRoutes from "./routes/cashVoucherRoutes.js";
 
 const app = express();
 const port = process.env.PORT || 5000;
@@ -94,6 +95,7 @@ app.use("/api/subscriptions", subscriptionRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/admin/subscription-plans", subscriptionPlanRoutes);
+app.use("/api/cash-vouchers", cashVoucherRoutes);
 
 app.get("/", (req, res) => {
   res.send("API working");
