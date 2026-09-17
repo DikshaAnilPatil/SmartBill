@@ -1663,18 +1663,6 @@ export default function PurchaseScreen() {
                               >
                                 <RotateCcw className="w-4 h-4 text-amber-600" />
                               </button>
-
-                              {/* Quick Clear Button if Due */}
-                              {!isFullyPaid && (
-                                <button
-                                  type="button"
-                                  onClick={() => handleMarkAsPaid(purchase._id || purchase.id)}
-                                  className="p-1.5 rounded-lg border border-blue-200 hover:border-blue-300 bg-blue-50 hover:bg-blue-100 text-blue-700 dark:bg-blue-950/50 dark:border-blue-800 dark:hover:bg-blue-900/60 dark:text-blue-300 text-xs font-semibold transition-colors cursor-pointer"
-                                  title="Mark 100% full balance as cleared"
-                                >
-                                  <Check className="w-4 h-4 text-blue-600" />
-                                </button>
-                              )}
                             </div>
                           </td>
                         </tr>
