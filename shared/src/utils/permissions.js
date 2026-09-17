@@ -56,7 +56,7 @@ export const ROLE_DEFAULT_PERMISSIONS = {
     dashboard: true,
     customers: true,
     suppliers: true,
-    products: false,
+    products: true,
     pos: true,
     purchase: true,
     inventory: false,

@@ -39,6 +39,7 @@ const expenseSchema = new mongoose.Schema(
     paymentMode: {
       type: String,
       required: true,
+      trim: true,
       default: "Cash",
     },
 

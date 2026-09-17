@@ -6,6 +6,8 @@ import {
   grantBusinessAccess,
   getSystemSettings,
   updateSystemSettings,
+  getVendorSettings,
+  updateVendorSettings,
   getAdminRevenueAnalytics,
   getSuperAdminDashboardStats,
   getAdminStaff,
@@ -13,6 +15,7 @@ import {
   updateAdminStaff,
   deleteAdminStaff,
   updateRolePermissionsInBulk,
+  getBusinessCustomers,
 } from "../controller/adminController.js";
 
 const router = express.Router();
@@ -34,6 +37,10 @@ router.put("/roles/:roleId", protect, updateRolePermissionsInBulk);
 // GET /api/admin/businesses - Fetch all owner accounts (SuperAdmin only)
 router.get("/", protect, getAllBusinesses);
 router.get("/businesses", protect, getAllBusinesses);
+
+// GET /api/admin/businesses/:id/customers - Fetch customer details of specific business (SuperAdmin only)
+router.get("/businesses/:id/customers", protect, getBusinessCustomers);
+router.get("/:id/customers", protect, getBusinessCustomers);
 
 // GET /api/admin/revenue & /api/admin/revenue-analytics - Real-time revenue analytics
 router.get("/revenue", protect, getAdminRevenueAnalytics);
@@ -63,5 +70,15 @@ router.put("/settings/system", protect, updateSystemSettings);
 router.put("/businesses/settings/system", protect, updateSystemSettings);
 router.post("/settings/system", protect, updateSystemSettings);
 router.post("/businesses/settings/system", protect, updateSystemSettings);
+
+// GET /api/admin/businesses/settings/vendor - Fetch vendor settings (SuperAdmin only)
+router.get("/settings/vendor", protect, getVendorSettings);
+router.get("/businesses/settings/vendor", protect, getVendorSettings);
+
+// PUT & POST /api/admin/businesses/settings/vendor - Update vendor settings (SuperAdmin only)
+router.put("/settings/vendor", protect, updateVendorSettings);
+router.put("/businesses/settings/vendor", protect, updateVendorSettings);
+router.post("/settings/vendor", protect, updateVendorSettings);
+router.post("/businesses/settings/vendor", protect, updateVendorSettings);
 
 export default router;

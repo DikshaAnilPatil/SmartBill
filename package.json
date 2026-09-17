@@ -9,6 +9,7 @@
   ],
   "scripts": {
     "dev": "concurrently \"npm run dev -w apps/landing-page\" \"npm run dev -w apps/crm\" \"npm run dev -w apps/admin-panel\" \"npm run server --prefix Backend\"",
+    "server": "npm run server --prefix Backend",
     "build": "npm run build --workspaces --if-present",
     "test": "npm test --prefix Backend"
   },

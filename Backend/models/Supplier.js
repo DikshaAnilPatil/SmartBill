@@ -21,6 +21,13 @@ const supplierSchema = new mongoose.Schema(
     phone: {
       type: String,
       default: "",
+      validate: {
+        validator: function (value) {
+          if (!value || String(value).trim() === "") return true;
+          return /^\d{10}$/.test(String(value).trim());
+        },
+        message: "Contact number must be exactly 10 digits.",
+      },
     },
 
     email: {

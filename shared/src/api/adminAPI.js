@@ -10,6 +10,14 @@ export const adminAPI = {
   },
 
   /**
+   * Fetch customer details for a specific business
+   */
+  getBusinessCustomers: async (businessId) => {
+    const res = await axiosClient.get(`/admin/businesses/${businessId}/customers`);
+    return res.data;
+  },
+
+  /**
    * Update status (Active / Suspended) and suspension reason for a business owner
    */
   updateBusinessStatus: async (businessId, status, reason = "") => {
@@ -44,6 +52,25 @@ export const adminAPI = {
   updateSystemSettings: async (settingsData) => {
     const res = await axiosClient.put(
       "/admin/businesses/settings/system",
+      settingsData
+    );
+    return res.data;
+  },
+
+  /**
+   * Fetch SuperAdmin Vendor Settings from MongoDB
+   */
+  getVendorSettings: async () => {
+    const res = await axiosClient.get("/admin/businesses/settings/vendor");
+    return res.data;
+  },
+
+  /**
+   * Update SuperAdmin Vendor Settings in MongoDB
+   */
+  updateVendorSettings: async (settingsData) => {
+    const res = await axiosClient.put(
+      "/admin/businesses/settings/vendor",
       settingsData
     );
     return res.data;

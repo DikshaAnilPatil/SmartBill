@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import {
   Settings,
   Package,
-  Mail,
   MessageSquare,
   Plus,
   Lock,
@@ -12,6 +11,7 @@ import {
   RotateCcw,
   Sliders,
   X,
+  Building2,
 } from "lucide-react";
 
 import { Btn, Badge, Card, Toast } from "@shared/components/common/ui";
@@ -41,15 +41,13 @@ export default function SuperAdminSettingsScreen() {
   const [backupFrequency, setBackupFrequency] = useState("daily");
   const [maxLoginAttempts, setMaxLoginAttempts] = useState("5");
 
-  // Dynamic SMTP Server credentials (stored in MongoDB)
-  const [smtpHost, setSmtpHost] = useState("smtp.gmail.com");
-  const [smtpPort, setSmtpPort] = useState("587");
-  const [smtpUser, setSmtpUser] = useState("");
-  const [smtpPass, setSmtpPass] = useState("");
-  const [smtpFrom, setSmtpFrom] = useState("");
-
   const [systemLoading, setSystemLoading] = useState(true);
   const [systemSaving, setSystemSaving] = useState(false);
+
+  // Vendor Settings states (Separate from System Settings)
+  const [vendorGrouping, setVendorGrouping] = useState(false);
+  const [vendorLoading, setVendorLoading] = useState(true);
+  const [vendorSaving, setVendorSaving] = useState(false);
 
   // Support Settings states
   const [supportEmail, setSupportEmail] = useState("support@smartbill.com");
@@ -79,11 +77,6 @@ export default function SuperAdminSettingsScreen() {
           setDebugMode(Boolean(res.systemSettings.debugMode));
           setBackupFrequency(res.systemSettings.backupFrequency || "daily");
           setMaxLoginAttempts(String(res.systemSettings.maxLoginAttempts ?? 5));
-          setSmtpHost(res.systemSettings.smtpHost || "smtp.gmail.com");
-          setSmtpPort(String(res.systemSettings.smtpPort ?? 587));
-          setSmtpUser(res.systemSettings.smtpUser || "");
-          setSmtpPass(res.systemSettings.smtpPass || "");
-          setSmtpFrom(res.systemSettings.smtpFrom || "");
           if (Array.isArray(res.systemSettings.emailTemplates) && res.systemSettings.emailTemplates.length > 0) {
             setEmailTemplates(res.systemSettings.emailTemplates);
           }
@@ -96,6 +89,25 @@ export default function SuperAdminSettingsScreen() {
     };
 
     loadSystemSettings();
+  }, []);
+
+  // Load Vendor Settings separately
+  useEffect(() => {
+    const loadVendorSettings = async () => {
+      try {
+        setVendorLoading(true);
+        const res = await adminAPI.getVendorSettings();
+        if (res?.vendorSettings) {
+          setVendorGrouping(Boolean(res.vendorSettings.vendorGrouping));
+        }
+      } catch (err) {
+        console.error("Failed to load vendor settings from MongoDB:", err);
+      } finally {
+        setVendorLoading(false);
+      }
+    };
+
+    loadVendorSettings();
   }, []);
 
 
@@ -129,12 +141,6 @@ export default function SuperAdminSettingsScreen() {
           overrides.maxLoginAttempts !== undefined
             ? overrides.maxLoginAttempts
             : parseInt(maxLoginAttempts, 10) || 5,
-
-        smtpHost: overrides.smtpHost !== undefined ? overrides.smtpHost : smtpHost,
-        smtpPort: overrides.smtpPort !== undefined ? parseInt(overrides.smtpPort, 10) || 587 : parseInt(smtpPort, 10) || 587,
-        smtpUser: overrides.smtpUser !== undefined ? overrides.smtpUser : smtpUser,
-        smtpPass: overrides.smtpPass !== undefined ? overrides.smtpPass : smtpPass,
-        smtpFrom: overrides.smtpFrom !== undefined ? overrides.smtpFrom : smtpFrom,
       };
 
       const res = await adminAPI.updateSystemSettings(payload);
@@ -170,6 +176,32 @@ export default function SuperAdminSettingsScreen() {
     }
   };
 
+  // Save Vendor Settings separately
+  const handleSaveVendorSettings = async (overrides = {}) => {
+    try {
+      setVendorSaving(true);
+      const payload = {
+        vendorGrouping:
+          overrides.vendorGrouping !== undefined
+            ? overrides.vendorGrouping
+            : vendorGrouping,
+      };
+
+      const res = await adminAPI.updateVendorSettings(payload);
+
+      if (res?.vendorSettings) {
+        setVendorGrouping(Boolean(res.vendorSettings.vendorGrouping));
+      }
+
+      showToast("✓ Vendor settings saved to MongoDB successfully!", "success");
+    } catch (err) {
+      console.error("Failed to save vendor settings:", err);
+      showToast(err.message || "Failed to save vendor settings to MongoDB.", "error");
+    } finally {
+      setVendorSaving(false);
+    }
+  };
+
   // Save Support Settings
   const handleSaveSupportSettings = () => {
     localStorage.setItem(
@@ -192,6 +224,7 @@ export default function SuperAdminSettingsScreen() {
       <div className="flex gap-2 overflow-x-auto pb-2">
         {[
           { key: "system", label: "System Settings", icon: Settings },
+          { key: "vendor", label: "Vendor Settings", icon: Building2 },
           { key: "customization", label: "Customization", icon: Palette },
           { key: "support", label: "Support Settings", icon: MessageSquare },
         ].map(({ key, label, icon: TabIcon }) => (
@@ -400,88 +433,6 @@ export default function SuperAdminSettingsScreen() {
                 </button>
               </div>
 
-              {/* SMTP Email Server Gateway Configuration */}
-              <div className="pt-5 mt-5 border-t border-slate-200">
-                <div className="flex items-center gap-2 mb-3">
-                  <Mail className="w-5 h-5 text-blue-600" />
-                  <div>
-                    <h4 className="text-sm font-bold text-slate-900">
-                      SaaS Email & SMTP Server Gateway
-                    </h4>
-                    <p className="text-xs text-slate-500">
-                      Configure your email server credentials in MongoDB so system emails (Welcome, Password Reset, Access Granted) are sent directly to recipients.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-200">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                      SMTP Host
-                    </label>
-                    <input
-                      type="text"
-                      value={smtpHost}
-                      onChange={(e) => setSmtpHost(e.target.value)}
-                      placeholder="smtp.gmail.com"
-                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-600 bg-white"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                      SMTP Port
-                    </label>
-                    <input
-                      type="number"
-                      value={smtpPort}
-                      onChange={(e) => setSmtpPort(e.target.value)}
-                      placeholder="587"
-                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-600 bg-white"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                      SMTP Email / Username
-                    </label>
-                    <input
-                      type="email"
-                      value={smtpUser}
-                      onChange={(e) => setSmtpUser(e.target.value)}
-                      placeholder="admin@smartbill.com"
-                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-600 bg-white"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                      SMTP / Google App Password
-                    </label>
-                    <input
-                      type="password"
-                      value={smtpPass}
-                      onChange={(e) => setSmtpPass(e.target.value)}
-                      placeholder="••••••••••••••••"
-                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-600 bg-white"
-                    />
-                  </div>
-
-                  <div className="sm:col-span-2">
-                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                      Sender Name & Format (SMTP_FROM)
-                    </label>
-                    <input
-                      type="text"
-                      value={smtpFrom}
-                      onChange={(e) => setSmtpFrom(e.target.value)}
-                      placeholder='"SmartBill System" <admin@smartbill.com>'
-                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-600 bg-white"
-                    />
-                  </div>
-                </div>
-              </div>
-
               <Btn
                 variant="primary"
                 onClick={() => handleSaveSystemSettings()}
@@ -496,8 +447,99 @@ export default function SuperAdminSettingsScreen() {
               >
                 {systemSaving
                   ? "Saving..."
-                  : "Save System & SMTP Settings"}
+                  : "Save System Settings"}
               </Btn>
+            </div>
+          )}
+        </Card>
+      )}
+
+      {/* SEPARATE TAB: VENDOR SETTINGS */}
+      {activeTab === "vendor" && (
+        <Card className="p-6">
+          <div className="flex items-center justify-between mb-5">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center font-bold">
+                <Building2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-slate-900 text-base">
+                  Vendor Settings
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Configure global rules, grouping options, and display preferences for business owners & vendors
+                </p>
+              </div>
+            </div>
+
+            {vendorSaving && (
+              <div className="flex items-center gap-2 text-xs font-medium text-blue-600">
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <span>Syncing to MongoDB...</span>
+              </div>
+            )}
+          </div>
+
+          {vendorLoading ? (
+            <div className="py-12 text-center text-slate-500">
+              <Loader2 className="w-6 h-6 animate-spin mx-auto text-blue-600 mb-2" />
+              <p className="text-sm font-medium">
+                Loading Vendor Settings from MongoDB...
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {/* Vendor Grouping */}
+              <div className="flex items-start justify-between py-4 border-b border-slate-100">
+                <div className="space-y-1">
+                  <p className="text-sm font-semibold text-slate-900">
+                    Vendor Grouping
+                  </p>
+                  <p className="text-xs text-slate-500 max-w-xl leading-relaxed">
+                    When <strong>ON</strong>, the <strong>Vendors</strong> module automatically groups business owners/vendors based on their actual <strong>Business Category</strong> (e.g. Grocery, Clothing, Pharmacy, Electronics, Restaurant, etc.). Vendors without a category appear under <strong>“Other.”</strong> When <strong>OFF</strong>, vendors are displayed in a standard flat list.
+                  </p>
+                </div>
+
+                <button
+                  onClick={() => {
+                    const nextVal = !vendorGrouping;
+                    setVendorGrouping(nextVal);
+                    handleSaveVendorSettings({
+                      vendorGrouping: nextVal,
+                    });
+                  }}
+                  className={`w-11 h-6 rounded-full relative flex-shrink-0 ml-4 transition-colors cursor-pointer ${
+                    vendorGrouping
+                      ? "bg-blue-600"
+                      : "bg-slate-200"
+                  }`}
+                >
+                  <span
+                    className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-all ${
+                      vendorGrouping ? "right-1" : "left-1"
+                    }`}
+                  />
+                </button>
+              </div>
+
+              <div className="pt-2">
+                <Btn
+                  variant="primary"
+                  onClick={() => handleSaveVendorSettings()}
+                  disabled={vendorSaving}
+                  icon={
+                    vendorSaving ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Check className="w-4 h-4" />
+                    )
+                  }
+                >
+                  {vendorSaving
+                    ? "Saving..."
+                    : "Save Vendor Settings"}
+                </Btn>
+              </div>
             </div>
           )}
         </Card>

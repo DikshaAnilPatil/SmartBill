@@ -244,3 +244,107 @@ export const listExpenses = async (req, res) => {
     });
   }
 };
+
+// ================= UPDATE EXPENSE =================
+export const updateExpense = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const {
+      category,
+      description,
+      amount,
+      date,
+      paymentMode,
+      reference,
+      status,
+    } = req.body;
+
+    if (!req.user) {
+      return res.status(401).json({
+        message: "Authentication required.",
+      });
+    }
+
+    const effectiveOwnerId = req.user.ownerId || req.user._id || req.user.id;
+
+    const expenseDoc = await Expense.findOne({
+      _id: id,
+      user: { $in: [effectiveOwnerId, req.user.actualUserId] },
+    });
+
+    if (!expenseDoc) {
+      return res.status(404).json({
+        message: "Expense not found.",
+      });
+    }
+
+    if (category !== undefined) expenseDoc.category = String(category).trim();
+    if (description !== undefined) expenseDoc.description = String(description).trim();
+    if (amount !== undefined) expenseDoc.amount = Number(amount);
+    if (date !== undefined) expenseDoc.date = date;
+    if (paymentMode !== undefined) expenseDoc.paymentMode = String(paymentMode).trim();
+    if (reference !== undefined) expenseDoc.reference = String(reference).trim();
+    if (status !== undefined) expenseDoc.status = status === "Pending" ? "Pending" : "Paid";
+
+    await expenseDoc.save();
+
+    const expense = {
+      id: expenseDoc._id.toString(),
+      category: expenseDoc.category,
+      description: expenseDoc.description,
+      amount: expenseDoc.amount,
+      date: expenseDoc.date,
+      paymentMode: expenseDoc.paymentMode,
+      reference: expenseDoc.reference,
+      status: expenseDoc.status,
+      createdAt: expenseDoc.createdAt,
+      updatedAt: expenseDoc.updatedAt,
+    };
+
+    return res.status(200).json({
+      message: "Expense updated successfully.",
+      expense,
+    });
+  } catch (error) {
+    console.error("UPDATE EXPENSE ERROR:", error);
+    return res.status(500).json({
+      message: "Unable to update expense. Please try again.",
+    });
+  }
+};
+
+// ================= DELETE EXPENSE =================
+export const deleteExpense = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!req.user) {
+      return res.status(401).json({
+        message: "Authentication required.",
+      });
+    }
+
+    const effectiveOwnerId = req.user.ownerId || req.user._id || req.user.id;
+
+    const expenseDoc = await Expense.findOneAndDelete({
+      _id: id,
+      user: { $in: [effectiveOwnerId, req.user.actualUserId] },
+    });
+
+    if (!expenseDoc) {
+      return res.status(404).json({
+        message: "Expense not found.",
+      });
+    }
+
+    return res.status(200).json({
+      message: "Expense deleted successfully.",
+      id,
+    });
+  } catch (error) {
+    console.error("DELETE EXPENSE ERROR:", error);
+    return res.status(500).json({
+      message: "Unable to delete expense. Please try again.",
+    });
+  }
+};

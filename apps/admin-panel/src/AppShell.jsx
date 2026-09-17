@@ -177,6 +177,7 @@ export default function AppShell({ role, user, onLogout, page, onNav }) {
         user={user}
         collapsed={collapsed}
         onToggle={() => setCollapsed((v) => !v)}
+        isPlatformAdmin={true}
       />
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         <TrialBanner user={user} onNav={onNav} />

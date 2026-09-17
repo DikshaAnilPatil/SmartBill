@@ -35,14 +35,13 @@ export default function AuthScreen({ view, onNav, onLogin, fixedRole }) {
   // ---- Login state ----
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [loginMethod, setLoginMethod] = useState("email"); // "email" | "phone"
-  const [loginPhone, setLoginPhone] = useState(PHONE_PREFIX);
 
   // ---- Register state ----
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [biz, setBiz] = useState("");
   const [phone, setPhone] = useState(PHONE_PREFIX);
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [bizType, setBizType] = useState("Retail");
 
   const [loading, setLoading] = useState(false);
@@ -111,10 +110,10 @@ export default function AuthScreen({ view, onNav, onLogin, fixedRole }) {
 
   // ---- Error state ----
   const [loginEmailError, setLoginEmailError] = useState("");
-  const [loginPhoneError, setLoginPhoneError] = useState("");
   const [loginPasswordError, setLoginPasswordError] = useState("");
   const [registerEmailError, setRegisterEmailError] = useState("");
   const [registerPasswordError, setRegisterPasswordError] = useState("");
+  const [registerConfirmPasswordError, setRegisterConfirmPasswordError] = useState("");
   const [registerPhoneError, setRegisterPhoneError] = useState("");
   const [registerNameError, setRegisterNameError] = useState("");
   const [formError, setFormError] = useState("");
@@ -147,6 +146,11 @@ export default function AuthScreen({ view, onNav, onLogin, fixedRole }) {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed);
   };
 
+  const isValidIndianMobile = (raw) => {
+    const digits = String(raw ?? "").replace(/\D/g, "");
+    return /^[6-9]\d{9}$/.test(digits);
+  };
+
   const getLoginEmailError = (raw) => {
     const trimmed = String(raw ?? "").trim();
     if (!trimmed) return "Email field is required.";
@@ -166,8 +170,10 @@ export default function AuthScreen({ view, onNav, onLogin, fixedRole }) {
 
     const digitsPart = trimmed.slice(PHONE_PREFIX.length);
     if (!digitsPart) return required ? "Phone field is required." : "";
-    if (!/^\d{10}$/.test(digitsPart)) {
-      return "Phone number must be exactly 10 digits.";
+
+    const cleanDigits = digitsPart.replace(/\D/g, "");
+    if (!/^[6-9]\d{9}$/.test(cleanDigits)) {
+      return "Enter a valid 10-digit Indian mobile number starting with 6, 7, 8, or 9.";
     }
 
     return "";
@@ -199,27 +205,19 @@ export default function AuthScreen({ view, onNav, onLogin, fixedRole }) {
   };
 
   const handleLogin = async () => {
-    const useEmail = loginMethod === "email";
-    const errEmail = useEmail ? getLoginEmailError(email) : "";
-    const errPhone = !useEmail ? validatePhone(loginPhone) : "";
+    const errEmail = getLoginEmailError(email);
     const errPassword = validateLoginPassword(password);
 
     setLoginEmailError(errEmail);
-    setLoginPhoneError(errPhone);
     setLoginPasswordError(errPassword);
     setFormError("");
     setSuspensionNotice(null);
 
-    if (errEmail || errPhone || errPassword) return;
+    if (errEmail || errPassword) return;
 
     setLoading(true);
     try {
-      const payload = useEmail
-        ? { email: email.trim(), password }
-        : {
-            phone: loginPhone.replace(PHONE_PREFIX, "").replace(/\D/g, ""),
-            password,
-          };
+      const payload = { email: email.trim(), password };
       const data = await loginUser(payload);
 
       const loggedInUser = data.user;
@@ -271,6 +269,12 @@ export default function AuthScreen({ view, onNav, onLogin, fixedRole }) {
   const handleRegister = async () => {
     const errEmail = getLoginEmailError(email);
     const errPassword = validateRegisterPassword(password);
+    const errConfirmPassword =
+      !confirmPassword.trim()
+        ? "Confirm Password field is required."
+        : password !== confirmPassword
+          ? "Passwords do not match."
+          : "";
     const errPhone = validatePhone(phone);
     const errName =
       !firstName.trim() || !lastName.trim()
@@ -279,15 +283,53 @@ export default function AuthScreen({ view, onNav, onLogin, fixedRole }) {
 
     setRegisterEmailError(errEmail);
     setRegisterPasswordError(errPassword);
+    setRegisterConfirmPasswordError(errConfirmPassword);
     setRegisterPhoneError(errPhone);
     setRegisterNameError(errName);
     setFormError("");
 
-    if (errEmail || errPassword || errPhone || errName) return;
+    if (errEmail || errPassword || errConfirmPassword || errPhone || errName) return;
 
     if (!phoneVerified) {
-      setOtpError("Please verify your phone number with OTP first.");
-      return;
+      if (otpSent && !otpSending) {
+        setOtpError("Please verify the OTP sent to your phone number before proceeding.");
+        return;
+      }
+
+      setOtpError("");
+      setOtpSending(true);
+      setLoading(true);
+      try {
+        const cleanEmail = email && typeof email === "string" ? email.trim() : undefined;
+        const data = await sendOtp({
+          phone: getCleanPhone(),
+          email: cleanEmail && isValidEmail(cleanEmail) ? cleanEmail : undefined,
+        });
+
+        setOtpSent(true);
+        setPhoneVerified(false);
+        setResendCooldown(60);
+        if (data?.otp) {
+          setOtp(String(data.otp));
+        }
+        showToast(
+          data?.otp
+            ? `Verification OTP: ${data.otp}`
+            : "OTP sent successfully! Please verify your phone number to continue.",
+          "success",
+        );
+        return;
+      } catch (err) {
+        if (err.field === "phone") {
+          setRegisterPhoneError(err.message);
+        }
+        setOtpError(err.message || "Failed to send OTP. Please try again.");
+        setOtpSent(false);
+        return;
+      } finally {
+        setOtpSending(false);
+        setLoading(false);
+      }
     }
 
     setLoading(true);
@@ -372,6 +414,10 @@ export default function AuthScreen({ view, onNav, onLogin, fixedRole }) {
   };
 
   const handleVerifyOtp = async () => {
+    const errPhone = validatePhone(phone);
+    setRegisterPhoneError(errPhone);
+    if (errPhone) return;
+
     const cleanOtp = String(otp ?? "").trim();
     if (!/^\d{6}$/.test(cleanOtp)) {
       setOtpError("Please enter the 6-digit OTP.");
@@ -616,73 +662,20 @@ export default function AuthScreen({ view, onNav, onLogin, fixedRole }) {
                   </div>
                 )}
 
-                <div>
-                  <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide block mb-1.5">
-                    Sign in with
-                  </label>
-                  <div className="grid grid-cols-2 gap-2 p-1 bg-slate-100 rounded-xl">
-                    {["email", "phone"].map((m) => {
-                      const active = loginMethod === m;
-                      return (
-                        <button
-                          key={m}
-                          onClick={() => {
-                            setLoginMethod(m);
-                            setLoginEmailError("");
-                            setLoginPhoneError("");
-                            setSuspensionNotice(null);
-                            setFormError("");
-                          }}
-                          className={`flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 ${active ? "bg-white text-blue-700 shadow-sm ring-1 ring-slate-200" : "text-slate-500 hover:text-slate-700"}`}
-                        >
-                          {m === "email" ? (
-                            <Mail
-                              className={`w-4 h-4 ${active ? "text-blue-600" : "text-slate-400"}`}
-                            />
-                          ) : (
-                            <Phone
-                              className={`w-4 h-4 ${active ? "text-blue-600" : "text-slate-400"}`}
-                            />
-                          )}
-                          {m === "email" ? "Email" : "Mobile"}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {loginMethod === "email" ? (
-                  <Input
-                    label="Email Address"
-                    value={email}
-                    onChange={(v) => {
-                      const trimmed = String(v ?? "").trimStart();
-                      setEmail(trimmed);
-                      setSuspensionNotice(null);
-                      if (trimmed && isValidEmail(trimmed))
-                        setLoginEmailError("");
-                      else setLoginEmailError(getLoginEmailError(trimmed));
-                    }}
-                    icon={<Mail className="w-4 h-4" />}
-                    error={loginEmailError}
-                  />
-                ) : (
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
-                      Mobile Number
-                    </label>
-                    <FixedPhoneInput
-                      icon={<Phone className="w-4 h-4" />}
-                      value={loginPhone}
-                      onChange={(value) => {
-                        setLoginPhone(value);
-                        setSuspensionNotice(null);
-                        setLoginPhoneError(validatePhone(value, false));
-                      }}
-                      error={loginPhoneError}
-                    />
-                  </div>
-                )}
+                <Input
+                  label="Email Address"
+                  value={email}
+                  onChange={(v) => {
+                    const trimmed = String(v ?? "").trimStart();
+                    setEmail(trimmed);
+                    setSuspensionNotice(null);
+                    if (trimmed && isValidEmail(trimmed))
+                      setLoginEmailError("");
+                    else setLoginEmailError(getLoginEmailError(trimmed));
+                  }}
+                  icon={<Mail className="w-4 h-4" />}
+                  error={loginEmailError}
+                />
                 <Input
                   label="Password"
                   type="password"
@@ -804,43 +797,17 @@ export default function AuthScreen({ view, onNav, onLogin, fixedRole }) {
                   <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
                     Phone
                   </label>
-                  <div className="flex items-start gap-2">
-                    <div className="flex-1">
-                      <FixedPhoneInput
-                        placeholder="+91"
-                        icon={<Phone className="w-4 h-4" />}
-                        value={phone}
-                        onChange={(value) => {
-                          setPhone(value);
-                          setRegisterPhoneError(validatePhone(value, false));
-                          if (phoneVerified) setPhoneVerified(false);
-                        }}
-                        error={registerPhoneError}
-                      />
-                    </div>
-                    <Btn
-                      variant="outline"
-                      size="md"
-                      onClick={handleSendOtp}
-                      disabled={otpSending || phoneVerified}
-                      className="h-[42px] whitespace-nowrap mt-[1px] shrink-0"
-                      icon={
-                        otpSending ? (
-                          <span className="w-3.5 h-3.5 border-2 border-slate-300 border-t-slate-600 rounded-full animate-spin" />
-                        ) : phoneVerified ? (
-                          <Check className="w-4 h-4 text-emerald-600" />
-                        ) : (
-                          <Send className="w-4 h-4" />
-                        )
-                      }
-                    >
-                      {phoneVerified
-                        ? "Verified"
-                        : otpSending
-                          ? "Sending..."
-                          : "Send OTP"}
-                    </Btn>
-                  </div>
+                  <FixedPhoneInput
+                    placeholder="+91"
+                    icon={<Phone className="w-4 h-4" />}
+                    value={phone}
+                    onChange={(value) => {
+                      setPhone(value);
+                      setRegisterPhoneError(validatePhone(value, false));
+                      if (phoneVerified) setPhoneVerified(false);
+                    }}
+                    error={registerPhoneError}
+                  />
                   {phoneVerified && (
                     <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs rounded-lg px-3 py-2 mt-1">
                       <CheckCircle className="w-4 h-4 text-emerald-600 flex-shrink-0" />
@@ -933,10 +900,34 @@ export default function AuthScreen({ view, onNav, onLogin, fixedRole }) {
                     const err = validateRegisterPassword(v);
                     if (!err) setRegisterPasswordError("");
                     else setRegisterPasswordError(err);
+
+                    if (confirmPassword && v !== confirmPassword) {
+                      setRegisterConfirmPasswordError("Passwords do not match.");
+                    } else if (confirmPassword) {
+                      setRegisterConfirmPasswordError("");
+                    }
                   }}
                   placeholder="Min. 8 characters"
                   icon={<Lock className="w-4 h-4" />}
                   error={registerPasswordError}
+                />
+                <Input
+                  label="Confirm Password"
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(v) => {
+                    setConfirmPassword(v);
+                    if (!v.trim()) {
+                      setRegisterConfirmPasswordError("Confirm Password field is required.");
+                    } else if (v !== password) {
+                      setRegisterConfirmPasswordError("Passwords do not match.");
+                    } else {
+                      setRegisterConfirmPasswordError("");
+                    }
+                  }}
+                  placeholder="Re-enter your password"
+                  icon={<Lock className="w-4 h-4" />}
+                  error={registerConfirmPasswordError}
                 />
                 <Select
                   label="Business Type"
@@ -949,14 +940,14 @@ export default function AuthScreen({ view, onNav, onLogin, fixedRole }) {
                   size="lg"
                   onClick={handleSubmit}
                   className="w-full justify-center"
-                  disabled={loading}
+                  disabled={loading || otpSending}
                   icon={
-                    loading ? (
+                    loading || otpSending ? (
                       <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                     ) : undefined
                   }
                 >
-                  {loading ? "Creating account..." : "Create Account"}
+                  {otpSending ? "Sending OTP..." : loading ? "Creating account..." : "Create Account"}
                 </Btn>
                 <p className="text-[10px] text-slate-400 text-center">
                   By registering, you agree to our Terms of Service and Privacy

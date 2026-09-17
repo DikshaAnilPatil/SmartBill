@@ -13,13 +13,15 @@ import {
   MoreHorizontal,
   Mail,
   Phone,
-  MapPin,
   TrendingUp,
   Users as UsersIcon,
   Activity,
   CreditCard,
   Building2,
   MoreVertical,
+  ArrowLeft,
+  Tag,
+  Folder,
 } from "lucide-react";
 
 import {
@@ -109,6 +111,7 @@ const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 export default function BusinessesNew() {
   const [search, setSearch] = useState("");
   const [activeTab, setActiveTab] = useState("all");
+  const [vendorGrouping, setVendorGrouping] = useState(false);
   const [sortConfig, setSortConfig] = useState({ key: "joined", direction: "desc" });
 
   const [rows, setRows] = useState(() => {
@@ -139,6 +142,37 @@ export default function BusinessesNew() {
   const [selectedPermissions, setSelectedPermissions] = useState({});
   const [grantingAccess, setGrantingAccess] = useState(false);
   const [accessMessage, setAccessMessage] = useState(null);
+
+  const [detailsModalOpen, setDetailsModalOpen] = useState(false);
+  const [selectedDetailsBusiness, setSelectedDetailsBusiness] = useState(null);
+  const [businessCustomers, setBusinessCustomers] = useState([]);
+  const [loadingCustomers, setLoadingCustomers] = useState(false);
+  const [customerSearch, setCustomerSearch] = useState("");
+  const [customerError, setCustomerError] = useState("");
+
+  const openBusinessDetailsModal = async (business) => {
+    setSelectedDetailsBusiness(business);
+    setDetailsModalOpen(true);
+    setLoadingCustomers(true);
+    setCustomerError("");
+    setCustomerSearch("");
+    setBusinessCustomers([]);
+
+    try {
+      const bizId = business.id || business._id;
+      const res = await adminAPI.getBusinessCustomers(bizId);
+      if (res && res.customers) {
+        setBusinessCustomers(res.customers);
+      } else {
+        setCustomerError("Failed to fetch customers for this business.");
+      }
+    } catch (err) {
+      console.error("Error fetching business customers:", err);
+      setCustomerError(err?.response?.data?.message || err.message || "Failed to fetch customers.");
+    } finally {
+      setLoadingCustomers(false);
+    }
+  };
 
   const openAccessModal = (business) => {
     setSelectedBusiness(business);
@@ -231,6 +265,16 @@ export default function BusinessesNew() {
       }
       setError(null);
 
+      // Fetch vendor settings to check vendorGrouping status
+      try {
+        const vendorRes = await adminAPI.getVendorSettings();
+        if (vendorRes?.vendorSettings) {
+          setVendorGrouping(Boolean(vendorRes.vendorSettings.vendorGrouping));
+        }
+      } catch (sysErr) {
+        console.warn("Notice: vendor settings fetch fallback:", sysErr.message);
+      }
+
       const token = localStorage.getItem("smartbill_token");
       if (!token) {
         setError("Not logged in. Please log out and log back in.");
@@ -255,7 +299,8 @@ export default function BusinessesNew() {
         return;
       }
 
-      const data = json.data || [];
+      const rawData = json.data || [];
+      const data = rawData.map((b) => ({ ...b, status: "Active", suspensionReason: "" }));
       setRows(data);
 
       try {
@@ -287,15 +332,8 @@ export default function BusinessesNew() {
   }, []);
 
   const processedRows = useMemo(() => {
-    // 1. Filter by Tab
+    // 1. Filter by Search
     let filtered = rows;
-    if (activeTab === "active") {
-      filtered = rows.filter((r) => r.status === "Active");
-    } else if (activeTab === "suspended") {
-      filtered = rows.filter((r) => r.status === "Suspended");
-    }
-
-    // 2. Filter by Search
     const q = search.trim().toLowerCase();
     if (q) {
       filtered = filtered.filter((b) => {
@@ -311,13 +349,13 @@ export default function BusinessesNew() {
       });
     }
 
-    // 3. Sort
+    // 2. Sort
     if (sortConfig.key) {
       filtered = [...filtered].sort((a, b) => {
         let valA = a[sortConfig.key];
         let valB = b[sortConfig.key];
 
-        if (sortConfig.key === "revenue" || sortConfig.key === "users") {
+        if (sortConfig.key === "users") {
           valA = Number(valA || 0);
           valB = Number(valB || 0);
         } else if (sortConfig.key === "joined") {
@@ -335,7 +373,21 @@ export default function BusinessesNew() {
     }
 
     return filtered;
-  }, [rows, search, activeTab, sortConfig]);
+  }, [rows, search, sortConfig]);
+
+  const groupedVendors = useMemo(() => {
+    if (!vendorGrouping) return null;
+    const groups = {};
+    processedRows.forEach((b) => {
+      const rawCategory = String(b.category || b.businessType || "").trim();
+      const catName = rawCategory ? rawCategory : "Other";
+      if (!groups[catName]) {
+        groups[catName] = [];
+      }
+      groups[catName].push(b);
+    });
+    return groups;
+  }, [processedRows, vendorGrouping]);
 
   const requestSort = (key) => {
     let direction = "asc";
@@ -414,6 +466,201 @@ export default function BusinessesNew() {
     }
   };
 
+  if (selectedDetailsBusiness) {
+    const filteredCustomers = businessCustomers.filter((c) => {
+      const q = customerSearch.trim().toLowerCase();
+      if (!q) return true;
+      return (
+        String(c.name || "").toLowerCase().includes(q) ||
+        String(c.email || "").toLowerCase().includes(q) ||
+        String(c.phone || "").toLowerCase().includes(q) ||
+        String(c.city || "").toLowerCase().includes(q) ||
+        String(c.category || "").toLowerCase().includes(q)
+      );
+    });
+
+    const totalCustomerValue = businessCustomers.reduce((s, c) => s + Number(c.totalOrderValue || 0), 0);
+    const totalCustomerBalance = businessCustomers.reduce((s, c) => s + Number(c.balance || 0), 0);
+
+    return (
+      <div className="p-6 space-y-6 bg-white min-h-screen">
+        {/* Header Navigation */}
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between border-b border-slate-200 pb-5">
+          <div>
+            <button
+              onClick={() => setSelectedDetailsBusiness(null)}
+              className="inline-flex items-center gap-2 text-sm font-semibold text-blue-600 hover:text-blue-800 hover:underline mb-2 cursor-pointer transition-colors"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              <span>Back to Businesses</span>
+            </button>
+            <h1 className="text-2xl font-bold text-slate-900 tracking-tight flex items-center gap-3">
+              <span>{selectedDetailsBusiness.name}</span>
+              <Badge label={selectedDetailsBusiness.plan} variant={planToVariant(selectedDetailsBusiness.plan)} />
+              <Badge label={selectedDetailsBusiness.status || "Active"} variant="green" />
+            </h1>
+            <p className="text-sm text-slate-500 mt-1 flex items-center gap-3 flex-wrap">
+              <span>Business Owner: <strong className="text-slate-800">{selectedDetailsBusiness.owner}</strong></span>
+              <span>•</span>
+              <span className="flex items-center gap-1"><Mail className="w-3.5 h-3.5 text-slate-400" /> {selectedDetailsBusiness.ownerEmail}</span>
+              <span>•</span>
+              <span className="flex items-center gap-1"><Phone className="w-3.5 h-3.5 text-slate-400" /> {selectedDetailsBusiness.ownerPhone || "N/A"}</span>
+            </p>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+              <input
+                type="text"
+                placeholder="Search customers by name, phone, email..."
+                value={customerSearch}
+                onChange={(e) => setCustomerSearch(e.target.value)}
+                className="pl-9 pr-4 py-2 w-72 text-sm bg-white border border-slate-200 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+              />
+            </div>
+            <button
+              onClick={() => openBusinessDetailsModal(selectedDetailsBusiness)}
+              disabled={loadingCustomers}
+              className="flex items-center gap-2 px-3.5 py-2 text-sm font-medium bg-white border border-slate-200 text-slate-700 rounded-lg shadow-sm hover:bg-slate-50 transition-colors disabled:opacity-50 cursor-pointer"
+            >
+              <RefreshCw className={`h-4 w-4 text-slate-500 ${loadingCustomers ? "animate-spin" : ""}`} />
+              <span>Refresh</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Stats Cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Total Registered Customers</p>
+              <p className="text-3xl font-bold text-slate-900 mt-1">{businessCustomers.length}</p>
+            </div>
+            <div className="w-12 h-12 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center">
+              <UsersIcon className="w-6 h-6" />
+            </div>
+          </div>
+
+          <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Total Customer Orders Value</p>
+              <p className="text-3xl font-bold text-emerald-600 mt-1">
+                ₹{totalCustomerValue.toLocaleString("en-IN")}
+              </p>
+            </div>
+            <div className="w-12 h-12 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center">
+              <CheckCircle className="w-6 h-6" />
+            </div>
+          </div>
+
+          <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Total Outstanding Balance</p>
+              <p className="text-3xl font-bold text-amber-600 mt-1">
+                ₹{totalCustomerBalance.toLocaleString("en-IN")}
+              </p>
+            </div>
+            <div className="w-12 h-12 rounded-full bg-amber-50 text-amber-600 flex items-center justify-center">
+              <Activity className="w-6 h-6" />
+            </div>
+          </div>
+        </div>
+
+        {/* Full-width Customers Table */}
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50/80">
+            <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
+              <span>Customer Directory for {selectedDetailsBusiness.name}</span>
+              <span className="text-xs px-2.5 py-0.5 rounded-full bg-blue-100 text-blue-700 font-semibold">
+                {filteredCustomers.length} Records
+              </span>
+            </h3>
+          </div>
+
+          {loadingCustomers ? (
+            <div className="py-20 text-center text-slate-500 flex flex-col items-center justify-center gap-3">
+              <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+              <span className="text-sm font-medium">Fetching customer records for {selectedDetailsBusiness.name}...</span>
+            </div>
+          ) : customerError ? (
+            <div className="p-8 text-center text-red-600 flex flex-col items-center justify-center gap-3">
+              <AlertCircle className="w-8 h-8 text-red-500" />
+              <span className="text-sm font-medium">{customerError}</span>
+              <button
+                onClick={() => openBusinessDetailsModal(selectedDetailsBusiness)}
+                className="px-4 py-2 bg-blue-600 text-white text-xs font-semibold rounded-lg hover:bg-blue-700 transition-colors"
+              >
+                Retry Loading
+              </button>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead className="bg-slate-50 border-b border-slate-200 sticky top-0 z-10">
+                  <tr>
+                    <th className="py-3.5 px-4 text-xs font-semibold text-slate-600 uppercase tracking-wider">Customer Name</th>
+                    <th className="py-3.5 px-4 text-xs font-semibold text-slate-600 uppercase tracking-wider">Phone Number</th>
+                    <th className="py-3.5 px-4 text-xs font-semibold text-slate-600 uppercase tracking-wider">Email</th>
+                    <th className="py-3.5 px-4 text-xs font-semibold text-slate-600 uppercase tracking-wider">City / Location</th>
+                    <th className="py-3.5 px-4 text-xs font-semibold text-slate-600 uppercase tracking-wider">Category</th>
+                    <th className="py-3.5 px-4 text-xs font-semibold text-slate-600 uppercase tracking-wider text-right">Total Purchases</th>
+                    <th className="py-3.5 px-4 text-xs font-semibold text-slate-600 uppercase tracking-wider text-right">Outstanding Balance</th>
+                    <th className="py-3.5 px-4 text-xs font-semibold text-slate-600 uppercase tracking-wider">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 bg-white">
+                  {filteredCustomers.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="py-20 text-center">
+                        <div className="flex flex-col items-center justify-center text-slate-400">
+                          <UsersIcon className="w-12 h-12 mb-3 opacity-40 text-blue-600" />
+                          <p className="text-base font-semibold text-slate-800 mb-1">No customer records found</p>
+                          <p className="text-xs text-slate-500">There are no registered customer records for this business vertical.</p>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredCustomers.map((c) => (
+                      <tr key={c._id || c.id} className="hover:bg-slate-50/80 transition-colors">
+                        <td className="px-4 py-3.5 font-semibold text-slate-900 text-sm">
+                          {c.name}
+                        </td>
+                        <td className="px-4 py-3.5 text-slate-600 text-sm font-mono">
+                          {c.phone || "N/A"}
+                        </td>
+                        <td className="px-4 py-3.5 text-slate-600 text-sm">
+                          {c.email || "N/A"}
+                        </td>
+                        <td className="px-4 py-3.5 text-slate-600 text-sm">
+                          {c.city || c.address || "N/A"}
+                        </td>
+                        <td className="px-4 py-3.5">
+                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-700 border border-slate-200">
+                            {c.category || "Retailer"}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3.5 text-right font-mono font-bold text-slate-900 text-sm">
+                          ₹{Number(c.totalOrderValue || 0).toLocaleString("en-IN")}
+                        </td>
+                        <td className="px-4 py-3.5 text-right font-mono text-slate-700 text-sm">
+                          ₹{Number(c.balance || 0).toLocaleString("en-IN")}
+                        </td>
+                        <td className="px-4 py-3.5">
+                          <Badge label="Active" variant="green" />
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="p-6 space-y-5 bg-white">
       {/* Header */}
@@ -474,7 +721,7 @@ export default function BusinessesNew() {
       )}
 
       {/* Stats */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between overflow-hidden relative group">
           <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
             <Building className="w-12 h-12 text-blue-600" />
@@ -513,25 +760,6 @@ export default function BusinessesNew() {
 
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between overflow-hidden relative group">
           <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
-            <CreditCard className="w-12 h-12 text-amber-600" />
-          </div>
-          <div className="flex items-center justify-between z-10">
-            <p className="text-xs font-bold uppercase tracking-wider text-slate-500">
-              Total Revenue
-            </p>
-            <div className="w-8 h-8 rounded-full bg-amber-50 text-amber-600 flex items-center justify-center">
-              <Activity className="w-4 h-4" />
-            </div>
-          </div>
-          <div className="mt-2 z-10">
-            <p className="text-3xl font-bold text-slate-900">
-              {fmt(rows.reduce((s, r) => s + Number(r.revenue || 0), 0))}
-            </p>
-          </div>
-        </div>
-
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between overflow-hidden relative group">
-          <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
             <UsersIcon className="w-12 h-12 text-purple-600" />
           </div>
           <div className="flex items-center justify-between z-10">
@@ -551,11 +779,9 @@ export default function BusinessesNew() {
       </div>
 
       {/* Tabs */}
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="grid w-full max-w-md grid-cols-3">
+      <Tabs value="all" className="w-full">
+        <TabsList className="w-fit">
           <TabsTrigger value="all">All ({rows.length})</TabsTrigger>
-          <TabsTrigger value="active">Active ({rows.filter(r => r.status === "Active").length})</TabsTrigger>
-          <TabsTrigger value="suspended">Suspended ({rows.filter(r => r.status === "Suspended").length})</TabsTrigger>
         </TabsList>
       </Tabs>
 
@@ -743,160 +969,310 @@ export default function BusinessesNew() {
         </Modal>
       )}
 
-      {/* Table */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
-            <thead className="bg-slate-50/80 border-b border-slate-200 sticky top-0 z-10 backdrop-blur-sm">
-              <tr>
-                {[
-                  { label: "Business & Owner", key: "name", sortable: true },
-                  { label: "Location", key: "ownerCity", sortable: true },
-                  { label: "Plan", key: "plan", sortable: true },
-                  { label: "Joined", key: "joined", sortable: true },
-                  { label: "Revenue", key: "revenue", sortable: true },
-                  { label: "Users", key: "users", sortable: true },
-                  { label: "Status", key: "status", sortable: true },
-                  { label: "Actions", key: null, sortable: false },
-                ].map((h) => (
-                  <th
-                    key={h.label}
-                    onClick={() => h.sortable && requestSort(h.key)}
-                    className={`py-3 px-4 text-xs font-semibold text-slate-600 uppercase tracking-wider whitespace-nowrap ${
-                      h.sortable ? "cursor-pointer hover:text-blue-600 hover:bg-slate-100 transition-colors select-none group" : ""
-                    }`}
-                  >
-                    <div className="flex items-center gap-1.5">
-                      {h.label}
-                      {h.sortable && (
-                        <ArrowUpDown className={`w-3 h-3 ${sortConfig.key === h.key ? "text-blue-600" : "text-slate-300 opacity-0 group-hover:opacity-100"} transition-all`} />
-                      )}
+
+
+      {/* Grouping Status Notification Banner */}
+      {vendorGrouping && (
+        <div className="p-3.5 rounded-xl bg-blue-50/80 border border-blue-200 text-blue-800 text-xs font-medium flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Tag className="w-4 h-4 text-blue-600 flex-shrink-0" />
+            <span>
+              <strong>Vendor Grouping ON:</strong> Business owners are automatically grouped by their actual business category.
+            </span>
+          </div>
+          <span className="font-semibold text-blue-700 bg-white px-2.5 py-1 rounded-md border border-blue-200 shadow-xs">
+            {Object.keys(groupedVendors || {}).length} Categories
+          </span>
+        </div>
+      )}
+
+      {/* Table / Grouped View */}
+      {vendorGrouping && groupedVendors ? (
+        <div className="space-y-6">
+          {Object.keys(groupedVendors).length === 0 ? (
+            <div className="bg-white rounded-xl border border-slate-200 p-12 text-center shadow-sm">
+              <Building2 className="w-8 h-8 text-slate-400 mx-auto mb-2" />
+              <h3 className="text-sm font-semibold text-slate-900">No businesses found</h3>
+              <p className="text-xs text-slate-500">No matching business records in the database.</p>
+            </div>
+          ) : (
+            Object.entries(groupedVendors).map(([categoryName, categoryRows]) => (
+              <div key={categoryName} className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                {/* Category Header */}
+                <div className="px-5 py-3.5 border-b border-slate-200 bg-slate-50/80 flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-7 h-7 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center font-bold text-xs">
+                      <Tag className="w-3.5 h-3.5" />
                     </div>
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {loading ? (
-                <tr>
-                  <td colSpan={8} className="py-12 text-center text-slate-500">
-                    <div className="flex flex-col items-center justify-center gap-2">
-                      <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
-                      <span className="text-sm font-medium">Fetching registered business owners...</span>
-                    </div>
-                  </td>
-                </tr>
-              ) : processedRows.length === 0 ? (
-                <tr>
-                  <td colSpan={8} className="py-16 text-center">
-                    <div className="flex flex-col items-center justify-center">
-                      <div className="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center mb-3">
-                        <Building2 className="w-6 h-6 text-slate-400" />
-                      </div>
-                      <h3 className="text-sm font-semibold text-slate-900 mb-1">No businesses found</h3>
-                      <p className="text-xs text-slate-500">No matching business records in the database.</p>
-                    </div>
-                  </td>
-                </tr>
-              ) : (
-                processedRows.map((b) => (
-                  <tr
-                    key={b.id || b._id}
-                    className="hover:bg-slate-50/50 transition-colors group"
-                  >
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-3">
-                        <Avatar className="h-10 w-10 border border-slate-200">
-                          <AvatarFallback className="bg-blue-50 text-blue-700 font-semibold text-sm">
-                            {b.name ? b.name.substring(0, 2).toUpperCase() : "B"}
-                          </AvatarFallback>
-                        </Avatar>
-                        <div>
-                          <p className="font-semibold text-slate-900 text-sm leading-tight">{b.name}</p>
-                          <div className="flex items-center gap-2 mt-0.5 text-xs text-slate-500">
-                            <span className="flex items-center gap-1 truncate max-w-[120px]" title={b.ownerEmail}>
-                              <Mail className="w-3 h-3" /> {b.ownerEmail}
-                            </span>
-                            <span className="flex items-center gap-1">
-                              <Phone className="w-3 h-3" /> {b.ownerPhone}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 text-slate-600 text-sm">
-                      <div className="flex items-center gap-1.5">
-                        <MapPin className="w-3.5 h-3.5 text-slate-400" />
-                        {b.ownerCity || "-"}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <Badge label={b.plan} variant={planToVariant(b.plan)} />
-                    </td>
-                    <td className="px-4 py-3 text-slate-500 text-sm">{b.joined}</td>
-                    <td className="px-4 py-3 font-semibold text-slate-900 text-sm">
-                      {fmt(b.revenue)}
-                    </td>
-                    <td className="px-4 py-3 text-slate-600 text-sm">{b.users}</td>
-                    <td className="px-4 py-3">
-                      <div className="flex flex-col items-start gap-1">
-                        <Badge label={b.status} variant={statusToVariant(b.status)} />
-                        {b.status === "Suspended" && b.suspensionReason && (
-                          <span
-                            className="text-[10px] text-rose-600 truncate max-w-[120px]"
-                            title={b.suspensionReason}
+                    <h3 className="font-bold text-slate-900 text-sm tracking-tight">
+                      {categoryName}
+                    </h3>
+                  </div>
+                  <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
+                    {categoryRows.length} {categoryRows.length === 1 ? "Vendor" : "Vendors"}
+                  </span>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead className="bg-slate-50/80 border-b border-slate-200 sticky top-0 z-10 backdrop-blur-sm">
+                      <tr>
+                        {[
+                          { label: "Business & Owner", key: "name", sortable: true },
+                          { label: "Email", key: "ownerEmail", sortable: true },
+                          { label: "Phone No", key: "ownerPhone", sortable: true },
+                          { label: "Plan", key: "plan", sortable: true },
+                          { label: "Joined", key: "joined", sortable: true },
+                          { label: "Users", key: "users", sortable: true },
+                          { label: "Status", key: "status", sortable: true },
+                        ].map((h) => (
+                          <th
+                            key={h.label}
+                            onClick={() => h.sortable && requestSort(h.key)}
+                            className={`py-3 px-4 text-xs font-semibold text-slate-600 uppercase tracking-wider whitespace-nowrap ${
+                              h.sortable ? "cursor-pointer hover:text-blue-600 hover:bg-slate-100 transition-colors select-none group" : ""
+                            }`}
                           >
-                            {b.suspensionReason}
-                          </span>
+                            <div className="flex items-center gap-1.5">
+                              {h.label}
+                              {h.sortable && (
+                                <ArrowUpDown className={`w-3 h-3 ${sortConfig.key === h.key ? "text-blue-600" : "text-slate-300 opacity-0 group-hover:opacity-100"} transition-all`} />
+                              )}
+                            </div>
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {loading ? (
+                        <tr>
+                          <td colSpan={7} className="py-12 text-center text-slate-500">
+                            <div className="flex flex-col items-center justify-center gap-2">
+                              <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
+                              <span className="text-sm font-medium">Fetching registered business owners...</span>
+                            </div>
+                          </td>
+                        </tr>
+                      ) : categoryRows.length === 0 ? (
+                        <tr>
+                          <td colSpan={7} className="py-12 text-center">
+                            <div className="flex flex-col items-center justify-center">
+                              <div className="w-10 h-10 bg-slate-50 rounded-full flex items-center justify-center mb-2">
+                                <Building2 className="w-5 h-5 text-slate-400" />
+                              </div>
+                              <h3 className="text-xs font-semibold text-slate-900 mb-0.5">No businesses found</h3>
+                              <p className="text-[11px] text-slate-500">No matching business records in this category.</p>
+                            </div>
+                          </td>
+                        </tr>
+                      ) : (
+                        categoryRows.map((b) => (
+                          <tr
+                            key={b.id || b._id}
+                            className="hover:bg-slate-50/50 transition-colors group"
+                          >
+                            <td className="px-4 py-3">
+                              <div
+                                onClick={() => openBusinessDetailsModal(b)}
+                                className="flex items-center gap-3 cursor-pointer group/item select-none"
+                                title="Click to view business & customer details"
+                              >
+                                <Avatar className="h-10 w-10 border border-slate-200 group-hover/item:border-blue-400 transition-colors">
+                                  <AvatarFallback className="bg-blue-50 text-blue-700 font-semibold text-sm group-hover/item:bg-blue-600 group-hover/item:text-white transition-colors">
+                                    {b.name ? b.name.substring(0, 2).toUpperCase() : "B"}
+                                  </AvatarFallback>
+                                </Avatar>
+                                <div>
+                                  <p className="font-semibold text-slate-900 text-sm leading-tight group-hover/item:text-blue-600 group-hover/item:underline transition-colors flex items-center gap-1.5">
+                                    <span>{b.name}</span>
+                                  </p>
+                                  <p className="text-xs text-slate-500 font-medium mt-0.5">
+                                    {b.owner || "-"} {(b.category || b.businessType) ? `• ${b.category || b.businessType}` : ""}
+                                  </p>
+                                </div>
+                              </div>
+                            </td>
+                            <td className="px-4 py-3 text-slate-600 text-sm">
+                              <div className="flex items-center gap-1.5">
+                                <Mail className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+                                <span className="truncate max-w-[180px]" title={b.ownerEmail}>
+                                  {b.ownerEmail || "-"}
+                                </span>
+                              </div>
+                            </td>
+                            <td className="px-4 py-3 text-slate-600 text-sm font-mono whitespace-nowrap">
+                              <div className="flex items-center gap-1.5">
+                                <Phone className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+                                <span>{b.ownerPhone || "-"}</span>
+                              </div>
+                            </td>
+                            <td className="px-4 py-3">
+                              <Badge label={b.plan} variant={planToVariant(b.plan)} />
+                            </td>
+                            <td className="px-4 py-3 text-slate-500 text-sm">{b.joined}</td>
+                            <td className="px-4 py-3 text-slate-600 text-sm">{b.users}</td>
+                            <td className="px-4 py-3">
+                              <div className="flex flex-col items-start gap-1">
+                                <Badge label={b.status} variant={statusToVariant(b.status)} />
+                                {b.status === "Suspended" && b.suspensionReason && (
+                                  <span
+                                    className="text-[10px] text-rose-600 truncate max-w-[120px]"
+                                    title={b.suspensionReason}
+                                  >
+                                    {b.suspensionReason}
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="flex items-center justify-between px-5 py-3 border-t border-slate-100 bg-slate-50/30">
+                  <p className="text-xs text-slate-500">
+                    Showing <span className="font-semibold text-slate-700">{categoryRows.length}</span> vendors under {categoryName}
+                  </p>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      ) : (
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead className="bg-slate-50/80 border-b border-slate-200 sticky top-0 z-10 backdrop-blur-sm">
+                <tr>
+                  {[
+                    { label: "Business & Owner", key: "name", sortable: true },
+                    { label: "Email", key: "ownerEmail", sortable: true },
+                    { label: "Phone No", key: "ownerPhone", sortable: true },
+                    { label: "Plan", key: "plan", sortable: true },
+                    { label: "Joined", key: "joined", sortable: true },
+                    { label: "Users", key: "users", sortable: true },
+                    { label: "Status", key: "status", sortable: true },
+                  ].map((h) => (
+                    <th
+                      key={h.label}
+                      onClick={() => h.sortable && requestSort(h.key)}
+                      className={`py-3 px-4 text-xs font-semibold text-slate-600 uppercase tracking-wider whitespace-nowrap ${
+                        h.sortable ? "cursor-pointer hover:text-blue-600 hover:bg-slate-100 transition-colors select-none group" : ""
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5">
+                        {h.label}
+                        {h.sortable && (
+                          <ArrowUpDown className={`w-3 h-3 ${sortConfig.key === h.key ? "text-blue-600" : "text-slate-300 opacity-0 group-hover:opacity-100"} transition-all`} />
                         )}
                       </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <DropdownMenu>
-                        <DropdownMenuTrigger className="p-2 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-900 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-blue-500 data-[state=open]:bg-slate-100 data-[state=open]:text-slate-900">
-                          <MoreHorizontal className="w-4 h-4" />
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="w-48">
-                          <DropdownMenuLabel>Actions</DropdownMenuLabel>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem onClick={() => openAccessModal(b)} className="cursor-pointer">
-                            <Shield className="w-4 h-4 mr-2 text-blue-500" />
-                            Manage Access
-                          </DropdownMenuItem>
-                          
-                          {b.status === "Suspended" ? (
-                            <DropdownMenuItem onClick={() => resumeBusiness(b.id || b._id)} className="cursor-pointer">
-                              <CheckCircle className="w-4 h-4 mr-2 text-emerald-500" />
-                              Resume Account
-                            </DropdownMenuItem>
-                          ) : (
-                            <DropdownMenuItem onClick={() => openSuspendModal(b.id || b._id)} className="cursor-pointer text-red-600 focus:text-red-700">
-                              <XCircle className="w-4 h-4 mr-2" />
-                              Suspend Account
-                            </DropdownMenuItem>
-                          )}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {loading ? (
+                  <tr>
+                    <td colSpan={7} className="py-12 text-center text-slate-500">
+                      <div className="flex flex-col items-center justify-center gap-2">
+                        <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
+                        <span className="text-sm font-medium">Fetching registered business owners...</span>
+                      </div>
                     </td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+                ) : processedRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="py-16 text-center">
+                      <div className="flex flex-col items-center justify-center">
+                        <div className="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center mb-3">
+                          <Building2 className="w-6 h-6 text-slate-400" />
+                        </div>
+                        <h3 className="text-sm font-semibold text-slate-900 mb-1">No businesses found</h3>
+                        <p className="text-xs text-slate-500">No matching business records in the database.</p>
+                      </div>
+                    </td>
+                  </tr>
+                ) : (
+                  processedRows.map((b) => (
+                    <tr
+                      key={b.id || b._id}
+                      className="hover:bg-slate-50/50 transition-colors group"
+                    >
+                      <td className="px-4 py-3">
+                        <div
+                          onClick={() => openBusinessDetailsModal(b)}
+                          className="flex items-center gap-3 cursor-pointer group/item select-none"
+                          title="Click to view business & customer details"
+                        >
+                          <Avatar className="h-10 w-10 border border-slate-200 group-hover/item:border-blue-400 transition-colors">
+                            <AvatarFallback className="bg-blue-50 text-blue-700 font-semibold text-sm group-hover/item:bg-blue-600 group-hover/item:text-white transition-colors">
+                              {b.name ? b.name.substring(0, 2).toUpperCase() : "B"}
+                            </AvatarFallback>
+                          </Avatar>
+                          <div>
+                            <p className="font-semibold text-slate-900 text-sm leading-tight group-hover/item:text-blue-600 group-hover/item:underline transition-colors flex items-center gap-1.5">
+                              <span>{b.name}</span>
+                            </p>
+                            <p className="text-xs text-slate-500 font-medium mt-0.5">
+                              {b.owner || "-"}
+                            </p>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-slate-600 text-sm">
+                        <div className="flex items-center gap-1.5">
+                          <Mail className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+                          <span className="truncate max-w-[180px]" title={b.ownerEmail}>
+                            {b.ownerEmail || "-"}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-slate-600 text-sm font-mono whitespace-nowrap">
+                        <div className="flex items-center gap-1.5">
+                          <Phone className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+                          <span>{b.ownerPhone || "-"}</span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <Badge label={b.plan} variant={planToVariant(b.plan)} />
+                      </td>
+                      <td className="px-4 py-3 text-slate-500 text-sm">{b.joined}</td>
+                      <td className="px-4 py-3 text-slate-600 text-sm">{b.users}</td>
+                      <td className="px-4 py-3">
+                        <div className="flex flex-col items-start gap-1">
+                          <Badge label={b.status} variant={statusToVariant(b.status)} />
+                          {b.status === "Suspended" && b.suspensionReason && (
+                            <span
+                              className="text-[10px] text-rose-600 truncate max-w-[120px]"
+                              title={b.suspensionReason}
+                            >
+                              {b.suspensionReason}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
 
-        <div className="flex items-center justify-between px-5 py-4 border-t border-slate-200 bg-slate-50/50">
-          <p className="text-xs text-slate-500">
-            Showing{" "}
-            <span className="font-semibold text-slate-700">
-              {processedRows.length}
-            </span>{" "}
-            of{" "}
-            <span className="font-semibold text-slate-700">{rows.length}</span>{" "}
-            businesses
-          </p>
+          <div className="flex items-center justify-between px-5 py-4 border-t border-slate-200 bg-slate-50/50">
+            <p className="text-xs text-slate-500">
+              Showing{" "}
+              <span className="font-semibold text-slate-700">
+                {processedRows.length}
+              </span>{" "}
+              of{" "}
+              <span className="font-semibold text-slate-700">{rows.length}</span>{" "}
+              businesses
+            </p>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

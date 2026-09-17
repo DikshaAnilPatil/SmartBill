@@ -2,7 +2,9 @@ import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import User from "../models/User.js";
 import Order from "../models/Order.js";
+import Customer from "../models/Customer.js";
 import SystemSettings from "../models/SystemSettings.js";
+import VendorSettings from "../models/VendorSettings.js";
 import { createNotification, notifySuperAdmins, broadcastToOwner } from "../services/notificationService.js";
 import { sendSystemEmail } from "../utils/emailService.js";
 
@@ -77,8 +79,9 @@ export const getAllBusinesses = async (req, res) => {
         plan: formattedPlan,
         users: employeeCount + 1, // Owner + employees
         revenue: revenue,
-        status: owner.status || "Active",
-        suspensionReason: owner.suspensionReason || "",
+        category: owner.businessType || owner.category || owner.businessCategory || "",
+        status: "Active",
+        suspensionReason: "",
         joined: owner.createdAt
           ? new Date(owner.createdAt).toISOString().split("T")[0]
           : "N/A",
@@ -299,6 +302,70 @@ export const updateSystemSettings = async (req, res) => {
     console.error("UPDATE SYSTEM SETTINGS ERROR:", error);
     return res.status(500).json({
       message: error.message || "Failed to update system settings.",
+    });
+  }
+};
+
+/**
+ * GET /api/admin/settings/vendor
+ * Retrieve vendor settings for SuperAdmin.
+ */
+export const getVendorSettings = async (req, res) => {
+  try {
+    if (!isInternalAdmin(req.user)) {
+      return res.status(403).json({
+        message: "Forbidden: Admin access required.",
+      });
+    }
+
+    let settings = await VendorSettings.findOne({ key: "global_vendor_settings" });
+    if (!settings) {
+      settings = await VendorSettings.create({ key: "global_vendor_settings" });
+    }
+
+    return res.status(200).json({
+      success: true,
+      vendorSettings: settings,
+    });
+  } catch (error) {
+    console.error("GET VENDOR SETTINGS ERROR:", error);
+    return res.status(500).json({
+      message: error.message || "Failed to retrieve vendor settings.",
+    });
+  }
+};
+
+/**
+ * PUT /api/admin/settings/vendor
+ * Update vendor settings for SuperAdmin.
+ */
+export const updateVendorSettings = async (req, res) => {
+  try {
+    if (!isInternalAdmin(req.user)) {
+      return res.status(403).json({
+        message: "Forbidden: Admin access required.",
+      });
+    }
+
+    const { vendorGrouping } = req.body;
+    const payload = {};
+    if (typeof vendorGrouping === "boolean") payload.vendorGrouping = vendorGrouping;
+
+    const settings = await VendorSettings.findOneAndUpdate(
+      { key: "global_vendor_settings" },
+      { $set: payload },
+      { new: true, upsert: true }
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Vendor settings updated successfully.",
+      vendorSettings: settings,
+    });
+  } catch (error) {
+    console.error("UPDATE VENDOR SETTINGS ERROR:", error);
+    return res.status(500).json({
+      message: error.message || "Failed to update vendor settings.",
     });
   }
 };
@@ -1155,6 +1222,79 @@ export const updateRolePermissionsInBulk = async (req, res) => {
   } catch (error) {
     console.error("UPDATE ROLE PERMISSIONS ERROR:", error);
     return res.status(500).json({ message: error.message || "Failed to update role permissions." });
+  }
+};
+
+/**
+ * GET /api/admin/businesses/:id/customers
+ * Fetch detailed business owner profile and all registered customers for that business.
+ */
+export const getBusinessCustomers = async (req, res) => {
+  try {
+    if (!isInternalAdmin(req.user)) {
+      return res.status(403).json({
+        message: "Forbidden: Internal Admin access required.",
+      });
+    }
+
+    const { id } = req.params;
+    const owner = await User.findById(id).select("-password -passwordResetToken -passwordResetExpires -twoFactorSecret").lean();
+
+    if (!owner) {
+      return res.status(404).json({
+        success: false,
+        message: "Business owner not found.",
+      });
+    }
+
+    const customers = await Customer.find({ ownerId: id }).sort({ createdAt: -1 }).lean();
+
+    const formattedPlan = owner.subscription?.plan
+      ? owner.subscription.plan.charAt(0).toUpperCase() + owner.subscription.plan.slice(1)
+      : "Starter";
+
+    return res.status(200).json({
+      success: true,
+      business: {
+        _id: owner._id,
+        id: owner._id.toString(),
+        name: owner.businessName || `${owner.firstName} ${owner.lastName}'s Business`,
+        owner: `${owner.firstName} ${owner.lastName}`.trim(),
+        ownerEmail: owner.email,
+        ownerPhone: owner.phone || "N/A",
+        ownerCity: owner.city || "N/A",
+        address: owner.address || "N/A",
+        plan: formattedPlan,
+        status: "Active",
+        joined: owner.createdAt
+          ? new Date(owner.createdAt).toISOString().split("T")[0]
+          : "N/A",
+      },
+      customersCount: customers.length,
+      customers: customers.map((c) => ({
+        _id: c._id,
+        id: c._id.toString(),
+        name: c.name,
+        email: c.email || "N/A",
+        phone: c.phone || "N/A",
+        city: c.city || "N/A",
+        address: c.address || "N/A",
+        gst: c.gst || "N/A",
+        category: c.category || "Retailer",
+        totalOrderValue: c.totalOrderValue || 0,
+        balance: c.balance || 0,
+        status: c.status || "Active",
+        createdAt: c.createdAt
+          ? new Date(c.createdAt).toISOString().split("T")[0]
+          : "N/A",
+      })),
+    });
+  } catch (error) {
+    console.error("GET BUSINESS CUSTOMERS ERROR:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to fetch business customers.",
+    });
   }
 };
 
