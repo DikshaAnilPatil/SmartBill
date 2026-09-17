@@ -32,5 +32,30 @@ export const fetchPurchaseById = (id) =>
 export const markPurchaseAsPaid = (id) =>
   axiosClient.put(`/purchases/${id}/mark-paid`).then((res) => res.data);
 
+/**
+ * Create a purchase return / Debit Note.
+ * Deducts stock from inventory and updates supplier balance.
+ * @param {object} payload
+ * @returns {{ message: string, purchaseReturn: object }}
+ */
+export const createPurchaseReturn = (payload) =>
+  axiosClient.post("/purchase-returns", payload).then((res) => res.data);
+
+/**
+ * Fetch all purchase return / Debit Note records.
+ * @returns {{ message: string, purchaseReturns: Array }}
+ */
+export const fetchPurchaseReturns = () =>
+  axiosClient.get("/purchase-returns").then((res) => res.data);
+
+/**
+ * Fetch a single purchase return record by ID.
+ * @param {string} id
+ * @returns {{ message: string, purchaseReturn: object }}
+ */
+export const fetchPurchaseReturnById = (id) =>
+  axiosClient.get(`/purchase-returns/${id}`).then((res) => res.data);
+
+
 
 
