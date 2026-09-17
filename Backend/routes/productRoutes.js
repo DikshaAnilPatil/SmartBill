@@ -7,6 +7,7 @@ import {
   bulkAddProducts,
   getProducts,
   getProduct,
+  adjustStock,
   updateProduct,
   deleteProduct,
 } from "../controller/productController.js";
@@ -19,6 +20,7 @@ router.post("/", protect, checkResourceLimit("products"), addProduct);
 router.get("/", protect, getProducts);
 router.get("/:id", protect, getProduct);
 
+router.post("/:id/adjust", protect, adjustStock);
 router.put("/:id", protect, updateProduct);
 
 router.delete("/:id", protect, deleteProduct);

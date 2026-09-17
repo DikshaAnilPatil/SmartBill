@@ -5,6 +5,7 @@ import {
   getPurchaseById,
   createPurchase,
   markPurchaseAsPaid,
+  createPurchaseReturn,
   uploadPurchaseReceipt,
   deletePurchase,
 } from "../controller/purchaseController.js";
@@ -27,6 +28,9 @@ router.post("/", requireFeature("purchaseManagement"), createPurchase);
 
 // Mark an unpaid/partially paid purchase as fully paid / record payment
 router.put("/:id/mark-paid", markPurchaseAsPaid);
+
+// Purchase return / Debit Note
+router.post("/:id/return", createPurchaseReturn);
 
 // Upload / attach invoice or receipt image/PDF
 router.put("/:id/receipt", uploadPurchaseReceipt);

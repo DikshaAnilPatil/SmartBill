@@ -45,12 +45,21 @@ axiosClient.interceptors.response.use(
         if (fallbackError.response) {
           const status = fallbackError.response.status;
           const data = fallbackError.response.data || {};
+          const isSusp = Boolean(
+            data.isSuspended ||
+            data.status === "Suspended" ||
+            data.code === "ACCOUNT_SUSPENDED" ||
+            (status === 403 && typeof data.message === "string" && /suspended/i.test(data.message))
+          );
           return Promise.reject({
             message: data.message || `Request failed with status ${status}`,
             status,
             field: data.field || null,
             errors: data.errors || null,
             raw: fallbackError,
+            data,
+            isSuspended: isSusp,
+            suspensionReason: data.suspensionReason || null,
           });
         }
       }
@@ -60,14 +69,43 @@ axiosClient.interceptors.response.use(
     let status = null;
     let field = null;
     let errors = null;
+    let data = {};
+    let isSuspended = false;
+    let suspensionReason = null;
 
     if (error.response) {
       // Server responded with a non-2xx status.
       status = error.response.status;
-      const data = error.response.data || {};
+      data = error.response.data || {};
       message = data.message || `Request failed with status ${status}`;
       field = data.field || null;
       errors = data.errors || null;
+      suspensionReason = data.suspensionReason || null;
+      isSuspended = Boolean(
+        data.isSuspended ||
+        data.status === "Suspended" ||
+        data.code === "ACCOUNT_SUSPENDED" ||
+        (status === 403 && typeof message === "string" && /suspended/i.test(message))
+      );
+
+      // If active session token was rejected due to suspension and not login endpoint
+      if (isSuspended && !originalRequest?.url?.includes("/auth/login")) {
+        try {
+          sessionStorage.setItem(
+            "smartbill_suspension_notice",
+            JSON.stringify({
+              reason: suspensionReason || "",
+              message: message,
+            })
+          );
+          localStorage.removeItem("smartbill_token");
+          localStorage.removeItem("smartbill_user");
+          window.dispatchEvent(new Event("userUpdated"));
+          if (!window.location.pathname.includes("/login")) {
+            window.location.href = "/login";
+          }
+        } catch {}
+      }
     } else if (error.request) {
       // Request was made but no response received (server offline / CORS / proxy).
       message =
@@ -80,6 +118,9 @@ axiosClient.interceptors.response.use(
       field,
       errors,
       raw: error,
+      data,
+      isSuspended,
+      suspensionReason,
     });
   }
 );

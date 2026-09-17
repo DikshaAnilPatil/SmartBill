@@ -13,6 +13,8 @@ import {
   ArrowDownRight,
   ArrowUpRight,
   BarChart3,
+  Calendar,
+  ChevronDown,
   DollarSign,
   FileText,
   Loader2,
@@ -34,6 +36,20 @@ import { Btn, Card, StatCard, statusBadge } from "@shared/components/common/ui";
 import { useCustomization } from "@shared/hooks/useCustomization";
 
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const MONTHS = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+];
 
 export default function BusinessDashboard({ onNav }) {
   const { t, formatCurrency } = useCustomization();
@@ -44,6 +60,7 @@ export default function BusinessDashboard({ onNav }) {
   const [expenses, setExpenses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [salesPeriod, setSalesPeriod] = useState("week"); // "week" | "month" | "year"
 
   const loadDashboardData = useCallback(async (isSilent = false) => {
     if (!isSilent) setLoading(true);
@@ -159,29 +176,109 @@ export default function BusinessDashboard({ onNav }) {
     };
   }, [orders, products, customers, globalLowStockThreshold]);
 
-  // Daily Sales for Current Week
-  const weeklySalesData = useMemo(() => {
+  // Filtered Sales Performance Data (Week / Month / Year)
+  const salesPerformanceData = useMemo(() => {
     const now = new Date();
-    const daysMap = {};
-    DAYS.forEach((d) => (daysMap[d] = 0));
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth();
 
-    const currentDay = now.getDay();
-    const distanceToMon = (currentDay + 6) % 7;
-    const monday = new Date(now);
-    monday.setDate(now.getDate() - distanceToMon);
-    monday.setHours(0, 0, 0, 0);
+    if (salesPeriod === "week") {
+      const daysMap = {};
+      DAYS.forEach((d) => (daysMap[d] = 0));
 
+      const currentDay = now.getDay();
+      const distanceToMon = (currentDay + 6) % 7;
+      const monday = new Date(currentYear, currentMonth, now.getDate() - distanceToMon, 0, 0, 0, 0);
+      const endOfWeek = new Date(monday);
+      endOfWeek.setDate(monday.getDate() + 7);
+
+      let total = 0;
+      orders.forEach((o) => {
+        const orderDate = new Date(o.createdAt || o.date);
+        if (!isNaN(orderDate.getTime()) && orderDate >= monday && orderDate < endOfWeek) {
+          const dayIdx = (orderDate.getDay() + 6) % 7;
+          const dayName = DAYS[dayIdx];
+          const val = Number(o.totalOrderValue || o.total) || 0;
+          daysMap[dayName] += val;
+          total += val;
+        }
+      });
+
+      return {
+        chartData: DAYS.map((day) => ({ label: day, amount: daysMap[day] })),
+        totalForPeriod: total,
+        periodTitle: "Weekly Sales Performance",
+        periodSubtitle: "Daily sales totals for the current week",
+      };
+    }
+
+    if (salesPeriod === "month") {
+      const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+      const buckets = [
+        { key: "w1", label: "Week 1 (1-7)", minDay: 1, maxDay: 7, amount: 0 },
+        { key: "w2", label: "Week 2 (8-14)", minDay: 8, maxDay: 14, amount: 0 },
+        { key: "w3", label: "Week 3 (15-21)", minDay: 15, maxDay: 21, amount: 0 },
+        { key: "w4", label: "Week 4 (22-28)", minDay: 22, maxDay: 28, amount: 0 },
+      ];
+      if (daysInMonth > 28) {
+        buckets.push({
+          key: "w5",
+          label: `Week 5 (29-${daysInMonth})`,
+          minDay: 29,
+          maxDay: daysInMonth,
+          amount: 0,
+        });
+      }
+
+      let total = 0;
+      orders.forEach((o) => {
+        const orderDate = new Date(o.createdAt || o.date);
+        if (
+          !isNaN(orderDate.getTime()) &&
+          orderDate.getFullYear() === currentYear &&
+          orderDate.getMonth() === currentMonth
+        ) {
+          const day = orderDate.getDate();
+          const val = Number(o.totalOrderValue || o.total) || 0;
+          const targetBucket = buckets.find((b) => day >= b.minDay && day <= b.maxDay);
+          if (targetBucket) {
+            targetBucket.amount += val;
+          }
+          total += val;
+        }
+      });
+
+      const monthName = MONTHS[currentMonth];
+      return {
+        chartData: buckets.map((b) => ({ label: b.label, amount: b.amount })),
+        totalForPeriod: total,
+        periodTitle: "Monthly Sales Performance",
+        periodSubtitle: `Weekly breakdown for ${monthName} ${currentYear}`,
+      };
+    }
+
+    // "year"
+    const monthsMap = {};
+    MONTHS.forEach((m) => (monthsMap[m] = 0));
+
+    let total = 0;
     orders.forEach((o) => {
       const orderDate = new Date(o.createdAt || o.date);
-      if (!isNaN(orderDate.getTime()) && orderDate >= monday) {
-        const dayIdx = (orderDate.getDay() + 6) % 7;
-        const dayName = DAYS[dayIdx];
-        daysMap[dayName] += Number(o.totalOrderValue || o.total) || 0;
+      if (!isNaN(orderDate.getTime()) && orderDate.getFullYear() === currentYear) {
+        const monthName = MONTHS[orderDate.getMonth()];
+        const val = Number(o.totalOrderValue || o.total) || 0;
+        monthsMap[monthName] += val;
+        total += val;
       }
     });
 
-    return DAYS.map((day) => ({ day, amount: daysMap[day] }));
-  }, [orders]);
+    return {
+      chartData: MONTHS.map((m) => ({ label: m, amount: monthsMap[m] })),
+      totalForPeriod: total,
+      periodTitle: "Yearly Sales Performance",
+      periodSubtitle: `Month-by-month sales for ${currentYear}`,
+    };
+  }, [orders, salesPeriod]);
 
   // Category Revenue Share
   const salesByCategory = useMemo(() => {
@@ -296,22 +393,41 @@ export default function BusinessDashboard({ onNav }) {
       {/* Charts Section */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         <Card className="lg:col-span-2 p-5 h-[340px] flex flex-col">
-          <div className="flex items-center justify-between mb-5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
             <div>
               <h3 className="font-semibold text-slate-900 dark:text-white text-base">
-                Weekly Sales Performance
+                {salesPerformanceData.periodTitle}
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                Daily sales totals for the current week
+                {salesPerformanceData.periodSubtitle}
               </p>
+            </div>
+            <div className="flex items-center gap-2 self-start sm:self-auto">
+              <div className="relative inline-flex items-center">
+                <select
+                  id="sales-performance-period-select"
+                  aria-label="Select sales performance period"
+                  value={salesPeriod}
+                  onChange={(e) => setSalesPeriod(e.target.value)}
+                  className="appearance-none bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200 text-xs font-semibold pl-3 pr-8 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:border-blue-400 dark:hover:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all cursor-pointer shadow-2xs"
+                >
+                  <option value="week">Week</option>
+                  <option value="month">Month</option>
+                  <option value="year">Year</option>
+                </select>
+                <ChevronDown className="w-3.5 h-3.5 text-slate-400 dark:text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+              </div>
             </div>
           </div>
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={weeklySalesData} barSize={26}>
+            <BarChart
+              data={salesPerformanceData.chartData}
+              barSize={salesPeriod === "month" ? 34 : salesPeriod === "week" ? 28 : 18}
+            >
               <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" />
               <XAxis
-                dataKey="day"
-                tick={{ fill: "#94A3B8", fontSize: 11 }}
+                dataKey="label"
+                tick={{ fill: "#94A3B8", fontSize: salesPeriod === "month" ? 10 : 11 }}
                 axisLine={false}
                 tickLine={false}
               />

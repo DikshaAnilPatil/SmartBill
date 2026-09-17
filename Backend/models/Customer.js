@@ -52,6 +52,18 @@ const customerSchema = new mongoose.Schema(
       default: "",
     },
 
+    state: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
+    stateCode: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
     category: {
       type: String,
       trim: true,
@@ -97,6 +109,17 @@ const customerSchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
+
+    paymentHistory: [
+      {
+        amount: { type: Number, required: true },
+        paymentMode: { type: String, default: "Cash" },
+        date: { type: Date, default: Date.now },
+        referenceNo: { type: String, default: "" },
+        notes: { type: String, default: "" },
+        invoiceNo: { type: String, default: "" },
+      },
+    ],
 
     status: {
       type: String,

@@ -40,12 +40,14 @@ const generateInvoiceNo = async (ownerId) => {
     yearStr = `/${String(startYear).slice(-2)}-${String(endYear).slice(-2)}`;
   }
 
-  const count = await Order.countDocuments({ ownerId });
-  let candidate = count + startingNumber;
+  const totalCount = await Order.countDocuments();
+  const ownerCount = await Order.countDocuments({ ownerId });
+  let candidate = Math.max(totalCount + 1, ownerCount + startingNumber);
   let invoiceNo = `${prefix}${yearStr}-${String(candidate).padStart(4, "0")}`;
 
-  for (let attempt = 0; attempt < 20; attempt++) {
-    const existing = await Order.exists({ invoiceNo, ownerId });
+  // Guard against collision with any existing invoice across the database
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const existing = await Order.exists({ invoiceNo });
     if (!existing) return invoiceNo;
     candidate += 1;
     invoiceNo = `${prefix}${yearStr}-${String(candidate).padStart(4, "0")}`;
@@ -106,11 +108,18 @@ export const createOrder = async (req, res) => {
     const {
       customerId = null,
       customerName = "Walk-in Customer",
+      customerPhone = "",
+      customerGst = "",
+      placeOfSupply = "",
+      taxType = "Intra-State",
       items = [],
       cashDiscount = 0,
       amountPaid = 0,
       paymentMode = "Cash",
       splitPayments = [],
+      notes = "",
+      terms = "",
+      date = new Date(),
     } = req.body;
 
     if (!items || !Array.isArray(items) || items.length === 0) {
@@ -143,11 +152,11 @@ export const createOrder = async (req, res) => {
     // Authoritative Server-Side Item Resolution & Calculations
     // ─────────────────────────────────────────────────────────────────
     for (const rawItem of items) {
-      const quantity = Number(rawItem.qty);
-      if (!Number.isInteger(quantity) || quantity <= 0) {
+      const quantity = Number(rawItem.qty ?? rawItem.quantity);
+      if (!Number.isFinite(quantity) || quantity <= 0) {
         await abortSession();
         return res.status(400).json({
-          message: `Invalid quantity for item "${rawItem.name || "Product"}". Quantity must be a positive whole number.`,
+          message: `Invalid quantity for item "${rawItem.name || "Product"}". Quantity must be a positive number.`,
         });
       }
 
@@ -187,6 +196,9 @@ export const createOrder = async (req, res) => {
       let itemGstRate = 0;
       let itemName = rawItem.name || "Product";
       let itemSku = rawItem.sku || "";
+      let itemHsn = rawItem.hsnCode || "";
+      let itemUnit = rawItem.unit || "Piece";
+      let itemBatch = rawItem.batchNo || "";
 
       if (product) {
         // Authoritative pricing from database
@@ -195,12 +207,31 @@ export const createOrder = async (req, res) => {
         itemGstRate = Number(product.gst) || 0;
         itemName = product.name;
         itemSku = product.sku;
+        itemHsn = product.hsnCode || itemHsn;
+        itemUnit = product.unit || itemUnit;
+        itemBatch = product.batchNo || itemBatch;
 
         // Atomic inventory reduction
+        const prevStock = Number(product.stock || 0);
+        const newStock = prevStock - quantity;
+
         if (!allowNegativeStock) {
           const updatedProduct = await Product.findOneAndUpdate(
             { _id: product._id, stock: { $gte: quantity } },
-            { $inc: { stock: -quantity } },
+            { 
+              $inc: { stock: -quantity },
+              $push: {
+                stockHistory: {
+                  date: new Date(),
+                  type: "Sale",
+                  quantity: -quantity,
+                  previousStock: prevStock,
+                  newStock,
+                  reason: `Sale on Invoice`,
+                  performedBy: req.user.name || "User",
+                }
+              }
+            },
             { new: true, ...queryOptions }
           );
 
@@ -213,7 +244,20 @@ export const createOrder = async (req, res) => {
         } else {
           await Product.findOneAndUpdate(
             { _id: product._id },
-            { $inc: { stock: -quantity } },
+            { 
+              $inc: { stock: -quantity },
+              $push: {
+                stockHistory: {
+                  date: new Date(),
+                  type: "Sale",
+                  quantity: -quantity,
+                  previousStock: prevStock,
+                  newStock,
+                  reason: `Sale on Invoice`,
+                  performedBy: req.user.name || "User",
+                }
+              }
+            },
             { new: true, ...queryOptions }
           );
         }
@@ -221,7 +265,6 @@ export const createOrder = async (req, res) => {
       } else {
         // Auto-create product for custom/POS items without falsifying cost data
         unitPrice = Math.max(0, Number(rawItem.price) || 0);
-        // Do NOT set cost equal to selling price to preserve margin tracking
         unitCost = Number(rawItem.cost) != null && !isNaN(Number(rawItem.cost))
           ? Math.max(0, Number(rawItem.cost))
           : 0;
@@ -247,8 +290,21 @@ export const createOrder = async (req, res) => {
                 gst: itemGstRate,
                 stock: initialStock,
                 minStock: 10,
-                unit: rawItem.unit || "Piece",
+                unit: itemUnit,
+                hsnCode: itemHsn,
+                batchNo: itemBatch,
                 status: "Active",
+                stockHistory: [
+                  {
+                    date: new Date(),
+                    type: "Sale",
+                    quantity: -quantity,
+                    previousStock: 0,
+                    newStock: initialStock,
+                    reason: `Initial Sale Auto-Created Product`,
+                    performedBy: req.user.name || "User",
+                  },
+                ],
               },
             ],
             queryOptions
@@ -296,6 +352,9 @@ export const createOrder = async (req, res) => {
         productId: product ? product._id : null,
         name: itemName,
         sku: itemSku,
+        hsnCode: itemHsn,
+        unit: itemUnit,
+        batchNo: itemBatch,
         price: unitPrice,
         cost: unitCost,
         qty: quantity,
@@ -329,8 +388,30 @@ export const createOrder = async (req, res) => {
     const balanceDue = Math.max(0, Math.round((authoritativeTotal - paid) * 100) / 100);
     const status = paid <= 0 ? "Due" : paid >= authoritativeTotal ? "Paid" : "Partial";
 
+    // GST Breakdown based on Place of Supply
+    let cgstAmount = 0;
+    let sgstAmount = 0;
+    let igstAmount = 0;
+
+    if (taxType === "Inter-State") {
+      igstAmount = Math.round(computedTotalGst * 100) / 100;
+    } else {
+      cgstAmount = Math.round((computedTotalGst / 2) * 100) / 100;
+      sgstAmount = Math.round((computedTotalGst - cgstAmount) * 100) / 100;
+    }
+
     // Generate collision-safe invoice number
     const invoiceNo = await generateInvoiceNo(effectiveOwnerId);
+
+    const initialPaymentHistory = paid > 0 ? [
+      {
+        amount: paid,
+        paymentMode: paymentMode || "Cash",
+        date: new Date(date),
+        referenceNo: "",
+        notes: "Initial payment on invoice creation",
+      }
+    ] : [];
 
     // Create Order in MongoDB
     const orderDocs = await Order.create(
@@ -339,11 +420,18 @@ export const createOrder = async (req, res) => {
           ownerId: effectiveOwnerId,
           customerId: customerId && mongoose.isValidObjectId(customerId) ? customerId : null,
           customerName: customerName || "Walk-in Customer",
+          customerPhone: String(customerPhone || "").trim(),
+          customerGst: String(customerGst || "").trim(),
+          placeOfSupply: String(placeOfSupply || "").trim(),
+          taxType: taxType === "Inter-State" ? "Inter-State" : "Intra-State",
           invoiceNo,
           items: processedItems,
           subtotal: Math.round(computedSubtotal * 100) / 100,
           gstRate: processedItems.length === 1 ? processedItems[0].gstRate : 0,
           gst: Math.round(computedTotalGst * 100) / 100,
+          cgst: cgstAmount,
+          sgst: sgstAmount,
+          igst: igstAmount,
           discount: Math.round(computedTotalDiscount * 100) / 100,
           cashDiscount: validCashDiscount,
           totalOrderValue: authoritativeTotal,
@@ -351,7 +439,11 @@ export const createOrder = async (req, res) => {
           balanceDue,
           paymentMode: paymentMode || "Cash",
           splitPayments: Array.isArray(splitPayments) ? splitPayments : [],
+          paymentHistory: initialPaymentHistory,
           status,
+          notes: String(notes || "").trim(),
+          terms: String(terms || "").trim(),
+          date: new Date(date),
           totalCogs: trackCogs ? calculatedTotalCogs : 0,
         },
       ],
@@ -384,16 +476,31 @@ export const createOrder = async (req, res) => {
 
     if (targetCustomer) {
       const balanceChange = authoritativeTotal - paid;
+      const custUpdate = {
+        $inc: {
+          totalOrderValue: authoritativeTotal,
+          totalPaid: paid,
+          invoices: 1,
+          balance: balanceChange,
+        },
+      };
+
+      if (paid > 0) {
+        custUpdate.$push = {
+          paymentHistory: {
+            amount: paid,
+            paymentMode: paymentMode || "Cash",
+            date: new Date(date),
+            referenceNo: "",
+            notes: `Payment for Invoice #${invoiceNo}`,
+            invoiceNo,
+          },
+        };
+      }
+
       await Customer.findByIdAndUpdate(
         targetCustomer._id,
-        {
-          $inc: {
-            totalOrderValue: authoritativeTotal,
-            totalPaid: paid,
-            invoices: 1,
-            balance: balanceChange,
-          },
-        },
+        custUpdate,
         queryOptions
       );
 
@@ -517,19 +624,21 @@ export const getOrders = async (req, res) => {
 
     if (search && String(search).trim()) {
       const cleanSearch = String(search).trim();
+      const escaped = cleanSearch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       query.$or = [
-        { invoiceNo: new RegExp(cleanSearch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i") },
-        { customerName: new RegExp(cleanSearch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i") },
+        { invoiceNo: new RegExp(escaped, "i") },
+        { customerName: new RegExp(escaped, "i") },
+        { customerPhone: new RegExp(escaped, "i") },
       ];
     }
 
     if (startDate || endDate) {
-      query.createdAt = {};
-      if (startDate) query.createdAt.$gte = new Date(startDate);
+      query.date = {};
+      if (startDate) query.date.$gte = new Date(startDate);
       if (endDate) {
         const end = new Date(endDate);
         end.setHours(23, 59, 59, 999);
-        query.createdAt.$lte = end;
+        query.date.$lte = end;
       }
     }
 
@@ -560,7 +669,6 @@ export const getOrders = async (req, res) => {
       });
     }
 
-    // Default: Return standard ordered list with total count for full backward compatibility
     const orders = await Order.find(query).sort(sortOption).lean();
     return res.status(200).json({
       message: "OK",
@@ -595,5 +703,355 @@ export const getOrder = async (req, res) => {
   } catch (error) {
     console.error("GET ORDER ERROR:", error.message);
     return res.status(500).json({ message: "Failed to fetch order." });
+  }
+};
+
+// ================= RECORD PAYMENT ON ORDER (INVOICE SETTLEMENT) =================
+export const recordOrderPayment = async (req, res) => {
+  try {
+    const ownerId = req.user.ownerId || req.user._id;
+    const order = await Order.findOne({ _id: req.params.id, ownerId });
+
+    if (!order) {
+      return res.status(404).json({ message: "Order not found." });
+    }
+
+    if (order.status === "Cancelled") {
+      return res.status(400).json({ message: "Cannot record payment on a cancelled order." });
+    }
+
+    const { amount, paymentMode = "Cash", referenceNo = "", notes = "", date = new Date() } = req.body;
+    const paymentAmount = Number(amount);
+
+    if (!Number.isFinite(paymentAmount) || paymentAmount <= 0) {
+      return res.status(400).json({ message: "Payment amount must be a positive number." });
+    }
+
+    if (paymentAmount > order.balanceDue) {
+      return res.status(400).json({
+        message: `Payment amount (₹${paymentAmount}) exceeds balance due (₹${order.balanceDue}).`,
+      });
+    }
+
+    const newAmountPaid = Math.round((order.amountPaid + paymentAmount) * 100) / 100;
+    const newBalanceDue = Math.max(0, Math.round((order.totalOrderValue - newAmountPaid) * 100) / 100);
+    const newStatus = newBalanceDue === 0 ? "Paid" : "Partial";
+
+    if (!Array.isArray(order.paymentHistory)) {
+      order.paymentHistory = [];
+    }
+
+    order.paymentHistory.push({
+      amount: paymentAmount,
+      paymentMode,
+      date: new Date(date),
+      referenceNo: String(referenceNo || "").trim(),
+      notes: String(notes || "").trim(),
+    });
+
+    order.amountPaid = newAmountPaid;
+    order.balanceDue = newBalanceDue;
+    order.status = newStatus;
+
+    await order.save();
+
+    // Settle customer ledger balance
+    if (order.customerId && mongoose.isValidObjectId(order.customerId)) {
+      await Customer.findByIdAndUpdate(order.customerId, {
+        $inc: {
+          totalPaid: paymentAmount,
+          balance: -paymentAmount,
+        },
+        $push: {
+          paymentHistory: {
+            amount: paymentAmount,
+            paymentMode,
+            date: new Date(date),
+            referenceNo: String(referenceNo || "").trim(),
+            notes: notes || `Payment against Invoice #${order.invoiceNo}`,
+            invoiceNo: order.invoiceNo,
+          },
+        },
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: `Payment of ₹${paymentAmount.toLocaleString("en-IN")} recorded successfully.`,
+      order,
+    });
+  } catch (error) {
+    console.error("RECORD ORDER PAYMENT ERROR:", error.message);
+    return res.status(500).json({ message: error.message || "Failed to record payment." });
+  }
+};
+
+// ================= SALES RETURN / CREDIT NOTE =================
+export const createSalesReturn = async (req, res) => {
+  const ownerId = req.user.ownerId || req.user._id;
+  const actualUserId = req.user.actualUserId || req.user._id;
+
+  try {
+    const order = await Order.findOne({ _id: req.params.id, ownerId });
+    if (!order) {
+      return res.status(404).json({ message: "Invoice not found." });
+    }
+
+    if (order.status === "Cancelled") {
+      return res.status(400).json({ message: "Cannot process return on a cancelled invoice." });
+    }
+
+    const {
+      returnedItems = [],
+      refundAmount = 0,
+      refundMode = "Credit", // "Credit" (adjusts customer balance), "Cash", "Bank", "UPI"
+      reason = "Customer Return",
+      returnDate = new Date(),
+    } = req.body;
+
+    if (!Array.isArray(returnedItems) || returnedItems.length === 0) {
+      return res.status(400).json({ message: "At least one item must be specified for return." });
+    }
+
+    let calculatedReturnTotal = 0;
+    const validatedReturnedItems = [];
+
+    for (const retItem of returnedItems) {
+      const retQty = Number(retItem.qty ?? retItem.quantity);
+      if (!Number.isFinite(retQty) || retQty <= 0) {
+        return res.status(400).json({ message: `Invalid return quantity for ${retItem.name || "item"}.` });
+      }
+
+      // Check against sold quantity in order
+      const originalItem = order.items.find(
+        (i) => (retItem.productId && String(i.productId) === String(retItem.productId)) ||
+               (retItem.sku && i.sku === retItem.sku) ||
+               (retItem.name && i.name.toLowerCase() === String(retItem.name).toLowerCase())
+      );
+
+      if (!originalItem) {
+        return res.status(400).json({
+          message: `Item "${retItem.name || retItem.sku}" was not found in original invoice #${order.invoiceNo}.`,
+        });
+      }
+
+      // Check previously returned quantity for this item
+      const previouslyReturnedQty = (order.returnedItems || [])
+        .filter((ri) => String(ri.productId) === String(originalItem.productId) || ri.sku === originalItem.sku)
+        .reduce((sum, ri) => sum + (Number(ri.qty) || 0), 0);
+
+      const maxReturnable = originalItem.qty - previouslyReturnedQty;
+      if (retQty > maxReturnable) {
+        return res.status(400).json({
+          message: `Return quantity (${retQty}) for "${originalItem.name}" exceeds maximum returnable quantity (${maxReturnable}).`,
+        });
+      }
+
+      const itemRate = Number(originalItem.price) || 0;
+      const itemGstRate = Number(originalItem.gstRate) || 0;
+      const itemDiscount = Number(originalItem.discount) || 0;
+      const lineBase = itemRate * retQty;
+      const lineDisc = (lineBase * itemDiscount) / 100;
+      const lineTaxable = lineBase - lineDisc;
+      const lineGst = (lineTaxable * itemGstRate) / 100;
+      const lineReturnTotal = Math.round((lineTaxable + lineGst) * 100) / 100;
+
+      calculatedReturnTotal += lineReturnTotal;
+
+      validatedReturnedItems.push({
+        productId: originalItem.productId,
+        name: originalItem.name,
+        sku: originalItem.sku,
+        hsnCode: originalItem.hsnCode,
+        unit: originalItem.unit,
+        price: originalItem.price,
+        cost: originalItem.cost,
+        qty: retQty,
+        discount: originalItem.discount,
+        gstRate: originalItem.gstRate,
+        gst: lineGst,
+        amount: lineReturnTotal,
+      });
+
+      // Restore product stock and record history
+      if (originalItem.productId && mongoose.isValidObjectId(originalItem.productId)) {
+        const prod = await Product.findById(originalItem.productId);
+        if (prod) {
+          const prevStock = Number(prod.stock || 0);
+          const newStock = prevStock + retQty;
+          await Product.findByIdAndUpdate(originalItem.productId, {
+            $inc: { stock: retQty },
+            $push: {
+              stockHistory: {
+                date: new Date(returnDate),
+                type: "Sales Return",
+                quantity: retQty,
+                previousStock: prevStock,
+                newStock,
+                reason: `Sales Return against Invoice #${order.invoiceNo}: ${reason}`,
+                referenceNo: order.invoiceNo,
+                performedBy: req.user.name || "User",
+              },
+            },
+          });
+        }
+      }
+    }
+
+    const finalRefund = Math.min(
+      calculatedReturnTotal,
+      Number(refundAmount) > 0 ? Number(refundAmount) : calculatedReturnTotal
+    );
+
+    const creditNoteNo = `CN-${order.invoiceNo}-${(order.salesReturns?.length || 0) + 1}`;
+
+    if (!Array.isArray(order.salesReturns)) {
+      order.salesReturns = [];
+    }
+    if (!Array.isArray(order.returnedItems)) {
+      order.returnedItems = [];
+    }
+
+    order.salesReturns.push({
+      returnNo: creditNoteNo,
+      returnDate: new Date(returnDate),
+      reason,
+      refundAmount: finalRefund,
+      paymentMode: refundMode,
+      items: validatedReturnedItems,
+    });
+
+    validatedReturnedItems.forEach((vi) => {
+      order.returnedItems.push(vi);
+    });
+
+    order.refundAmount = Math.round(((order.refundAmount || 0) + finalRefund) * 100) / 100;
+
+    // Calculate overall return status
+    const totalSoldQty = order.items.reduce((sum, i) => sum + (Number(i.qty) || 0), 0);
+    const totalReturnedQty = order.returnedItems.reduce((sum, i) => sum + (Number(i.qty) || 0), 0);
+    order.returnStatus = totalReturnedQty >= totalSoldQty ? "Returned" : "Partial";
+
+    await order.save();
+
+    // Settle Customer Ledger based on refund mode
+    if (order.customerId && mongoose.isValidObjectId(order.customerId)) {
+      if (refundMode === "Credit") {
+        // Reduce customer outstanding balance
+        await Customer.findByIdAndUpdate(order.customerId, {
+          $inc: {
+            totalOrderValue: -finalRefund,
+            balance: -finalRefund,
+          },
+          $push: {
+            paymentHistory: {
+              amount: finalRefund,
+              paymentMode: "Credit Note",
+              date: new Date(returnDate),
+              referenceNo: creditNoteNo,
+              notes: `Credit Note #${creditNoteNo} for Sales Return on Invoice #${order.invoiceNo}`,
+              invoiceNo: order.invoiceNo,
+            },
+          },
+        });
+      }
+    }
+
+    try {
+      await createNotification({
+        ownerId,
+        userId: actualUserId,
+        title: `Sales Return: ${creditNoteNo}`,
+        message: `Credit note ${creditNoteNo} for ₹${finalRefund.toLocaleString("en-IN")} generated for ${order.customerName}.`,
+        type: "warning",
+        category: "sale",
+        link: "pos",
+        metadata: { orderId: order._id, invoiceNo: order.invoiceNo, creditNoteNo, refundAmount: finalRefund },
+      });
+    } catch (notifErr) {
+      console.error("Sales return notification error:", notifErr.message);
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: `Sales return processed successfully. Credit Note: ${creditNoteNo}`,
+      order,
+      creditNoteNo,
+      refundAmount: finalRefund,
+    });
+  } catch (error) {
+    console.error("CREATE SALES RETURN ERROR:", error.message);
+    return res.status(500).json({ message: error.message || "Failed to process sales return." });
+  }
+};
+
+// ================= DELETE / CANCEL ORDER =================
+export const deleteOrder = async (req, res) => {
+  try {
+    const ownerId = req.user.ownerId || req.user._id;
+    const order = await Order.findOne({ _id: req.params.id, ownerId });
+
+    if (!order) {
+      return res.status(404).json({ message: "Order not found." });
+    }
+
+    if (order.status === "Cancelled") {
+      return res.status(400).json({ message: "Order is already cancelled." });
+    }
+
+    // 1. Restore product inventory stock
+    for (const item of order.items) {
+      const qty = Number(item.qty) || 0;
+      if (qty > 0 && item.productId && mongoose.isValidObjectId(item.productId)) {
+        const prod = await Product.findById(item.productId);
+        if (prod) {
+          const prevStock = Number(prod.stock || 0);
+          const newStock = prevStock + qty;
+          await Product.findByIdAndUpdate(item.productId, {
+            $inc: { stock: qty },
+            $push: {
+              stockHistory: {
+                date: new Date(),
+                type: "Stock Adjustment",
+                quantity: qty,
+                previousStock: prevStock,
+                newStock,
+                reason: `Cancelled Invoice #${order.invoiceNo}`,
+                referenceNo: order.invoiceNo,
+                performedBy: req.user.name || "User",
+              },
+            },
+          });
+        }
+      }
+    }
+
+    // 2. Rollback Customer khata balance
+    if (order.customerId && mongoose.isValidObjectId(order.customerId)) {
+      const balanceRollback = order.balanceDue || 0;
+      const totalPaidRollback = order.amountPaid || 0;
+      const orderValueRollback = order.totalOrderValue || 0;
+
+      await Customer.findByIdAndUpdate(order.customerId, {
+        $inc: {
+          totalOrderValue: -orderValueRollback,
+          totalPaid: -totalPaidRollback,
+          balance: -balanceRollback,
+          invoices: -1,
+        },
+      });
+    }
+
+    order.status = "Cancelled";
+    await order.save();
+
+    return res.status(200).json({
+      success: true,
+      message: `Invoice #${order.invoiceNo} was cancelled and inventory stock was restored.`,
+      order,
+    });
+  } catch (error) {
+    console.error("DELETE ORDER ERROR:", error.message);
+    return res.status(500).json({ message: error.message || "Failed to cancel order." });
   }
 };

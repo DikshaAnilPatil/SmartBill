@@ -391,3 +391,80 @@ export const sendSubscriptionReminderEmail = async ({
     defaultBody: `Hello ${userName},\n\nYour SmartBill subscription is scheduled to expire on ${expiryDate}. Please renew your plan to avoid service interruption.`,
   });
 };
+
+/**
+ * Send Registration / Phone Verification OTP Email
+ */
+export const sendVerificationOtpEmail = async ({
+  toEmail,
+  otp,
+  phone = "",
+  userName = "Valued Business Owner",
+  businessName = "Smart Bill",
+}) => {
+  const customHtml = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Your SmartBill Verification Code</title>
+  <style>
+    body { margin: 0; padding: 0; background-color: #f1f5f9; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #1e293b; }
+    .wrapper { width: 100%; table-layout: fixed; background-color: #f1f5f9; padding: 30px 0 50px; }
+    .main { max-width: 560px; margin: 0 auto; background: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.08); border: 1px solid #e2e8f0; }
+    .header { background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); padding: 32px; text-align: center; }
+    .logo-text { color: #ffffff; font-size: 24px; font-weight: 800; margin: 0; }
+    .badge-sub { color: #94a3b8; font-size: 13px; margin: 6px 0 0; }
+    .content { padding: 32px; }
+    .greeting { font-size: 18px; font-weight: 700; color: #0f172a; margin: 0 0 14px; }
+    .desc { font-size: 14px; line-height: 1.6; color: #475569; margin: 0 0 20px; }
+    .otp-card { background: #f8fafc; border: 2px dashed #93c5fd; border-radius: 14px; padding: 24px 20px; text-align: center; margin: 20px 0; }
+    .otp-label { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.2px; color: #64748b; margin-bottom: 8px; }
+    .otp-code { font-family: 'SF Pro Mono', 'Courier New', monospace; font-size: 38px; font-weight: 800; color: #1d4ed8; letter-spacing: 8px; margin: 6px 0; }
+    .otp-expiry { font-size: 12px; color: #dc2626; font-weight: 600; margin-top: 8px; }
+    .footer { background: #f8fafc; border-top: 1px solid #e2e8f0; padding: 20px 32px; text-align: center; font-size: 12px; color: #94a3b8; }
+  </style>
+</head>
+<body>
+  <div class="wrapper">
+    <div class="main">
+      <div class="header">
+        <h1 class="logo-text">SmartBill</h1>
+        <p class="badge-sub">Registration & Verification</p>
+      </div>
+      <div class="content">
+        <h2 class="greeting">Welcome to SmartBill!</h2>
+        <p class="desc">
+          Thank you for starting your registration. Use the 6-digit verification code below to verify your phone number (${phone || "provided"}) and complete your registration.
+        </p>
+        <div class="otp-card">
+          <div class="otp-label">Your Verification Code</div>
+          <div class="otp-code">${otp}</div>
+          <div class="otp-expiry">⏳ Valid for 10 minutes only</div>
+        </div>
+      </div>
+      <div class="footer">
+        © ${new Date().getFullYear()} SmartBill Inc. All rights reserved.
+      </div>
+    </div>
+  </div>
+</body>
+</html>
+  `;
+
+  return sendSystemEmail({
+    templateName: "Email Verification",
+    toEmail,
+    customHtml,
+    variables: {
+      user_name: userName,
+      otp: otp,
+      phone: phone,
+      business_name: businessName,
+    },
+    defaultSubject: `🔐 Your SmartBill Verification Code: ${otp}`,
+    defaultBody: `Welcome to SmartBill!\n\nYour 6-digit registration verification code is: ${otp}\n\nThis code expires in 10 minutes.\n\nBest regards,\n${businessName} Team`,
+  });
+};
+

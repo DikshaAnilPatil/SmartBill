@@ -1,6 +1,7 @@
 import Customer from "../models/Customer.js";
 import Order from "../models/Order.js";
 import { createNotification } from "../services/notificationService.js";
+import mongoose from "mongoose";
 
 // ================= LIST CUSTOMERS WITH PAGINATION =================
 export const getCustomers = async (req, res) => {
@@ -34,6 +35,7 @@ export const getCustomers = async (req, res) => {
         { phone: new RegExp(escaped, "i") },
         { email: new RegExp(escaped, "i") },
         { city: new RegExp(escaped, "i") },
+        { gst: new RegExp(escaped, "i") },
       ];
     }
 
@@ -154,7 +156,7 @@ export const getCustomerDetails = async (req, res) => {
       summary: {
         totalOrderValue,
         totalPaidValue,
-        amountLeftToBePaid,
+        amountLeftToBePaid: customer.balance !== undefined ? customer.balance : amountLeftToBePaid,
         invoicesCount: orders.length,
       },
       orders,
@@ -179,6 +181,8 @@ export const createCustomer = async (req, res) => {
       phone,
       email,
       city,
+      state,
+      stateCode,
       address,
       gst,
       category,
@@ -220,6 +224,8 @@ export const createCustomer = async (req, res) => {
       phone: cleanPhone,
       email: cleanEmail,
       city: city ? String(city).trim() : "",
+      state: state ? String(state).trim() : "",
+      stateCode: stateCode ? String(stateCode).trim() : "",
       address: address ? String(address).trim() : "",
       gst: gst ? String(gst).trim() : "",
       category: category || "Retailer",
@@ -260,6 +266,59 @@ export const createCustomer = async (req, res) => {
   }
 };
 
+// ================= RECORD CUSTOMER PAYMENT IN (KHATA SETTLEMENT) =================
+export const recordCustomerPayment = async (req, res) => {
+  try {
+    const ownerId = req.user.ownerId || req.user._id;
+    const customer = await Customer.findOne({ _id: req.params.id, ownerId });
+
+    if (!customer) {
+      return res.status(404).json({ message: "Customer not found." });
+    }
+
+    const {
+      amount,
+      paymentMode = "Cash",
+      referenceNo = "",
+      notes = "",
+      invoiceNo = "",
+      date = new Date(),
+    } = req.body;
+
+    const payAmount = Number(amount);
+    if (!Number.isFinite(payAmount) || payAmount <= 0) {
+      return res.status(400).json({ message: "Payment amount must be a positive number." });
+    }
+
+    customer.balance = Math.round(((customer.balance || 0) - payAmount) * 100) / 100;
+    customer.totalPaid = Math.round(((customer.totalPaid || 0) + payAmount) * 100) / 100;
+
+    if (!Array.isArray(customer.paymentHistory)) {
+      customer.paymentHistory = [];
+    }
+
+    customer.paymentHistory.push({
+      amount: payAmount,
+      paymentMode,
+      date: new Date(date),
+      referenceNo: String(referenceNo || "").trim(),
+      notes: String(notes || "").trim(),
+      invoiceNo: String(invoiceNo || "").trim(),
+    });
+
+    await customer.save();
+
+    return res.status(200).json({
+      success: true,
+      message: `Payment of ₹${payAmount.toLocaleString("en-IN")} received from ${customer.name}. New Balance: ₹${customer.balance.toLocaleString("en-IN")}.`,
+      customer,
+    });
+  } catch (error) {
+    console.error("RECORD CUSTOMER PAYMENT ERROR:", error.message);
+    return res.status(500).json({ message: error.message || "Failed to record payment." });
+  }
+};
+
 // ================= UPDATE CUSTOMER =================
 export const updateCustomer = async (req, res) => {
   try {
@@ -270,6 +329,8 @@ export const updateCustomer = async (req, res) => {
       phone,
       email,
       city,
+      state,
+      stateCode,
       address,
       gst,
       category,
@@ -315,6 +376,8 @@ export const updateCustomer = async (req, res) => {
 
     if (email !== undefined) customer.email = String(email).trim().toLowerCase();
     if (city !== undefined) customer.city = String(city).trim();
+    if (state !== undefined) customer.state = String(state).trim();
+    if (stateCode !== undefined) customer.stateCode = String(stateCode).trim();
     if (address !== undefined) customer.address = String(address).trim();
     if (gst !== undefined) customer.gst = String(gst).trim();
     if (category !== undefined) customer.category = category;

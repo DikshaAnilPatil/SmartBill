@@ -259,7 +259,22 @@ export default function PurchaseReport() {
                       <Cell key={c.name} fill={c.color} />
                     ))}
                   </Pie>
-                  <Tooltip formatter={(v) => [`${Number(v).toFixed(1)}%`, "Share"]} />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: "#0F172A",
+                      color: "#ffffff",
+                      borderRadius: "10px",
+                      fontSize: "12px",
+                      border: "1px solid #334155",
+                      boxShadow: "0 10px 25px -5px rgba(0,0,0,0.5)",
+                    }}
+                    itemStyle={{ color: "#38BDF8", fontSize: "12px", fontWeight: "600" }}
+                    labelStyle={{ color: "#F8FAFC", fontSize: "12px", fontWeight: "700" }}
+                    formatter={(v, name, item) => [
+                      `${Number(v || 0).toFixed(1)}% Share`,
+                      item?.payload?.name || name || "Category",
+                    ]}
+                  />
                 </RechartsPie>
               </ResponsiveContainer>
             </div>

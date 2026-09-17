@@ -45,6 +45,24 @@ const purchaseItemSchema = new mongoose.Schema({
     required: true,
     min: 0,
   },
+  hsnCode: {
+    type: String,
+    default: "",
+    trim: true,
+  },
+  batchNo: {
+    type: String,
+    default: "",
+    trim: true,
+  },
+  expiryDate: {
+    type: Date,
+    default: null,
+  },
+  itcEligible: {
+    type: Boolean,
+    default: true,
+  },
 });
 
 const purchaseSchema = new mongoose.Schema(
@@ -74,6 +92,20 @@ const purchaseSchema = new mongoose.Schema(
       type: String,
       default: "",
       trim: true,
+    },
+    eWayBillNo: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    taxType: {
+      type: String,
+      enum: ["GST Regular", "RCM", "SEZ / Zero-Rated", "Exempt"],
+      default: "GST Regular",
+    },
+    itcEligible: {
+      type: Boolean,
+      default: true,
     },
     purchaseDate: {
       type: Date,
@@ -112,6 +144,21 @@ const purchaseSchema = new mongoose.Schema(
       enum: ["Unpaid", "Partially Paid", "Paid"],
       default: "Unpaid",
     },
+    returnStatus: {
+      type: String,
+      enum: ["None", "Partial", "Returned"],
+      default: "None",
+    },
+    purchaseReturns: [
+      {
+        returnNo: { type: String, default: "" },
+        returnDate: { type: Date, default: Date.now },
+        reason: { type: String, default: "" },
+        refundAmount: { type: Number, default: 0 },
+        paymentMode: { type: String, default: "Cash" },
+        items: [purchaseItemSchema],
+      },
+    ],
     paymentMethod: {
       type: String,
       default: "Cash",

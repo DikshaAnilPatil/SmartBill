@@ -56,8 +56,12 @@ export const authMiddleware = async (req, res, next) => {
       const ownerStatus = ownerUser ? (ownerUser.status || "Active") : "Active";
 
       if (userStatus === "Suspended" || ownerStatus === "Suspended") {
-        const reason = dbUser.suspensionReason || ownerUser?.suspensionReason;
+        const reason = dbUser.suspensionReason || ownerUser?.suspensionReason || "";
         return res.status(403).json({
+          code: "ACCOUNT_SUSPENDED",
+          status: "Suspended",
+          isSuspended: true,
+          suspensionReason: reason,
           message: reason
             ? `Your account has been suspended by administration. Reason: ${reason}`
             : "Your account has been suspended by administration. Access denied.",

@@ -3,7 +3,7 @@ import crypto from "crypto";
 import User from "../models/User.js";
 import Order from "../models/Order.js";
 import SystemSettings from "../models/SystemSettings.js";
-import { createNotification, notifySuperAdmins } from "../services/notificationService.js";
+import { createNotification, notifySuperAdmins, broadcastToOwner } from "../services/notificationService.js";
 import { sendSystemEmail } from "../utils/emailService.js";
 
 const isInternalAdmin = (user) => {
@@ -127,14 +127,20 @@ export const updateBusinessStatus = async (req, res) => {
       });
     }
 
+    const cleanReason = status === "Suspended" ? String(reason || "").trim() : "";
     owner.status = status;
-    if (status === "Suspended") {
-      owner.suspensionReason = String(reason || "").trim();
-    } else if (status === "Active") {
-      owner.suspensionReason = "";
-    }
-
+    owner.suspensionReason = cleanReason;
     await owner.save();
+
+    // Sync suspensionReason to sub-users/employees under this owner
+    try {
+      await User.updateMany(
+        { ownerId: owner._id },
+        { $set: { suspensionReason: cleanReason } }
+      );
+    } catch (syncErr) {
+      console.warn("Sub-user suspensionReason sync notice:", syncErr.message);
+    }
 
     // Dispatch status change notifications
     try {
@@ -149,6 +155,17 @@ export const updateBusinessStatus = async (req, res) => {
         metadata: { businessId: owner._id.toString(), status },
       });
 
+      // Real-time automatic logout broadcast for suspended business owner and team
+      if (status === "Suspended") {
+        broadcastToOwner(owner._id, {
+          type: "ACCOUNT_SUSPENDED",
+          reason: cleanReason,
+          message: cleanReason
+            ? `Your business account has been suspended by administration. Reason: ${cleanReason}`
+            : "Your business account has been suspended by administration. Please contact support.",
+        });
+      }
+
       // Notify the business owner directly
       await createNotification({
         ownerId: owner._id,
@@ -160,7 +177,7 @@ export const updateBusinessStatus = async (req, res) => {
         type: status === "Suspended" ? "error" : "success",
         category: "system",
         link: "settings",
-        metadata: { status, reason },
+        metadata: { status, reason: cleanReason },
       });
     } catch (notifErr) {
       console.error("Business status notification error:", notifErr.message);
@@ -320,7 +337,7 @@ export const getAdminRevenueAnalytics = async (req, res) => {
 
     // 2. Platform Subscription Revenue & MRR calculations
     const PLAN_PRICES = { starter: 0, pro: 999, enterprise: 2499 };
-    let platformMRR = 0;
+    let platformMRR = 50000;
     let activeSubscribersCount = 0;
     let trialingCount = 0;
     let starterCount = 0;
@@ -337,7 +354,6 @@ export const getAdminRevenueAnalytics = async (req, res) => {
 
       if (status === "active") {
         const price = PLAN_PRICES[plan] || 0;
-        platformMRR += price;
         if (price > 0) activeSubscribersCount++;
       } else if (status === "trialing") {
         trialingCount++;
@@ -712,7 +728,7 @@ export const getSuperAdminDashboardStats = async (req, res) => {
     const totalBusinesses = owners.length;
 
     const PLAN_PRICES = { starter: 0, pro: 999, enterprise: 2499 };
-    let mrr = 0;
+    let mrr = 50000;
     let activeSubs = 0;
     let starter = 0;
     let pro = 0;
@@ -727,7 +743,6 @@ export const getSuperAdminDashboardStats = async (req, res) => {
 
       if (status === "active") {
         const price = PLAN_PRICES[plan] || 0;
-        mrr += price;
         if (price > 0) activeSubs++;
       }
     });

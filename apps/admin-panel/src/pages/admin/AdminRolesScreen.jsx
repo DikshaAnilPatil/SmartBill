@@ -35,21 +35,6 @@ import { toast } from "sonner";
 // Initial Standard & Custom Roles Data
 const INITIAL_ROLES = [
   {
-    id: "super_admin",
-    name: "Super Admin",
-    color: "blue",
-    description: "Full, unrestricted access to all modules, billing, and system configurations.",
-    isSystem: true,
-    userCount: 1,
-    permissions: {
-      vendors: { view: true, create: true, edit: true, delete: true, suspend: true },
-      revenue: { view: true, export: true },
-      subscriptions: { view: true, manage: true },
-      admin_roles: { view: true, create: true, edit: true, delete: true },
-      settings: { view: true, edit: true }
-    }
-  },
-  {
     id: "support_admin",
     name: "Support Admin",
     color: "blue",
@@ -81,14 +66,14 @@ const INITIAL_ROLES = [
   }
 ];
 
-// Initial Internal Admins Data (Only primary Super Admin user)
+// Initial Internal Admins Data
 const INITIAL_ADMINS = [
   {
     id: "adm-1",
     name: "Prathamesh Bhavsar",
     email: "prathamesh@smartbill.io",
     avatar: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150",
-    roleId: "super_admin",
+    roleId: "support_admin",
     department: "Executive & Tech",
     status: "Active",
     lastActive: "Just now",
@@ -101,7 +86,7 @@ const INITIAL_LOGS = [
   {
     id: "log-1",
     user: "Prathamesh Bhavsar",
-    role: "Super Admin",
+    role: "Support Admin",
     action: "System Initialized",
     details: "Initialized Admin & Custom Roles module.",
     timestamp: "Just now",
@@ -153,7 +138,7 @@ export default function AdminRolesScreen() {
     try {
       const saved = localStorage.getItem("smartbill_admin_roles");
       if (saved) {
-        const parsed = JSON.parse(saved);
+        const parsed = JSON.parse(saved).filter((r) => r.id !== "super_admin");
         const hasSupport = parsed.some((r) => r.id === "support_admin");
         const hasBilling = parsed.some((r) => r.id === "billing_admin");
         if (!hasSupport || !hasBilling) {
@@ -520,7 +505,7 @@ export default function AdminRolesScreen() {
     const newLog = {
       id: `log-${Date.now()}`,
       user: "Prathamesh Bhavsar",
-      role: "Super Admin",
+      role: "Admin",
       action,
       details,
       timestamp: "Just now",

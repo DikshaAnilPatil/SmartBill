@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Lock, LogIn, Mail, AlertCircle, ShieldCheck, Check } from "lucide-react";
+import { Lock, LogIn, Mail, AlertCircle, ShieldCheck, Check, ShieldAlert, X } from "lucide-react";
 import { loginUser } from "@shared/api/authAPI";
 import { setUserToStorage } from "@shared/utils/userUtils";
 import { getCrmUrl } from "@shared/utils/urlUtils";
@@ -10,6 +10,7 @@ export default function AdminLogin({ onLogin }) {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [suspensionNotice, setSuspensionNotice] = useState(null);
   const [toast, setToast] = useState(null);
 
   const handleLogin = async (e) => {
@@ -20,6 +21,7 @@ export default function AdminLogin({ onLogin }) {
     }
     
     setError("");
+    setSuspensionNotice(null);
     setLoading(true);
     try {
       const data = await loginUser({ email: email.trim(), password });
@@ -53,7 +55,22 @@ export default function AdminLogin({ onLogin }) {
         onLogin(loggedInUser.role, loggedInUser);
       }, 500);
     } catch (err) {
-      setError(err.message || "Login failed. Please try again.");
+      if (
+        err.isSuspended ||
+        err.status === 403 && (err.suspensionReason || /suspended/i.test(err.message))
+      ) {
+        let reason = err.suspensionReason || "";
+        if (!reason && err.message && /reason:\s*/i.test(err.message)) {
+          const match = err.message.match(/reason:\s*(.*)$/i);
+          if (match && match[1]) reason = match[1].trim();
+        }
+        setSuspensionNotice({
+          reason: reason || err.suspensionReason || "",
+          message: err.message || "This account has been suspended by administration.",
+        });
+      } else {
+        setError(err.message || "Login failed. Please try again.");
+      }
     } finally {
       setLoading(false);
     }
@@ -129,13 +146,42 @@ export default function AdminLogin({ onLogin }) {
             </div>
           )}
 
+          {/* Simple 2-Line Suspension Reason Alert */}
+          {suspensionNotice && (
+            <div className="mb-4 flex items-start gap-2.5 bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl p-3 animate-in fade-in duration-150">
+              <AlertCircle className="w-4 h-4 flex-shrink-0 text-red-600 mt-0.5" />
+              <div className="flex-1 min-w-0">
+                <div className="font-semibold text-red-900">
+                  Account Suspended
+                </div>
+                <div className="text-[11px] text-red-800 mt-0.5 break-words">
+                  <span className="font-medium text-red-950">Reason:</span>{" "}
+                  {suspensionNotice.reason ? `"${suspensionNotice.reason}"` : "This account has been suspended by administration."}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSuspensionNotice(null)}
+                className="text-red-400 hover:text-red-600 p-0.5 rounded transition-colors"
+                title="Dismiss"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
           <form onSubmit={handleLogin} className="space-y-4">
             <Input
               label="Admin Email Address"
               type="email"
               placeholder="admin@smartbill.com"
               value={email}
-              onChange={(val) => setEmail(typeof val === "string" ? val : val?.target?.value ?? "")}
+              onChange={(val) => {
+                const v = typeof val === "string" ? val : val?.target?.value ?? "";
+                setEmail(v);
+                setSuspensionNotice(null);
+                setError("");
+              }}
               icon={<Mail className="w-4 h-4" />}
               required
             />
@@ -145,7 +191,12 @@ export default function AdminLogin({ onLogin }) {
               type="password"
               placeholder="••••••••"
               value={password}
-              onChange={(val) => setPassword(typeof val === "string" ? val : val?.target?.value ?? "")}
+              onChange={(val) => {
+                const v = typeof val === "string" ? val : val?.target?.value ?? "";
+                setPassword(v);
+                setSuspensionNotice(null);
+                setError("");
+              }}
               icon={<Lock className="w-4 h-4" />}
               required
             />

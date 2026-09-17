@@ -9,8 +9,11 @@ import {
   Plus,
   RefreshCw,
   ShoppingCart,
+  SlidersHorizontal,
   Upload,
   XCircle,
+  History,
+  CheckCircle2,
 } from "lucide-react";
 import { fmt } from "@shared/utils/format";
 import {
@@ -19,9 +22,12 @@ import {
   Card,
   StatCard,
   Toast,
+  Modal,
+  Input,
+  Select,
   statusBadge,
 } from "@shared/components/common/ui";
-import { getProducts } from "@shared/api/productAPI";
+import { getProducts, adjustProductStock } from "@shared/api/productAPI";
 import { exportToCsv, exportToExcel } from "@shared/utils/csvHelper";
 
 export default function InventoryScreen({ onNav }) {
@@ -31,10 +37,19 @@ export default function InventoryScreen({ onNav }) {
   const [toast, setToast] = useState(null);
   const [showExportMenu, setShowExportMenu] = useState(false);
 
+  // Stock Adjustment Modal state
+  const [selectedProductForAdjustment, setSelectedProductForAdjustment] = useState(null);
+  const [adjustmentType, setAdjustmentType] = useState("Add"); // "Add", "Reduce", "Set Exact"
+  const [adjustmentQuantity, setAdjustmentQuantity] = useState("");
+  const [adjustmentReason, setAdjustmentReason] = useState("Physical Audit Discrepancy");
+  const [adjustmentNotes, setAdjustmentNotes] = useState("");
+  const [adjusting, setAdjusting] = useState(false);
+
   const showToast = (msg, type = "success") => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 3000);
   };
+
   const [globalThreshold, setGlobalThreshold] = useState(() => {
     try {
       const stored = localStorage.getItem("smartbill_inventorySettings");
@@ -50,7 +65,6 @@ export default function InventoryScreen({ onNav }) {
     setLoading(true);
     setError("");
     try {
-      // Refresh local threshold
       try {
         const stored = localStorage.getItem("smartbill_inventorySettings");
         if (stored) {
@@ -94,6 +108,44 @@ export default function InventoryScreen({ onNav }) {
       window.removeEventListener("purchaseCreated", handleUpdate);
     };
   }, [loadProducts]);
+
+  const handleOpenAdjustment = (product) => {
+    setSelectedProductForAdjustment(product);
+    setAdjustmentType("Add");
+    setAdjustmentQuantity("");
+    setAdjustmentReason("Physical Audit Discrepancy");
+    setAdjustmentNotes("");
+  };
+
+  const handleSaveAdjustment = async (e) => {
+    e.preventDefault();
+    if (!selectedProductForAdjustment) return;
+
+    const qty = Number(adjustmentQuantity);
+    if (!Number.isFinite(qty) || (adjustmentType !== "Set Exact" && qty <= 0)) {
+      showToast("Please enter a valid adjustment quantity.", "error");
+      return;
+    }
+
+    setAdjusting(true);
+    try {
+      const prodId = selectedProductForAdjustment._id || selectedProductForAdjustment.id;
+      const res = await adjustProductStock(prodId, {
+        adjustmentType,
+        quantity: qty,
+        reason: adjustmentReason,
+        notes: adjustmentNotes,
+      });
+
+      showToast(res.message || "Stock adjusted successfully!", "success");
+      setSelectedProductForAdjustment(null);
+      loadProducts();
+    } catch (err) {
+      showToast(err?.response?.data?.message || err.message || "Failed to adjust stock.", "error");
+    } finally {
+      setAdjusting(false);
+    }
+  };
 
   const totalProducts = productList.length;
   const totalStockValue = productList.reduce(
@@ -359,106 +411,229 @@ export default function InventoryScreen({ onNav }) {
             )}
           </div>
         ) : (
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-slate-100">
-                {[
-                  "Product",
-                  "Category",
-                  "In Stock",
-                  "Min Level",
-                  "Value",
-                  "Status",
-                  "Action",
-                ].map((h) => (
-                  <th
-                    key={h}
-                    className={`px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide ${
-                      h === "Action" ? "text-right" : "text-left"
-                    }`}
-                  >
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-50">
-              {productList.map((p) => (
-                <tr key={p._id || p.id} className="hover:bg-slate-50 transition-colors">
-                  <td className="px-5 py-3.5">
-                    <p className="font-medium text-slate-900">{p.name}</p>
-                    <p className="text-xs text-slate-400 font-mono">{p.sku}</p>
-                  </td>
-                  <td className="px-5 py-3.5">
-                    <Badge label={p.category || "General"} variant="blue" />
-                  </td>
-                  <td className="px-5 py-3.5">
-                    <div className="flex items-center gap-2">
-                      <span
-                        className={`font-bold font-mono ${
-                          p.stock === 0
-                            ? "text-red-500"
-                            : p.stock <= getEffectiveMinStock(p)
-                            ? "text-amber-600"
-                            : "text-slate-900"
-                        }`}
-                      >
-                        {p.stock}
-                      </span>
-                      <div className="w-16 h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                        <div
-                          className="h-full rounded-full"
-                          style={{
-                            width: `${Math.min(100, (p.stock / Math.max(1, getEffectiveMinStock(p) * 3)) * 100)}%`,
-                            backgroundColor:
-                              p.stock === 0
-                                ? "#EF4444"
-                                : p.stock <= getEffectiveMinStock(p)
-                                ? "#F59E0B"
-                                : "#10B981",
-                          }}
-                        />
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-5 py-3.5 text-slate-600 font-mono">
-                    {p.minStock !== undefined && p.minStock !== null && p.minStock !== "" ? p.minStock : `${globalThreshold} (global)`}
-                  </td>
-                  <td className="px-5 py-3.5 font-medium text-slate-900">
-                    {fmt((p.price || 0) * (p.stock || 0))}
-                  </td>
-                  <td className="px-5 py-3.5">
-                    {statusBadge(p.stock === 0 ? "Inactive" : p.status || "Active")}
-                  </td>
-                  <td className="px-5 py-3.5 text-right">
-                    <Btn
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        if (onNav) {
-                          localStorage.setItem(
-                            "reorderProduct",
-                            JSON.stringify({ name: p.name, minStock: p.minStock })
-                          );
-                          onNav("purchase");
-                        }
-                      }}
-                      icon={<ShoppingCart className="w-3.5 h-3.5 text-blue-600" />}
-                      className="text-xs py-1 px-2.5 text-blue-700 bg-blue-50/70 border-blue-200 hover:bg-blue-100"
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-100">
+                  {[
+                    "Product",
+                    "Category",
+                    "In Stock",
+                    "Min Level",
+                    "Value",
+                    "Status",
+                    "Actions",
+                  ].map((h) => (
+                    <th
+                      key={h}
+                      className={`px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide ${
+                        h === "Actions" ? "text-right" : "text-left"
+                      }`}
                     >
-                      + Inward Stock
-                    </Btn>
-                  </td>
+                      {h}
+                    </th>
+                  ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-slate-50">
+                {productList.map((p) => (
+                  <tr key={p._id || p.id} className="hover:bg-slate-50 transition-colors">
+                    <td className="px-5 py-3.5">
+                      <p className="font-medium text-slate-900">{p.name}</p>
+                      <p className="text-xs text-slate-400 font-mono">{p.sku}</p>
+                    </td>
+                    <td className="px-5 py-3.5">
+                      <Badge label={p.category || "General"} variant="blue" />
+                    </td>
+                    <td className="px-5 py-3.5">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`font-bold font-mono ${
+                            p.stock === 0
+                              ? "text-red-500"
+                              : p.stock <= getEffectiveMinStock(p)
+                              ? "text-amber-600"
+                              : "text-slate-900"
+                          }`}
+                        >
+                          {p.stock}
+                        </span>
+                        <div className="w-16 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                          <div
+                            className="h-full rounded-full"
+                            style={{
+                              width: `${Math.min(100, (p.stock / Math.max(1, getEffectiveMinStock(p) * 3)) * 100)}%`,
+                              backgroundColor:
+                                p.stock === 0
+                                  ? "#EF4444"
+                                  : p.stock <= getEffectiveMinStock(p)
+                                  ? "#F59E0B"
+                                  : "#10B981",
+                            }}
+                          />
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-5 py-3.5 text-slate-600 font-mono">
+                      {p.minStock !== undefined && p.minStock !== null && p.minStock !== "" ? p.minStock : `${globalThreshold} (global)`}
+                    </td>
+                    <td className="px-5 py-3.5 font-medium text-slate-900">
+                      {fmt((p.price || 0) * (p.stock || 0))}
+                    </td>
+                    <td className="px-5 py-3.5">
+                      {statusBadge(p.stock === 0 ? "Inactive" : p.status || "Active")}
+                    </td>
+                    <td className="px-5 py-3.5 text-right space-x-1.5">
+                      <Btn
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleOpenAdjustment(p)}
+                        icon={<SlidersHorizontal className="w-3.5 h-3.5 text-slate-600" />}
+                        className="text-xs py-1 px-2.5 text-slate-700 hover:bg-slate-100"
+                      >
+                        Adjust Stock
+                      </Btn>
+                      <Btn
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          if (onNav) {
+                            localStorage.setItem(
+                              "reorderProduct",
+                              JSON.stringify({ name: p.name, minStock: p.minStock })
+                            );
+                            onNav("purchase");
+                          }
+                        }}
+                        icon={<ShoppingCart className="w-3.5 h-3.5 text-blue-600" />}
+                        className="text-xs py-1 px-2.5 text-blue-700 bg-blue-50/70 border-blue-200 hover:bg-blue-100"
+                      >
+                        Inward
+                      </Btn>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </Card>
+
+      {/* Stock Adjustment Modal */}
+      {selectedProductForAdjustment && (
+        <Modal
+          title={`Adjust Stock — ${selectedProductForAdjustment.name}`}
+          onClose={() => setSelectedProductForAdjustment(null)}
+          size="md"
+        >
+          <form onSubmit={handleSaveAdjustment} className="space-y-4">
+            <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 flex justify-between items-center text-sm">
+              <div>
+                <p className="text-xs text-slate-500">Current Stock in System</p>
+                <p className="text-lg font-bold text-slate-900 font-mono">
+                  {selectedProductForAdjustment.stock} {selectedProductForAdjustment.unit || "units"}
+                </p>
+              </div>
+              <div className="text-right">
+                <p className="text-xs text-slate-500">SKU / Code</p>
+                <p className="font-mono text-slate-700 text-xs font-semibold">
+                  {selectedProductForAdjustment.sku}
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                { type: "Add", label: "+ Add Stock", desc: "Found / Surplus" },
+                { type: "Reduce", label: "- Reduce Stock", desc: "Damage / Loss" },
+                { type: "Set Exact", label: "= Exact Count", desc: "Physical Audit" },
+              ].map((m) => (
+                <button
+                  type="button"
+                  key={m.type}
+                  onClick={() => setAdjustmentType(m.type)}
+                  className={`p-2.5 text-center rounded-xl border transition-all ${
+                    adjustmentType === m.type
+                      ? "border-blue-600 bg-blue-50/80 text-blue-900 font-bold shadow-sm"
+                      : "border-slate-200 hover:bg-slate-50 text-slate-700"
+                  }`}
+                >
+                  <p className="text-xs font-semibold">{m.label}</p>
+                  <p className="text-[10px] text-slate-400 mt-0.5">{m.desc}</p>
+                </button>
+              ))}
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                {adjustmentType === "Set Exact" ? "New Exact Physical Quantity *" : "Adjustment Quantity *"}
+              </label>
+              <Input
+                type="number"
+                step="any"
+                min="0"
+                required
+                value={adjustmentQuantity}
+                onChange={(e) => setAdjustmentQuantity(e.target.value)}
+                placeholder={adjustmentType === "Set Exact" ? "e.g. 50" : "e.g. 5"}
+                className="w-full font-mono text-base"
+                autoFocus
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                Reason for Adjustment
+              </label>
+              <Select
+                value={adjustmentReason}
+                onChange={(e) => setAdjustmentReason(e.target.value)}
+                className="w-full"
+              >
+                <option value="Physical Audit Discrepancy">Physical Audit Discrepancy</option>
+                <option value="Damaged / Broken Goods">Damaged / Broken Goods</option>
+                <option value="Expired Batch / Scrap">Expired Batch / Scrap</option>
+                <option value="Theft / Lost Items">Theft / Lost Items</option>
+                <option value="Internal Consumption / Sample">Internal Consumption / Sample</option>
+                <option value="Opening Stock Correction">Opening Stock Correction</option>
+                <option value="Other">Other Adjustment</option>
+              </Select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                Remarks / Audit Notes (Optional)
+              </label>
+              <Input
+                type="text"
+                value={adjustmentNotes}
+                onChange={(e) => setAdjustmentNotes(e.target.value)}
+                placeholder="e.g. Verified by Store Manager"
+                className="w-full text-xs"
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+              <Btn
+                type="button"
+                variant="outline"
+                onClick={() => setSelectedProductForAdjustment(null)}
+                disabled={adjusting}
+              >
+                Cancel
+              </Btn>
+              <Btn
+                type="submit"
+                variant="primary"
+                disabled={adjusting || !adjustmentQuantity}
+                icon={<CheckCircle2 className="w-4 h-4" />}
+              >
+                {adjusting ? "Updating..." : "Save Stock Adjustment"}
+              </Btn>
+            </div>
+          </form>
+        </Modal>
+      )}
     </div>
   );
 }
-
-
-
-

@@ -13,10 +13,11 @@ const normalizeProduct = (p) => {
 
 /**
  * Fetch all products for the logged-in user.
- * @returns {{ products: Array }}
+ * @param {object} [params]
+ * @returns {{ products: Array, pagination?: object }}
  */
-export const getProducts = () =>
-  axiosClient.get("/products").then((res) => {
+export const getProducts = (params = {}) =>
+  axiosClient.get("/products", { params }).then((res) => {
     const raw = res.data.products || [];
     const products = raw.map(normalizeProduct);
     return { ...res.data, products };
@@ -52,6 +53,17 @@ export const bulkCreateProducts = (products, options = {}) =>
   axiosClient.post("/products/bulk", { products, ...options }).then((res) => res.data);
 
 /**
+ * Perform manual stock adjustment (Physical Audit, Damaged, Expired, Theft/Loss).
+ * @param {string} id
+ * @param {{ adjustmentType: string, quantity: number, reason: string, notes?: string }} payload
+ * @returns {{ success: boolean, message: string, product: object }}
+ */
+export const adjustProductStock = (id, payload) =>
+  axiosClient.post(`/products/${id}/adjust`, payload).then((res) => {
+    return { ...res.data, product: normalizeProduct(res.data.product) };
+  });
+
+/**
  * Update an existing product.
  * @param {string} id
  * @param {object} payload updated product fields
@@ -69,7 +81,3 @@ export const updateProduct = (id, payload) =>
  */
 export const deleteProduct = (id) =>
   axiosClient.delete(`/products/${id}`).then((res) => res.data);
-
-
-
-

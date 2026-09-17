@@ -9,8 +9,29 @@ import {
   AlertCircle,
   Shield,
   KeyRound,
+  ArrowUpDown,
+  MoreHorizontal,
+  Mail,
+  Phone,
+  MapPin,
+  TrendingUp,
+  Users as UsersIcon,
+  Activity,
+  CreditCard,
+  Building2,
+  MoreVertical,
 } from "lucide-react";
 
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  DropdownMenuSeparator,
+  DropdownMenuLabel,
+} from "@shared/components/ui/dropdown-menu";
+import { Avatar, AvatarFallback } from "@shared/components/ui/avatar";
+import { Tabs, TabsList, TabsTrigger } from "@shared/components/ui/tabs";
 import adminAPI from "@shared/api/adminAPI";
 import { PERMISSION_CATEGORIES } from "../settings/components/UserPermissionsSettings";
 
@@ -87,6 +108,9 @@ const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 export default function BusinessesNew() {
   const [search, setSearch] = useState("");
+  const [activeTab, setActiveTab] = useState("all");
+  const [sortConfig, setSortConfig] = useState({ key: "joined", direction: "desc" });
+
   const [rows, setRows] = useState(() => {
     // Seed from cache immediately so refresh shows data instantly
     try {
@@ -262,35 +286,64 @@ export default function BusinessesNew() {
     return () => controller.abort(); // Cleanup on unmount / StrictMode double-invoke
   }, []);
 
-  const filtered = useMemo(() => {
+  const processedRows = useMemo(() => {
+    // 1. Filter by Tab
+    let filtered = rows;
+    if (activeTab === "active") {
+      filtered = rows.filter((r) => r.status === "Active");
+    } else if (activeTab === "suspended") {
+      filtered = rows.filter((r) => r.status === "Suspended");
+    }
+
+    // 2. Filter by Search
     const q = search.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter((b) => {
-      return (
-        String(b.name ?? "")
-          .toLowerCase()
-          .includes(q) ||
-        String(b.owner ?? "")
-          .toLowerCase()
-          .includes(q) ||
-        String(b.ownerEmail ?? "")
-          .toLowerCase()
-          .includes(q) ||
-        String(b.ownerPhone ?? "")
-          .toLowerCase()
-          .includes(q) ||
-        String(b.plan ?? "")
-          .toLowerCase()
-          .includes(q) ||
-        String(b.status ?? "")
-          .toLowerCase()
-          .includes(q) ||
-        String(b.ownerCity ?? "")
-          .toLowerCase()
-          .includes(q)
-      );
-    });
-  }, [rows, search]);
+    if (q) {
+      filtered = filtered.filter((b) => {
+        return (
+          String(b.name ?? "").toLowerCase().includes(q) ||
+          String(b.owner ?? "").toLowerCase().includes(q) ||
+          String(b.ownerEmail ?? "").toLowerCase().includes(q) ||
+          String(b.ownerPhone ?? "").toLowerCase().includes(q) ||
+          String(b.plan ?? "").toLowerCase().includes(q) ||
+          String(b.status ?? "").toLowerCase().includes(q) ||
+          String(b.ownerCity ?? "").toLowerCase().includes(q)
+        );
+      });
+    }
+
+    // 3. Sort
+    if (sortConfig.key) {
+      filtered = [...filtered].sort((a, b) => {
+        let valA = a[sortConfig.key];
+        let valB = b[sortConfig.key];
+
+        if (sortConfig.key === "revenue" || sortConfig.key === "users") {
+          valA = Number(valA || 0);
+          valB = Number(valB || 0);
+        } else if (sortConfig.key === "joined") {
+          valA = new Date(valA).getTime();
+          valB = new Date(valB).getTime();
+        } else {
+          valA = String(valA ?? "").toLowerCase();
+          valB = String(valB ?? "").toLowerCase();
+        }
+
+        if (valA < valB) return sortConfig.direction === "asc" ? -1 : 1;
+        if (valA > valB) return sortConfig.direction === "asc" ? 1 : -1;
+        return 0;
+      });
+    }
+
+    return filtered;
+  }, [rows, search, activeTab, sortConfig]);
+
+  const requestSort = (key) => {
+    let direction = "asc";
+    if (sortConfig.key === key && sortConfig.direction === "asc") {
+      direction = "desc";
+    }
+    setSortConfig({ key, direction });
+  };
 
   const openSuspendModal = (businessId) => {
     setSuspendBusinessId(businessId);
@@ -421,79 +474,90 @@ export default function BusinessesNew() {
       )}
 
       {/* Stats */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between overflow-hidden relative group">
+          <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+            <Building className="w-12 h-12 text-blue-600" />
+          </div>
+          <div className="flex items-center justify-between z-10">
+            <p className="text-xs font-bold uppercase tracking-wider text-slate-500">
               Total Businesses
             </p>
-            <p className="text-2xl font-bold text-slate-900 mt-1">
-              {rows.length}
-            </p>
+            <div className="w-8 h-8 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center">
+              <Building2 className="w-4 h-4" />
+            </div>
           </div>
-          <div className="p-2 bg-blue-50 rounded-lg text-blue-600">
-            <Building className="h-5 w-5" />
+          <div className="mt-2 z-10">
+            <p className="text-3xl font-bold text-slate-900">{rows.length}</p>
           </div>
         </div>
 
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between overflow-hidden relative group">
+          <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+            <CheckCircle className="w-12 h-12 text-emerald-600" />
+          </div>
+          <div className="flex items-center justify-between z-10">
+            <p className="text-xs font-bold uppercase tracking-wider text-slate-500">
               Active
             </p>
-            <p className="text-2xl font-bold text-slate-900 mt-1">
+            <div className="w-8 h-8 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center">
+              <CheckCircle className="w-4 h-4" />
+            </div>
+          </div>
+          <div className="mt-2 z-10">
+            <p className="text-3xl font-bold text-slate-900">
               {rows.filter((r) => r.status === "Active").length}
             </p>
           </div>
-          <div className="p-2 bg-emerald-50 rounded-lg text-emerald-600">
-            <CheckCircle className="h-5 w-5" />
-          </div>
         </div>
 
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-              Suspended
+        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between overflow-hidden relative group">
+          <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+            <CreditCard className="w-12 h-12 text-amber-600" />
+          </div>
+          <div className="flex items-center justify-between z-10">
+            <p className="text-xs font-bold uppercase tracking-wider text-slate-500">
+              Total Revenue
             </p>
-            <p className="text-2xl font-bold text-slate-900 mt-1">
-              {rows.filter((r) => r.status === "Suspended").length}
+            <div className="w-8 h-8 rounded-full bg-amber-50 text-amber-600 flex items-center justify-center">
+              <Activity className="w-4 h-4" />
+            </div>
+          </div>
+          <div className="mt-2 z-10">
+            <p className="text-3xl font-bold text-slate-900">
+              {fmt(rows.reduce((s, r) => s + Number(r.revenue || 0), 0))}
             </p>
           </div>
-          <div className="p-2 bg-rose-50 rounded-lg text-rose-600">
-            <XCircle className="h-5 w-5" />
+        </div>
+
+        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between overflow-hidden relative group">
+          <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+            <UsersIcon className="w-12 h-12 text-purple-600" />
           </div>
-        </div>
-
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between col-span-1 sm:col-span-1 lg:col-span-1 xl:col-span-1">
-          <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-            Results
-          </p>
-          <p className="text-2xl font-bold text-slate-900 mt-1">
-            {filtered.length}
-          </p>
-          <p className="text-xs text-slate-500 mt-1">matches search</p>
-        </div>
-
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between col-span-1 sm:col-span-1 lg:col-span-1 xl:col-span-1">
-          <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-            Total Revenue
-          </p>
-          <p className="text-2xl font-bold text-slate-900 mt-1">
-            {fmt(rows.reduce((s, r) => s + Number(r.revenue || 0), 0))}
-          </p>
-          <p className="text-xs text-slate-500 mt-1">total sales revenue</p>
-        </div>
-
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between col-span-1 sm:col-span-1 lg:col-span-1 xl:col-span-1">
-          <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-            Total Users
-          </p>
-          <p className="text-2xl font-bold text-slate-900 mt-1">
-            {rows.reduce((s, r) => s + Number(r.users || 0), 0)}
-          </p>
-          <p className="text-xs text-slate-500 mt-1">registered seats</p>
+          <div className="flex items-center justify-between z-10">
+            <p className="text-xs font-bold uppercase tracking-wider text-slate-500">
+              Total Users
+            </p>
+            <div className="w-8 h-8 rounded-full bg-purple-50 text-purple-600 flex items-center justify-center">
+              <UsersIcon className="w-4 h-4" />
+            </div>
+          </div>
+          <div className="mt-2 z-10">
+            <p className="text-3xl font-bold text-slate-900">
+              {rows.reduce((s, r) => s + Number(r.users || 0), 0)}
+            </p>
+          </div>
         </div>
       </div>
+
+      {/* Tabs */}
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+        <TabsList className="grid w-full max-w-md grid-cols-3">
+          <TabsTrigger value="all">All ({rows.length})</TabsTrigger>
+          <TabsTrigger value="active">Active ({rows.filter(r => r.status === "Active").length})</TabsTrigger>
+          <TabsTrigger value="suspended">Suspended ({rows.filter(r => r.status === "Suspended").length})</TabsTrigger>
+        </TabsList>
+      </Tabs>
 
       {/* Suspend Modal */}
       {suspendModalOpen && (
@@ -686,23 +750,28 @@ export default function BusinessesNew() {
             <thead className="bg-slate-50/80 border-b border-slate-200 sticky top-0 z-10 backdrop-blur-sm">
               <tr>
                 {[
-                  "Business Name",
-                  "Business Owner",
-                  "Email",
-                  "Phone",
-                  "City",
-                  "Plan",
-                  "Joined",
-                  "Revenue",
-                  "Users",
-                  "Status",
-                  "Actions",
+                  { label: "Business & Owner", key: "name", sortable: true },
+                  { label: "Location", key: "ownerCity", sortable: true },
+                  { label: "Plan", key: "plan", sortable: true },
+                  { label: "Joined", key: "joined", sortable: true },
+                  { label: "Revenue", key: "revenue", sortable: true },
+                  { label: "Users", key: "users", sortable: true },
+                  { label: "Status", key: "status", sortable: true },
+                  { label: "Actions", key: null, sortable: false },
                 ].map((h) => (
                   <th
-                    key={h}
-                    className="py-3.5 px-5 text-xs font-semibold text-slate-600 uppercase tracking-wide whitespace-nowrap"
+                    key={h.label}
+                    onClick={() => h.sortable && requestSort(h.key)}
+                    className={`py-3 px-4 text-xs font-semibold text-slate-600 uppercase tracking-wider whitespace-nowrap ${
+                      h.sortable ? "cursor-pointer hover:text-blue-600 hover:bg-slate-100 transition-colors select-none group" : ""
+                    }`}
                   >
-                    {h}
+                    <div className="flex items-center gap-1.5">
+                      {h.label}
+                      {h.sortable && (
+                        <ArrowUpDown className={`w-3 h-3 ${sortConfig.key === h.key ? "text-blue-600" : "text-slate-300 opacity-0 group-hover:opacity-100"} transition-all`} />
+                      )}
+                    </div>
                   </th>
                 ))}
               </tr>
@@ -710,95 +779,104 @@ export default function BusinessesNew() {
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 <tr>
-                  <td colSpan={11} className="py-12 text-center text-slate-500">
+                  <td colSpan={8} className="py-12 text-center text-slate-500">
                     <div className="flex flex-col items-center justify-center gap-2">
                       <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
                       <span className="text-sm font-medium">Fetching registered business owners...</span>
                     </div>
                   </td>
                 </tr>
-              ) : filtered.length === 0 ? (
+              ) : processedRows.length === 0 ? (
                 <tr>
-                  <td colSpan={11} className="py-10 text-center text-slate-500">
-                    No business records found in database.
+                  <td colSpan={8} className="py-16 text-center">
+                    <div className="flex flex-col items-center justify-center">
+                      <div className="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center mb-3">
+                        <Building2 className="w-6 h-6 text-slate-400" />
+                      </div>
+                      <h3 className="text-sm font-semibold text-slate-900 mb-1">No businesses found</h3>
+                      <p className="text-xs text-slate-500">No matching business records in the database.</p>
+                    </div>
                   </td>
                 </tr>
               ) : (
-                filtered.map((b) => (
+                processedRows.map((b) => (
                   <tr
                     key={b.id || b._id}
-                    className="hover:bg-slate-50 transition-colors"
+                    className="hover:bg-slate-50/50 transition-colors group"
                   >
-                    <td className="px-5 py-4 font-semibold text-slate-900">
-                      {b.name}
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-3">
+                        <Avatar className="h-10 w-10 border border-slate-200">
+                          <AvatarFallback className="bg-blue-50 text-blue-700 font-semibold text-sm">
+                            {b.name ? b.name.substring(0, 2).toUpperCase() : "B"}
+                          </AvatarFallback>
+                        </Avatar>
+                        <div>
+                          <p className="font-semibold text-slate-900 text-sm leading-tight">{b.name}</p>
+                          <div className="flex items-center gap-2 mt-0.5 text-xs text-slate-500">
+                            <span className="flex items-center gap-1 truncate max-w-[120px]" title={b.ownerEmail}>
+                              <Mail className="w-3 h-3" /> {b.ownerEmail}
+                            </span>
+                            <span className="flex items-center gap-1">
+                              <Phone className="w-3 h-3" /> {b.ownerPhone}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
                     </td>
-                    <td className="px-5 py-4 text-slate-700">{b.owner}</td>
-                    <td className="px-5 py-4 text-slate-600 text-xs">
-                      {b.ownerEmail}
+                    <td className="px-4 py-3 text-slate-600 text-sm">
+                      <div className="flex items-center gap-1.5">
+                        <MapPin className="w-3.5 h-3.5 text-slate-400" />
+                        {b.ownerCity || "-"}
+                      </div>
                     </td>
-                    <td className="px-5 py-4 text-slate-600 font-mono text-xs">
-                      {b.ownerPhone}
-                    </td>
-                    <td className="px-5 py-4 text-slate-600">{b.ownerCity}</td>
-                    <td className="px-5 py-4">
+                    <td className="px-4 py-3">
                       <Badge label={b.plan} variant={planToVariant(b.plan)} />
                     </td>
-                    <td className="px-5 py-4 text-slate-500">{b.joined}</td>
-                    <td className="px-5 py-4 font-semibold text-slate-900">
+                    <td className="px-4 py-3 text-slate-500 text-sm">{b.joined}</td>
+                    <td className="px-4 py-3 font-semibold text-slate-900 text-sm">
                       {fmt(b.revenue)}
                     </td>
-                    <td className="px-5 py-4 text-slate-600">{b.users}</td>
-                    <td className="px-5 py-4">
-                      <div className="flex flex-col gap-1">
-                        <Badge
-                          label={b.status}
-                          variant={statusToVariant(b.status)}
-                        />
-                        {b.status === "Suspended" && (
-                          <p
-                            className="text-[10px] text-rose-700 bg-rose-50 border border-rose-200 rounded px-2 py-1 max-w-[150px] truncate"
-                            title={
-                              b.suspensionReason ||
-                              "Suspension reason not provided"
-                            }
+                    <td className="px-4 py-3 text-slate-600 text-sm">{b.users}</td>
+                    <td className="px-4 py-3">
+                      <div className="flex flex-col items-start gap-1">
+                        <Badge label={b.status} variant={statusToVariant(b.status)} />
+                        {b.status === "Suspended" && b.suspensionReason && (
+                          <span
+                            className="text-[10px] text-rose-600 truncate max-w-[120px]"
+                            title={b.suspensionReason}
                           >
-                            {b.suspensionReason
-                              ? `Reason: ${b.suspensionReason}`
-                              : "Reason not provided"}
-                          </p>
+                            {b.suspensionReason}
+                          </span>
                         )}
                       </div>
                     </td>
-                    <td className="px-5 py-4">
-                      <div className="flex items-center gap-2 text-slate-500">
-                        <button
-                          className="p-1.5 rounded-md hover:bg-blue-50 hover:text-blue-600 transition-colors"
-                          title="Manage Access"
-                          onClick={() => openAccessModal(b)}
-                          type="button"
-                        >
-                          <Shield className="h-4 w-4 text-blue-600" />
-                        </button>
-                        {b.status === "Suspended" ? (
-                          <button
-                            className="p-1.5 rounded-md hover:bg-emerald-50 hover:text-emerald-700 transition-colors"
-                            title="Resume"
-                            onClick={() => resumeBusiness(b.id || b._id)}
-                            type="button"
-                          >
-                            <CheckCircle className="h-4 w-4 text-emerald-600" />
-                          </button>
-                        ) : (
-                          <button
-                            className="p-1.5 rounded-md hover:bg-rose-50 hover:text-rose-600 transition-colors"
-                            title="Suspend (enter reason)"
-                            onClick={() => openSuspendModal(b.id || b._id)}
-                            type="button"
-                          >
-                            <XCircle className="h-4 w-4 text-rose-500" />
-                          </button>
-                        )}
-                      </div>
+                    <td className="px-4 py-3">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger className="p-2 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-900 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-blue-500 data-[state=open]:bg-slate-100 data-[state=open]:text-slate-900">
+                          <MoreHorizontal className="w-4 h-4" />
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-48">
+                          <DropdownMenuLabel>Actions</DropdownMenuLabel>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem onClick={() => openAccessModal(b)} className="cursor-pointer">
+                            <Shield className="w-4 h-4 mr-2 text-blue-500" />
+                            Manage Access
+                          </DropdownMenuItem>
+                          
+                          {b.status === "Suspended" ? (
+                            <DropdownMenuItem onClick={() => resumeBusiness(b.id || b._id)} className="cursor-pointer">
+                              <CheckCircle className="w-4 h-4 mr-2 text-emerald-500" />
+                              Resume Account
+                            </DropdownMenuItem>
+                          ) : (
+                            <DropdownMenuItem onClick={() => openSuspendModal(b.id || b._id)} className="cursor-pointer text-red-600 focus:text-red-700">
+                              <XCircle className="w-4 h-4 mr-2" />
+                              Suspend Account
+                            </DropdownMenuItem>
+                          )}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </td>
                   </tr>
                 ))
@@ -807,11 +885,11 @@ export default function BusinessesNew() {
           </table>
         </div>
 
-        <div className="flex items-center justify-between px-5 py-4 border-t border-slate-200">
+        <div className="flex items-center justify-between px-5 py-4 border-t border-slate-200 bg-slate-50/50">
           <p className="text-xs text-slate-500">
             Showing{" "}
             <span className="font-semibold text-slate-700">
-              {filtered.length}
+              {processedRows.length}
             </span>{" "}
             of{" "}
             <span className="font-semibold text-slate-700">{rows.length}</span>{" "}

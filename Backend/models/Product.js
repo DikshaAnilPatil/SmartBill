@@ -77,11 +77,41 @@ const productSchema = new mongoose.Schema(
       default: "Piece",
     },
 
+    hsnCode: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
+    batchNo: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
+    expiryDate: {
+      type: Date,
+      default: null,
+    },
+
     status: {
       type: String,
       enum: ["Active", "Inactive", "Discontinued"],
       default: "Active",
     },
+
+    stockHistory: [
+      {
+        date: { type: Date, default: Date.now },
+        type: { type: String, enum: ["Sale", "Purchase", "Sales Return", "Purchase Return", "Stock Adjustment", "Initial"], default: "Stock Adjustment" },
+        quantity: { type: Number, required: true },
+        previousStock: { type: Number, default: 0 },
+        newStock: { type: Number, default: 0 },
+        reason: { type: String, default: "" },
+        referenceNo: { type: String, default: "" },
+        performedBy: { type: String, default: "" },
+      },
+    ],
 
     userId: {
       type: mongoose.Schema.Types.ObjectId,

@@ -186,10 +186,10 @@ export default function PurchaseSupplierDetailsModal({
         </div>
 
         {/* 2. Purchase Invoice & Supplier Info */}
-        <div className="bg-slate-50/60 dark:bg-slate-800/40 p-4 rounded-xl border border-slate-200/70 dark:border-slate-800 text-xs grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="bg-slate-50/60 dark:bg-slate-800/40 p-4 rounded-xl border border-slate-200/70 dark:border-slate-800 text-xs grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
           <div>
             <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-              Invoice / Bill No.
+              Invoice / Bill #
             </p>
             <p className="font-mono font-bold text-blue-600 dark:text-blue-400 mt-0.5">
               {purchase.supplierInvoiceNo || purchase.invoiceNo || "-"}
@@ -198,7 +198,7 @@ export default function PurchaseSupplierDetailsModal({
 
           <div>
             <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-              Purchase Order No.
+              Purchase Order (PO) #
             </p>
             <p className="font-mono text-slate-700 dark:text-slate-300 mt-0.5">
               {purchase.purchaseOrderNo || "-"}
@@ -207,7 +207,16 @@ export default function PurchaseSupplierDetailsModal({
 
           <div>
             <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-              Purchase Date
+              E-Way Bill #
+            </p>
+            <p className="font-mono text-slate-700 dark:text-slate-300 mt-0.5">
+              {purchase.eWayBillNo || "-"}
+            </p>
+          </div>
+
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+              Inward Date
             </p>
             <p className="text-slate-700 dark:text-slate-300 font-mono mt-0.5">
               {purchase.purchaseDate
@@ -218,12 +227,27 @@ export default function PurchaseSupplierDetailsModal({
 
           <div>
             <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-              Due Date
+              Tax Regime
             </p>
-            <p className="text-slate-700 dark:text-slate-300 font-mono mt-0.5">
-              {purchase.dueDate
-                ? new Date(purchase.dueDate).toLocaleDateString("en-IN")
-                : "Immediate"}
+            <p className="text-slate-700 dark:text-slate-300 font-medium mt-0.5">
+              {purchase.taxType || "GST Regular"}
+            </p>
+          </div>
+
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+              ITC Status
+            </p>
+            <p className="mt-0.5">
+              {purchase.itcEligible !== false ? (
+                <span className="font-semibold text-emerald-600 dark:text-emerald-400">
+                  Eligible (GSTR-2B)
+                </span>
+              ) : (
+                <span className="font-semibold text-amber-600 dark:text-amber-400">
+                  Ineligible
+                </span>
+              )}
             </p>
           </div>
         </div>
@@ -231,13 +255,16 @@ export default function PurchaseSupplierDetailsModal({
         {/* 3. Items Purchased Table */}
         <div>
           <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2">
-            Items Purchased ({items.length})
+            Goods Received Line Items ({items.length})
           </h4>
           <div className="border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
             <table className="w-full text-xs text-left">
               <thead>
                 <tr className="bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 font-semibold text-slate-500 dark:text-slate-400 text-[11px]">
                   <th className="px-3.5 py-2.5">Item Name</th>
+                  <th className="px-3.5 py-2.5">HSN</th>
+                  <th className="px-3.5 py-2.5">Batch #</th>
+                  <th className="px-3.5 py-2.5">Expiry</th>
                   <th className="px-3.5 py-2.5 text-center">Qty</th>
                   <th className="px-3.5 py-2.5 text-right">Rate</th>
                   <th className="px-3.5 py-2.5 text-right">GST</th>
@@ -247,7 +274,7 @@ export default function PurchaseSupplierDetailsModal({
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                 {items.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="py-4 text-center text-slate-400">
+                    <td colSpan={8} className="py-4 text-center text-slate-400">
                       No items recorded
                     </td>
                   </tr>
@@ -256,6 +283,17 @@ export default function PurchaseSupplierDetailsModal({
                     <tr key={idx} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/30">
                       <td className="px-3.5 py-2.5 font-medium text-slate-900 dark:text-white">
                         {item.productName || item.product || "Product"}
+                      </td>
+                      <td className="px-3.5 py-2.5 font-mono text-slate-500">
+                        {item.hsnCode || "-"}
+                      </td>
+                      <td className="px-3.5 py-2.5 font-mono text-slate-500">
+                        {item.batchNo || "-"}
+                      </td>
+                      <td className="px-3.5 py-2.5 font-mono text-slate-500">
+                        {item.expiryDate
+                          ? new Date(item.expiryDate).toLocaleDateString("en-IN")
+                          : "-"}
                       </td>
                       <td className="px-3.5 py-2.5 text-center font-mono text-slate-600 dark:text-slate-300">
                         {item.quantity || item.qty} {item.unit || "pcs"}

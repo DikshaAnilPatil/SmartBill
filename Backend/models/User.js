@@ -67,6 +67,11 @@ const userSchema = new mongoose.Schema(
       default: "Active",
     },
 
+    suspensionReason: {
+      type: String,
+      default: "",
+    },
+
     twoFactorEnabled: {
       type: Boolean,
       default: false,

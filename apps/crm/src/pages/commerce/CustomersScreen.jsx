@@ -526,7 +526,7 @@ export default function CustomersScreen() {
                               const balanceDue = Number(order.balanceDue ?? 0);
                               const amtPaid = Number(order.amountPaid ?? 0);
                               const total = Number(order.totalOrderValue ?? 0);
-                              const invoiceNo = order.invoiceNumber || order.orderNumber || `#${String(orderId).slice(-6).toUpperCase()}`;
+                              const invoiceNo = order.invoiceNo || order.invoiceNumber || order.orderNumber || `#${String(orderId).slice(-6).toUpperCase()}`;
                               const createdAt = order.createdAt ? new Date(order.createdAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—";
                               const status = order.paymentStatus || (balanceDue <= 0 ? "Paid" : balanceDue < total ? "Partial" : "Pending");
 

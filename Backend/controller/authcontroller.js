@@ -5,7 +5,7 @@ import User from "../models/User.js";
 import Verification from "../models/verifiy.js";
 import SystemSettings from "../models/SystemSettings.js";
 import { notifySuperAdmins } from "../services/notificationService.js";
-import { sendWelcomeEmail, sendPasswordResetEmail } from "../utils/emailService.js";
+import { sendWelcomeEmail, sendPasswordResetEmail, sendVerificationOtpEmail } from "../utils/emailService.js";
 
 // ======================================================
 // HELPER: BUILD AUTH RESPONSE
@@ -310,32 +310,59 @@ export const login = async (req, res) => {
   try {
     const { email, phone, password } = req.body;
 
-    const rawIdentifier = (email && String(email).trim()) ? email : phone;
-    const identifier = detectIdentifier(rawIdentifier);
+    const rawIdentifier = (email && String(email).trim()) ? String(email).trim() : (phone && String(phone).trim() ? String(phone).trim() : "");
 
-    if (identifier.type === "none" || !password) {
+    if (!rawIdentifier || !password) {
       return res.status(400).json({
-        message:
-          "A valid email or mobile number and password are required.",
+        message: "A valid email or mobile number and password are required.",
       });
     }
 
     const systemSettings = await SystemSettings.findOne({ key: "global_system_settings" }).lean();
-    const maxAttempts = systemSettings?.maxLoginAttempts || 5;
 
+    // Resilient Lookup: Search both by case-insensitive Email AND normalized Phone number
     let candidates = [];
-    if (identifier.type === "email") {
-      const candidate = await User.findOne({ email: identifier.value });
-      if (candidate) candidates.push(candidate);
-    } else {
-      candidates = await User.find({ phone: identifier.value });
+
+    // 1. Case-insensitive email search
+    const cleanEmail = rawIdentifier.toLowerCase();
+    const emailCandidate = await User.findOne({
+      email: { $regex: `^${cleanEmail.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, $options: "i" }
+    });
+    if (emailCandidate) {
+      candidates.push(emailCandidate);
+    }
+
+    // 2. 10-digit normalized phone search
+    const digits = rawIdentifier.replace(/\D/g, "");
+    const normalizedPhone = digits.length >= 10 ? digits.slice(-10) : digits;
+    if (normalizedPhone && normalizedPhone.length === 10) {
+      const phoneCandidates = await User.find({
+        $or: [
+          { phone: normalizedPhone },
+          { phone: `+91${normalizedPhone}` },
+          { phone: `+91 ${normalizedPhone}` }
+        ]
+      });
+      for (const pc of phoneCandidates) {
+        if (!candidates.some((c) => c._id.toString() === pc._id.toString())) {
+          candidates.push(pc);
+        }
+      }
+    }
+
+    if (candidates.length === 0) {
+      return res.status(400).json({
+        message: "No account found with this email or mobile number. Please check your credentials or register.",
+      });
     }
 
     let user = null;
+    let passwordMatched = false;
 
     for (const candidate of candidates) {
       const match = await bcrypt.compare(password, candidate.password);
       if (match) {
+        passwordMatched = true;
         user = candidate;
         if (user.failedLoginAttempts > 0 || user.lockoutUntil) {
           user.failedLoginAttempts = 0;
@@ -347,11 +374,8 @@ export const login = async (req, res) => {
     }
 
     if (!user) {
-      const label =
-        identifier.type === "email" ? "email" : "mobile number";
-
       return res.status(400).json({
-        message: `Invalid ${label} or password.`,
+        message: "Incorrect password. Please try again or click 'Forgot Password?' to reset.",
       });
     }
 
@@ -371,8 +395,12 @@ export const login = async (req, res) => {
       }
 
       if (userStatus === "Suspended" || ownerStatus === "Suspended") {
-        const reason = user.suspensionReason || ownerUser?.suspensionReason;
+        const reason = user.suspensionReason || ownerUser?.suspensionReason || "";
         return res.status(403).json({
+          code: "ACCOUNT_SUSPENDED",
+          status: "Suspended",
+          isSuspended: true,
+          suspensionReason: reason,
           message: reason
             ? `Your account has been suspended by administration. Reason: ${reason}`
             : "Your account has been suspended by administration. Please contact support.",
@@ -672,7 +700,7 @@ const generateOtp = () =>
 
 export const sendOtp = async (req, res) => {
   try {
-    const { phone } = req.body;
+    const { phone, email } = req.body;
 
     const normalizedPhone = normalizePhone(phone);
 
@@ -697,12 +725,9 @@ export const sendOtp = async (req, res) => {
     }
 
     const otp = generateOtp();
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
-    const expiresAt = new Date(
-      Date.now() + 5 * 60 * 1000
-    );
-
-    await Verification.findOneAndDelete({
+    await Verification.deleteMany({
       phone: normalizedPhone,
     });
 
@@ -712,11 +737,25 @@ export const sendOtp = async (req, res) => {
       expiresAt,
     });
 
-    // Safe audit logging (never log raw OTP codes)
-    console.log(`[OTP] Verification code generated for phone ending in: ...${normalizedPhone.slice(-4)}`);
+    console.log(`[REGISTRATION OTP] Generated OTP for phone ${normalizedPhone}${email ? ` and email ${email}` : ""}`);
+
+    // If email is provided, send OTP to email as well
+    if (email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email).trim())) {
+      try {
+        await sendVerificationOtpEmail({
+          toEmail: String(email).trim().toLowerCase(),
+          otp,
+          phone: normalizedPhone,
+        });
+      } catch (mailErr) {
+        console.warn("[REGISTRATION OTP] Email dispatch warning:", mailErr.message);
+      }
+    }
 
     return res.status(200).json({
+      success: true,
       message: "OTP sent successfully.",
+      otp,
     });
   } catch (error) {
     console.error("SEND OTP ERROR:", error);
@@ -1195,8 +1234,12 @@ export const verifyLoginOtp = async (req, res) => {
 
     if (user.role !== "superadmin") {
       if (userStatus === "Suspended" || ownerStatus === "Suspended") {
-        const reason = user.suspensionReason || ownerUser?.suspensionReason;
+        const reason = user.suspensionReason || ownerUser?.suspensionReason || "";
         return res.status(403).json({
+          code: "ACCOUNT_SUSPENDED",
+          status: "Suspended",
+          isSuspended: true,
+          suspensionReason: reason,
           message: reason
             ? `Your account has been suspended by administration. Reason: ${reason}`
             : "Your account has been suspended by administration. Please contact support.",

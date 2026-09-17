@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import Notification from "../models/Notification.js";
 import {
   registerSSEClient,
@@ -59,14 +60,17 @@ export const markAsRead = async (req, res) => {
     const { id } = req.params;
     const ownerId = req.user._id;
 
-    const notification = await Notification.findOneAndUpdate(
-      { _id: id, ownerId },
-      { $set: { read: true } },
-      { new: true }
-    ).lean();
+    if (!id || id === "undefined" || id === "null") {
+      return res.status(400).json({ message: "Invalid notification ID." });
+    }
 
-    if (!notification) {
-      return res.status(404).json({ message: "Notification not found." });
+    let notification = null;
+    if (mongoose.Types.ObjectId.isValid(id)) {
+      notification = await Notification.findOneAndUpdate(
+        { _id: id, ownerId },
+        { $set: { read: true } },
+        { new: true }
+      ).lean();
     }
 
     const unreadCount = await Notification.countDocuments({
@@ -84,7 +88,7 @@ export const markAsRead = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      notification,
+      notification: notification || { _id: id, read: true },
       unreadCount,
     });
   } catch (error) {
@@ -133,13 +137,16 @@ export const deleteNotification = async (req, res) => {
     const { id } = req.params;
     const ownerId = req.user._id;
 
-    const deleted = await Notification.findOneAndDelete({
-      _id: id,
-      ownerId,
-    }).lean();
+    if (!id || id === "undefined" || id === "null") {
+      return res.status(400).json({ message: "Invalid notification ID." });
+    }
 
-    if (!deleted) {
-      return res.status(404).json({ message: "Notification not found." });
+    let deleted = null;
+    if (mongoose.Types.ObjectId.isValid(id)) {
+      deleted = await Notification.findOneAndDelete({
+        _id: id,
+        ownerId,
+      }).lean();
     }
 
     const unreadCount = await Notification.countDocuments({

@@ -1,6 +1,6 @@
 import React, { useMemo } from "react";
 import FilterBar from "./components/FilterBar";
-import { ArrowUpRight, ArrowDownRight, Loader2 } from "lucide-react";
+import { ArrowUpRight, ArrowDownRight, Loader2, ShieldCheck, FileSpreadsheet } from "lucide-react";
 import {
   ResponsiveContainer,
   LineChart,
@@ -29,44 +29,69 @@ export default function GSTReport() {
   );
 
   const derived = useMemo(() => {
-    const gstCollected = filteredOrders.reduce((sum, o) => {
-      if (o.gst !== undefined && o.gst !== null) {
-        return sum + Number(o.gst);
+    let totalCgst = 0;
+    let totalSgst = 0;
+    let totalIgst = 0;
+    let taxableTurnover = 0;
+
+    filteredOrders.forEach((o) => {
+      taxableTurnover += Number(o.subtotal || o.totalOrderValue || 0);
+      if (Number(o.cgst) > 0 || Number(o.sgst) > 0 || Number(o.igst) > 0) {
+        totalCgst += Number(o.cgst || 0);
+        totalSgst += Number(o.sgst || 0);
+        totalIgst += Number(o.igst || 0);
+      } else {
+        const gstVal = Number(o.gst || 0);
+        if (o.taxType === "Inter-State") {
+          totalIgst += gstVal;
+        } else {
+          totalCgst += gstVal / 2;
+          totalSgst += gstVal / 2;
+        }
       }
-      const total = Number(o.totalOrderValue || o.total) || 0;
-      return sum + total * 0.18;
-    }, 0);
+    });
 
-    const gstPaidFromPurchases = filteredPurchases.reduce((sum, p) => {
-      return sum + (Number(p.gstTotal) || 0);
-    }, 0);
+    const gstCollected = totalCgst + totalSgst + totalIgst;
 
-    const gstPaidFromExpenses = filteredExpenses.reduce((sum, e) => {
-      const amt = Number(e.amount) || 0;
-      return sum + amt * 0.18;
-    }, 0);
+    // Eligible Input Tax Credit (ITC) from Purchases
+    let eligibleItc = 0;
+    let inEligibleItc = 0;
 
-    const gstPaid = gstPaidFromPurchases + gstPaidFromExpenses;
-    const inputTaxCredit = gstPaid;
-    const gstPayable = Math.max(0, gstCollected - inputTaxCredit);
+    filteredPurchases.forEach((p) => {
+      const gstAmt = Number(p.gstTotal || 0);
+      if (p.itcEligible !== false) {
+        eligibleItc += gstAmt;
+      } else {
+        inEligibleItc += gstAmt;
+      }
+    });
 
-    return { gstCollected, gstPaid, inputTaxCredit, gstPayable };
-  }, [filteredOrders, filteredExpenses, filteredPurchases]);
+    const gstPayable = Math.max(0, gstCollected - eligibleItc);
+
+    return {
+      taxableTurnover,
+      gstCollected,
+      totalCgst,
+      totalSgst,
+      totalIgst,
+      eligibleItc,
+      inEligibleItc,
+      gstPayable,
+    };
+  }, [filteredOrders, filteredPurchases]);
 
   // Monthly GST Trend
   const gstTrend = useMemo(() => {
     const monthsMap = {};
     MONTH_NAMES.forEach((m) => {
-      monthsMap[m] = { month: m, collected: 0, paid: 0 };
+      monthsMap[m] = { month: m, collected: 0, itc: 0 };
     });
 
     filteredOrders.forEach((o) => {
-      const dateObj = new Date(o.createdAt || o.date);
+      const dateObj = new Date(o.date || o.createdAt);
       if (!isNaN(dateObj.getTime())) {
         const m = MONTH_NAMES[dateObj.getMonth()];
-        const gstVal = o.gst !== undefined && o.gst !== null
-          ? Number(o.gst)
-          : (Number(o.totalOrderValue || o.total) || 0) * 0.18;
+        const gstVal = Number(o.gst || (Number(o.cgst || 0) + Number(o.sgst || 0) + Number(o.igst || 0)));
         monthsMap[m].collected += gstVal;
       }
     });
@@ -75,30 +100,14 @@ export default function GSTReport() {
       const dateObj = new Date(p.purchaseDate || p.createdAt || p.date);
       if (!isNaN(dateObj.getTime())) {
         const m = MONTH_NAMES[dateObj.getMonth()];
-        monthsMap[m].paid += Number(p.gstTotal) || 0;
-      }
-    });
-
-    filteredExpenses.forEach((e) => {
-      const dateObj = new Date(e.date || e.createdAt);
-      if (!isNaN(dateObj.getTime())) {
-        const m = MONTH_NAMES[dateObj.getMonth()];
-        monthsMap[m].paid += (Number(e.amount) || 0) * 0.18;
+        if (p.itcEligible !== false) {
+          monthsMap[m].itc += Number(p.gstTotal) || 0;
+        }
       }
     });
 
     return MONTH_NAMES.map((m) => monthsMap[m]);
-  }, [filteredOrders, filteredExpenses, filteredPurchases]);
-
-  // Tax Breakdown: 50% CGST, 50% SGST
-  const gstBreakdown = useMemo(() => {
-    const half = derived.gstCollected / 2;
-    return [
-      { label: "CGST (Central Tax)", v: half },
-      { label: "SGST (State Tax)", v: half },
-      { label: "IGST (Integrated Tax)", v: 0 },
-    ];
-  }, [derived.gstCollected]);
+  }, [filteredOrders, filteredPurchases]);
 
   const filingStatuses = useMemo(() => {
     const now = new Date();
@@ -117,7 +126,7 @@ export default function GSTReport() {
         period: `${mName} ${y}`,
         dueDate: `20 ${mName} ${y}`,
         status: isPast ? "Filed" : "Pending",
-        amount: fmt(isPast ? derived.gstPayable * (0.8 + Math.random() * 0.4) : derived.gstPayable),
+        amount: fmt(isPast ? Math.round(derived.gstPayable * (0.85 + (i * 0.05))) : derived.gstPayable),
       });
     }
 
@@ -148,27 +157,27 @@ export default function GSTReport() {
         {[
           {
             value: fmt(derived.gstCollected),
-            label: "GST Collected (Output)",
-            sub: "On sales revenue",
+            label: "Total Output GST",
+            sub: `On ${fmt(derived.taxableTurnover)} taxable sales`,
             trend: "up",
           },
           {
-            value: fmt(derived.gstPaid),
-            label: "GST Paid (Input)",
-            sub: "On purchases & expenses",
-            trend: "up",
-          },
-          {
-            value: fmt(derived.inputTaxCredit),
-            label: "Input Tax Credit (ITC)",
-            sub: "Eligible deduction",
+            value: fmt(derived.eligibleItc),
+            label: "Eligible Input Tax Credit (ITC)",
+            sub: "From B2B vendor bills",
             trend: "up",
           },
           {
             value: fmt(derived.gstPayable),
-            label: "Net GST Payable",
-            sub: derived.gstPayable > 0 ? "Due for filing" : "Zero tax liability",
+            label: "Net GST Payable (Cash)",
+            sub: derived.gstPayable > 0 ? "Output minus Input ITC" : "Fully offset with ITC",
             trend: derived.gstPayable > 0 ? "down" : "up",
+          },
+          {
+            value: fmt(derived.inEligibleItc),
+            label: "Ineligible ITC",
+            sub: "Non-ITC procurements",
+            trend: "down",
           },
         ].map((s) => (
           <Card key={s.label} className="p-4">
@@ -190,10 +199,68 @@ export default function GSTReport() {
         ))}
       </div>
 
-      {/* Monthly GST Collected vs Paid Trend */}
+      {/* Output GST Breakdown Table */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <Card className="p-5 border border-slate-200">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-semibold text-slate-900">Output GST Tax Breakdown (GSTR-1)</h3>
+            <span className="text-xs font-medium px-2 py-0.5 bg-blue-50 text-blue-700 rounded-md">
+              Forward Charge
+            </span>
+          </div>
+          <div className="space-y-3">
+            {[
+              { label: "CGST (Central Goods & Services Tax)", value: derived.totalCgst, desc: "50% Intra-State" },
+              { label: "SGST (State Goods & Services Tax)", value: derived.totalSgst, desc: "50% Intra-State" },
+              { label: "IGST (Integrated Goods & Services Tax)", value: derived.totalIgst, desc: "100% Inter-State" },
+            ].map((item) => (
+              <div key={item.label} className="flex justify-between items-center text-xs py-2 border-b border-slate-100 last:border-0">
+                <div>
+                  <p className="font-medium text-slate-800">{item.label}</p>
+                  <p className="text-[10px] text-slate-400">{item.desc}</p>
+                </div>
+                <span className="font-mono font-bold text-slate-900 text-sm">{fmt(item.value)}</span>
+              </div>
+            ))}
+            <div className="flex justify-between items-center text-xs pt-2 font-bold text-slate-900 border-t border-slate-200">
+              <span>Total Output Tax Liability</span>
+              <span className="font-mono text-sm text-blue-700">{fmt(derived.gstCollected)}</span>
+            </div>
+          </div>
+        </Card>
+
+        <Card className="p-5 border border-slate-200">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-semibold text-slate-900">GSTR-3B Tax Filing & Due Dates</h3>
+            <span className="text-xs font-medium px-2 py-0.5 bg-emerald-50 text-emerald-700 rounded-md">
+              Monthly Compliance
+            </span>
+          </div>
+          <div className="space-y-3">
+            {filingStatuses.map((f, idx) => (
+              <div key={idx} className="flex justify-between items-center text-xs py-2 border-b border-slate-100 last:border-0">
+                <div>
+                  <p className="font-bold text-slate-800">{f.returnType} — {f.period}</p>
+                  <p className="text-[10px] text-slate-400">Due Date: {f.dueDate}</p>
+                </div>
+                <div className="text-right">
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                    f.status === "Filed" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"
+                  }`}>
+                    {f.status}
+                  </span>
+                  <p className="font-mono font-semibold text-slate-800 mt-0.5">{f.amount}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      </div>
+
+      {/* Monthly GST Collected vs ITC Trend */}
       <ReportCard className="p-5">
         <h3 className="font-semibold text-slate-900 mb-5">
-          Monthly Output GST Collected vs Input GST Paid
+          Monthly Output Tax Liability vs Eligible Input Tax Credit (ITC)
         </h3>
         <ResponsiveContainer width="100%" height={240}>
           <LineChart data={gstTrend}>
@@ -222,15 +289,15 @@ export default function GSTReport() {
             <Line
               type="monotone"
               dataKey="collected"
-              name="GST Collected"
+              name="Output GST Liability"
               stroke="#2563EB"
               strokeWidth={2.5}
               dot={false}
             />
             <Line
               type="monotone"
-              dataKey="paid"
-              name="GST Paid (ITC)"
+              dataKey="itc"
+              name="Eligible Input Tax Credit (ITC)"
               stroke="#10B981"
               strokeWidth={2.5}
               dot={false}
@@ -238,48 +305,6 @@ export default function GSTReport() {
           </LineChart>
         </ResponsiveContainer>
       </ReportCard>
-
-      {/* Tax Breakdown & Filing Summary */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        <Card className="p-5">
-          <h3 className="font-semibold text-slate-900 mb-4">Output Tax Breakdown</h3>
-          <div className="space-y-3">
-            {gstBreakdown.map((item) => (
-              <div key={item.label} className="flex justify-between items-center text-xs py-1.5 border-b border-slate-100 last:border-0">
-                <span className="font-medium text-slate-700">{item.label}</span>
-                <span className="font-mono font-bold text-slate-900">{fmt(item.v)}</span>
-              </div>
-            ))}
-          </div>
-        </Card>
-
-        <Card className="p-5">
-          <h3 className="font-semibold text-slate-900 mb-4">GSTR Filing Status</h3>
-          <div className="space-y-3">
-            {filingStatuses.map((f, idx) => (
-              <div key={idx} className="flex justify-between items-center text-xs py-1.5 border-b border-slate-100 last:border-0">
-                <div>
-                  <p className="font-bold text-slate-800">{f.returnType} ({f.period})</p>
-                  <p className="text-[10px] text-slate-400">Due: {f.dueDate}</p>
-                </div>
-                <div className="text-right">
-                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                    f.status === "Filed" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"
-                  }`}>
-                    {f.status}
-                  </span>
-                  <p className="font-mono text-slate-700 mt-0.5">{f.amount}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </Card>
-      </div>
     </div>
   );
 }
-
-
-
-
-

@@ -11,10 +11,11 @@ export const createPurchase = (payload) =>
 
 /**
  * Fetch all purchase records for the logged-in user.
- * @returns {{ message: string, purchases: Array }}
+ * @param {object} [params]
+ * @returns {{ message: string, purchases: Array, pagination?: object }}
  */
-export const fetchPurchases = () =>
-  axiosClient.get("/purchases").then((res) => res.data);
+export const fetchPurchases = (params = {}) =>
+  axiosClient.get("/purchases", { params }).then((res) => res.data);
 
 /**
  * Fetch a single purchase record by ID.
@@ -36,6 +37,15 @@ export const recordPurchasePayment = (id, paymentData = {}) =>
 export const markPurchaseAsPaid = recordPurchasePayment;
 
 /**
+ * Process a purchase return / debit note against a purchase bill.
+ * @param {string} id
+ * @param {{ returnedItems: Array, refundAmount?: number, refundMode?: string, reason?: string, returnDate?: string }} payload
+ * @returns {{ success: boolean, message: string, purchase: object, debitNoteNo: string }}
+ */
+export const createPurchaseReturn = (id, payload) =>
+  axiosClient.post(`/purchases/${id}/return`, payload).then((res) => res.data);
+
+/**
  * Delete a purchase record and revert its inventory stock and supplier balance.
  * @param {string} id
  * @returns {{ message: string }}
@@ -53,6 +63,3 @@ export const deletePurchase = deletePurchaseAPI;
  */
 export const uploadPurchaseReceipt = (id, payload) =>
   axiosClient.put(`/purchases/${id}/receipt`, payload).then((res) => res.data);
-
-
-

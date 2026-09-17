@@ -5,6 +5,7 @@ import {
   getCustomer,
   getCustomerDetails,
   createCustomer,
+  recordCustomerPayment,
   updateCustomer,
   deleteCustomer,
 } from "../controller/customerController.js";
@@ -21,6 +22,7 @@ router.get("/", getCustomers);
 router.get("/:id", getCustomer);
 router.get("/:id/details", getCustomerDetails);
 router.post("/", checkResourceLimit("customers"), createCustomer);
+router.post("/:id/payment", recordCustomerPayment);
 router.put("/:id", updateCustomer);
 router.delete("/:id", deleteCustomer);
 

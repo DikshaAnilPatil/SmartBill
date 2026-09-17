@@ -18,6 +18,9 @@ export const addProduct = async (req, res) => {
       minStock = 10,
       gst = 0,
       unit = "Piece",
+      hsnCode = "",
+      batchNo = "",
+      expiryDate = null,
       status = "Active",
     } = req.body;
 
@@ -52,6 +55,8 @@ export const addProduct = async (req, res) => {
       ? `${rawSku}-${Date.now().toString(36).toUpperCase()}-${Math.floor(100 + Math.random() * 900)}`
       : rawSku;
 
+    const initialStock = Math.max(0, Number(stock) || 0);
+
     const product = new Product({
       name,
       sku: finalSku,
@@ -61,13 +66,27 @@ export const addProduct = async (req, res) => {
       price: Number(price) || 0,
       wholesalePrice: Number(wholesalePrice) || 0,
       minPrice: Number(minPrice) || 0,
-      stock: Math.max(0, parseInt(stock, 10) || 0),
+      stock: initialStock,
       minStock: Number(minStock) || 0,
       gst: Number(gst) || 0,
       unit: String(unit || "Piece").trim(),
+      hsnCode: String(hsnCode || "").trim(),
+      batchNo: String(batchNo || "").trim(),
+      expiryDate: expiryDate ? new Date(expiryDate) : null,
       status: status || "Active",
       userId: actualUserId,
       ownerId: effectiveOwnerId,
+      stockHistory: initialStock > 0 ? [
+        {
+          date: new Date(),
+          type: "Initial",
+          quantity: initialStock,
+          previousStock: 0,
+          newStock: initialStock,
+          reason: "Initial opening stock",
+          performedBy: req.user.name || "User",
+        }
+      ] : [],
     });
 
     // Save product to MongoDB
@@ -207,8 +226,23 @@ export const bulkAddProducts = async (req, res) => {
           if (item.minPrice !== undefined) existing.minPrice = Number(item.minPrice) || 0;
           if (item.gst !== undefined) existing.gst = Number(item.gst) || 0;
           if (item.unit) existing.unit = String(item.unit).trim();
+          if (item.hsnCode) existing.hsnCode = String(item.hsnCode).trim();
+          if (item.batchNo) existing.batchNo = String(item.batchNo).trim();
           if (item.status) existing.status = item.status || "Active";
         }
+
+        if (!Array.isArray(existing.stockHistory)) {
+          existing.stockHistory = [];
+        }
+        existing.stockHistory.push({
+          date: new Date(),
+          type: "Stock Adjustment",
+          quantity: newStock - currentStock,
+          previousStock: currentStock,
+          newStock,
+          reason: "Bulk Import / Update",
+          performedBy: req.user.name || "User",
+        });
 
         await existing.save();
         updatedCount++;
@@ -249,6 +283,8 @@ export const bulkAddProducts = async (req, res) => {
           skuKey = sku.toLowerCase();
         }
 
+        const importStock = Number(item.stock) || 0;
+
         const newDoc = new Product({
           name,
           sku,
@@ -258,13 +294,26 @@ export const bulkAddProducts = async (req, res) => {
           price: Number(item.price) || 0,
           wholesalePrice: Number(item.wholesalePrice) || 0,
           minPrice: Number(item.minPrice) || 0,
-          stock: Number(item.stock) || 0,
+          stock: importStock,
           minStock: Number(item.minStock) || 10,
           gst: Number(item.gst) || 0,
           unit: String(item.unit || "Piece").trim(),
+          hsnCode: String(item.hsnCode || "").trim(),
+          batchNo: String(item.batchNo || "").trim(),
           status: item.status || "Active",
           userId: actualUserId,
           ownerId: effectiveOwnerId,
+          stockHistory: [
+            {
+              date: new Date(),
+              type: "Initial",
+              quantity: importStock,
+              previousStock: 0,
+              newStock: importStock,
+              reason: "Bulk Import Creation",
+              performedBy: req.user.name || "User",
+            },
+          ],
         });
 
         await newDoc.save();
@@ -374,6 +423,7 @@ export const getProducts = async (req, res) => {
             { name: new RegExp(escaped, "i") },
             { sku: new RegExp(escaped, "i") },
             { category: new RegExp(escaped, "i") },
+            { hsnCode: new RegExp(escaped, "i") },
           ],
         },
       ];
@@ -426,6 +476,82 @@ export const getProducts = async (req, res) => {
   }
 };
 
+// Stock Adjustment (Physical Audit, Damaged, Expired, Theft/Loss)
+export const adjustStock = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const effectiveOwnerId = req.user.ownerId || req.user._id;
+    const actualUserId = req.user.actualUserId || req.user._id;
+
+    const product = await Product.findOne({
+      _id: id,
+      $or: [
+        { ownerId: effectiveOwnerId },
+        { userId: effectiveOwnerId },
+        { userId: actualUserId },
+        { ownerId: actualUserId },
+      ],
+    });
+
+    if (!product) {
+      return res.status(404).json({ success: false, message: "Product not found." });
+    }
+
+    const {
+      adjustmentType = "Add", // "Add", "Reduce", "Set Exact"
+      quantity = 0,
+      reason = "Stock Adjustment",
+      notes = "",
+    } = req.body;
+
+    const qty = Number(quantity);
+    if (!Number.isFinite(qty)) {
+      return res.status(400).json({ success: false, message: "Invalid adjustment quantity." });
+    }
+
+    const prevStock = Number(product.stock || 0);
+    let newStock = prevStock;
+    let delta = 0;
+
+    if (adjustmentType === "Add") {
+      delta = Math.abs(qty);
+      newStock = prevStock + delta;
+    } else if (adjustmentType === "Reduce") {
+      delta = -Math.abs(qty);
+      newStock = Math.max(0, prevStock - Math.abs(qty));
+    } else if (adjustmentType === "Set Exact") {
+      newStock = Math.max(0, qty);
+      delta = newStock - prevStock;
+    }
+
+    product.stock = newStock;
+    if (!Array.isArray(product.stockHistory)) {
+      product.stockHistory = [];
+    }
+
+    product.stockHistory.push({
+      date: new Date(),
+      type: "Stock Adjustment",
+      quantity: delta,
+      previousStock: prevStock,
+      newStock,
+      reason: notes ? `${reason} - ${notes}` : reason,
+      performedBy: req.user.name || "User",
+    });
+
+    await product.save();
+
+    return res.status(200).json({
+      success: true,
+      message: `Stock adjusted for "${product.name}". New Stock: ${newStock} ${product.unit || "units"}.`,
+      product,
+    });
+  } catch (error) {
+    console.error("ADJUST STOCK ERROR:", error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 // Update a Single Product
 export const updateProduct = async (req, res) => {
   try {
@@ -433,7 +559,6 @@ export const updateProduct = async (req, res) => {
     const effectiveOwnerId = req.user.ownerId || req.user._id;
     const actualUserId = req.user.actualUserId || req.user._id;
 
-    // Find product belonging to logged-in user or business
     const product = await Product.findOne({
       _id: id,
       $or: [
@@ -464,6 +589,9 @@ export const updateProduct = async (req, res) => {
       stock,
       minStock,
       unit,
+      hsnCode,
+      batchNo,
+      expiryDate,
       status,
     } = req.body;
 
@@ -479,15 +607,18 @@ export const updateProduct = async (req, res) => {
     if (stock !== undefined) product.stock = Number(stock) || 0;
     if (minStock !== undefined) product.minStock = Number(minStock) || 0;
     if (unit !== undefined) product.unit = unit || product.unit;
+    if (hsnCode !== undefined) product.hsnCode = String(hsnCode).trim();
+    if (batchNo !== undefined) product.batchNo = String(batchNo).trim();
+    if (expiryDate !== undefined) product.expiryDate = expiryDate ? new Date(expiryDate) : null;
     if (status !== undefined) product.status = status || product.status;
 
     await product.save();
 
     // Trigger instant alert if updated stock is low or out of stock
     try {
-      const stock = Number(product.stock || 0);
-      const minStock = Number(product.minStock ?? 10);
-      if (stock <= 0) {
+      const currentStock = Number(product.stock || 0);
+      const currentMinStock = Number(product.minStock ?? 10);
+      if (currentStock <= 0) {
         await createNotification({
           ownerId: effectiveOwnerId,
           title: `Out of Stock: ${product.name}`,
@@ -497,15 +628,15 @@ export const updateProduct = async (req, res) => {
           link: "inventory",
           metadata: { productId: product._id, stock: 0 },
         });
-      } else if (stock <= minStock) {
+      } else if (currentStock <= currentMinStock) {
         await createNotification({
           ownerId: effectiveOwnerId,
           title: `Low Stock: ${product.name}`,
-          message: `${product.name} has only ${stock} ${product.unit || "units"} remaining.`,
+          message: `${product.name} has only ${currentStock} ${product.unit || "units"} remaining.`,
           type: "warning",
           category: "stock",
           link: "inventory",
-          metadata: { productId: product._id, stock },
+          metadata: { productId: product._id, stock: currentStock },
         });
       }
     } catch (notifErr) {
@@ -534,7 +665,6 @@ export const deleteProduct = async (req, res) => {
     const effectiveOwnerId = req.user.ownerId || req.user._id;
     const actualUserId = req.user.actualUserId || req.user._id;
 
-    // Delete only if product belongs to logged-in user or business
     const product = await Product.findOneAndDelete({
       _id: id,
       $or: [

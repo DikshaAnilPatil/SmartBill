@@ -15,15 +15,7 @@ const expenseSchema = new mongoose.Schema(
       type: String,
       required: true,
       trim: true,
-      enum: [
-        "Rent",
-        "Utilities",
-        "Salaries",
-        "Marketing",
-        "Logistics",
-        "Maintenance",
-        "Other",
-      ],
+      default: "Other",
     },
 
     description: {
@@ -41,18 +33,13 @@ const expenseSchema = new mongoose.Schema(
     date: {
       type: Date,
       required: true,
+      default: Date.now,
     },
 
     paymentMode: {
       type: String,
       required: true,
-      enum: [
-        "Cash",
-        "Bank Transfer",
-        "UPI",
-        "Credit Card",
-        "Cheque",
-      ],
+      default: "Cash",
     },
 
     reference: {

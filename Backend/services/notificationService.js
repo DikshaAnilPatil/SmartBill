@@ -245,34 +245,6 @@ export const notifySuperAdmins = async ({
         metadata,
       });
     }
-
-    // Direct live broadcast to all connected Super Admin SSE sockets
-    if (superAdminSockets.size > 0) {
-      const payload = {
-        type: "NEW_NOTIFICATION",
-        notification: {
-          title: String(title).trim(),
-          message: String(message).trim(),
-          type,
-          category,
-          link,
-          metadata,
-          read: false,
-          createdAt: new Date().toISOString(),
-        },
-        timestamp: new Date().toISOString(),
-      };
-      const dataStr = `data: ${JSON.stringify(payload)}\n\n`;
-      for (const socket of Array.from(superAdminSockets)) {
-        try {
-          socket.write(dataStr);
-          if (typeof socket.flushHeaders === "function") socket.flushHeaders();
-          if (typeof socket.flush === "function") socket.flush();
-        } catch (err) {
-          superAdminSockets.delete(socket);
-        }
-      }
-    }
   } catch (err) {
     console.error("[NotificationService] notifySuperAdmins error:", err.message);
   }

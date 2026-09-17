@@ -58,6 +58,9 @@ export default function PurchaseScreen() {
   const [supplier, setSupplier] = useState("");
   const [supplierInvoiceNo, setSupplierInvoiceNo] = useState("");
   const [purchaseOrderNo, setPurchaseOrderNo] = useState("");
+  const [eWayBillNo, setEWayBillNo] = useState("");
+  const [taxType, setTaxType] = useState("GST Regular");
+  const [itcEligible, setItcEligible] = useState(true);
   const [purchaseDate, setPurchaseDate] = useState(
     new Date().toISOString().slice(0, 10)
   );
@@ -107,6 +110,10 @@ export default function PurchaseScreen() {
       discount: 0,
       amount: 0,
       gstAmount: 0,
+      hsnCode: "",
+      batchNo: "",
+      expiryDate: "",
+      itcEligible: true,
     },
   ]);
 
@@ -377,6 +384,11 @@ export default function PurchaseScreen() {
                 ? selected.cost
                 : selected.price || 0;
             next.gstRate = selected.gst !== undefined ? Number(selected.gst) : 18;
+            next.hsnCode = selected.hsnCode || "";
+            next.batchNo = selected.batchNo || "";
+            if (selected.expiryDate) {
+              next.expiryDate = new Date(selected.expiryDate).toISOString().slice(0, 10);
+            }
           } else {
             // Free-form typed product name (manual new item)
             next.productId = null;
@@ -448,6 +460,10 @@ export default function PurchaseScreen() {
         discount: 0,
         amount: 0,
         gstAmount: 0,
+        hsnCode: "",
+        batchNo: "",
+        expiryDate: "",
+        itcEligible: true,
       },
     ]);
   };
@@ -464,6 +480,9 @@ export default function PurchaseScreen() {
     setSupplier(supplierList[0]?.name || "");
     setSupplierInvoiceNo("");
     setPurchaseOrderNo("");
+    setEWayBillNo("");
+    setTaxType("GST Regular");
+    setItcEligible(true);
     setPurchaseDate(new Date().toISOString().slice(0, 10));
     setDueDate("");
     setPaymentStatus("Unpaid");
@@ -481,6 +500,10 @@ export default function PurchaseScreen() {
         discount: 0,
         amount: 0,
         gstAmount: 0,
+        hsnCode: "",
+        batchNo: "",
+        expiryDate: "",
+        itcEligible: true,
       },
     ]);
   };
@@ -664,6 +687,10 @@ export default function PurchaseScreen() {
         gstAmount: item.gstAmount,
         discount: disc,
         itemAmount: item.amount,
+        hsnCode: item.hsnCode ? String(item.hsnCode).trim() : "",
+        batchNo: item.batchNo ? String(item.batchNo).trim() : "",
+        expiryDate: item.expiryDate || null,
+        itcEligible: item.itcEligible !== false,
       });
     }
 
@@ -697,6 +724,9 @@ export default function PurchaseScreen() {
       supplierName: supplier,
       supplierInvoiceNo,
       purchaseOrderNo,
+      eWayBillNo,
+      taxType,
+      itcEligible,
       purchaseDate,
       dueDate: dueDate || null,
       items: validItems,
@@ -807,15 +837,20 @@ export default function PurchaseScreen() {
           <div className="lg:col-span-2 space-y-5">
             {/* Purchase Details Form */}
             <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-sm">
-              <h3 className="font-semibold text-slate-900 dark:text-slate-100 text-sm mb-4">
-                Purchase Details
-              </h3>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-semibold text-slate-900 dark:text-slate-100 text-sm">
+                  Procurement & Vendor Details
+                </h3>
+                <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300">
+                  GST Tax Inward
+                </span>
+              </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 {/* Supplier */}
-                <div>
+                <div className="sm:col-span-1">
                   <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
-                    Supplier <span className="text-red-500">*</span>
+                    Supplier / Vendor <span className="text-red-500">*</span>
                   </label>
                   <select
                     value={supplier}
@@ -825,7 +860,7 @@ export default function PurchaseScreen() {
                     <option value="">Select Supplier</option>
                     {supplierList.map((s) => (
                       <option key={s._id || s.id} value={s.name}>
-                        {s.name}
+                        {s.name} {s.gstin || s.gst ? `[${s.gstin || s.gst}]` : ""}
                       </option>
                     ))}
                   </select>
@@ -834,33 +869,49 @@ export default function PurchaseScreen() {
                 {/* Supplier Invoice No */}
                 <div>
                   <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
-                    Supplier Invoice No.
+                    Supplier Invoice / Bill #
                   </label>
                   <input
                     type="text"
                     value={supplierInvoiceNo}
                     onChange={(e) => setSupplierInvoiceNo(e.target.value)}
-                    className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white placeholder-slate-400 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                    placeholder="e.g. TAX/2026/0892"
+                    className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white placeholder-slate-400 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 font-mono"
                   />
                 </div>
 
                 {/* Purchase Order No */}
                 <div>
                   <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
-                    Purchase Order No. (Optional)
+                    Purchase Order (PO) #
                   </label>
                   <input
                     type="text"
                     value={purchaseOrderNo}
                     onChange={(e) => setPurchaseOrderNo(e.target.value)}
-                    className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white placeholder-slate-400 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                    placeholder="e.g. PO-2026-0041"
+                    className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white placeholder-slate-400 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 font-mono"
+                  />
+                </div>
+
+                {/* E-Way Bill No */}
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
+                    E-Way Bill # (Optional)
+                  </label>
+                  <input
+                    type="text"
+                    value={eWayBillNo}
+                    onChange={(e) => setEWayBillNo(e.target.value)}
+                    placeholder="e.g. 1210-9842-1100"
+                    className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white placeholder-slate-400 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 font-mono"
                   />
                 </div>
 
                 {/* Purchase Date */}
                 <div>
                   <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
-                    Purchase Date <span className="text-red-500">*</span>
+                    Invoice Date <span className="text-red-500">*</span>
                   </label>
                   <input
                     type="date"
@@ -871,9 +922,9 @@ export default function PurchaseScreen() {
                 </div>
 
                 {/* Due Date */}
-                <div className="sm:col-span-2">
+                <div>
                   <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
-                    Due Date (Optional)
+                    Payment Due Date
                   </label>
                   <input
                     type="date"
@@ -881,6 +932,43 @@ export default function PurchaseScreen() {
                     onChange={(e) => setDueDate(e.target.value)}
                     className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                   />
+                </div>
+
+                {/* Tax Regime & ITC Toggle */}
+                <div className="sm:col-span-3 grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-slate-100 dark:border-slate-800">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
+                      Tax Type / Inward Regime
+                    </label>
+                    <select
+                      value={taxType}
+                      onChange={(e) => setTaxType(e.target.value)}
+                      className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-900 dark:text-white outline-none focus:border-blue-500"
+                    >
+                      <option value="GST Regular">GST Regular (Standard Tax Invoice)</option>
+                      <option value="RCM">RCM (Reverse Charge Mechanism)</option>
+                      <option value="SEZ / Zero-Rated">SEZ / Zero-Rated Inward</option>
+                      <option value="Exempt">Exempt / Non-GST Goods</option>
+                    </select>
+                  </div>
+
+                  <div className="flex items-center justify-between sm:justify-start gap-4 mt-4 sm:mt-5">
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={itcEligible}
+                        onChange={(e) => setItcEligible(e.target.checked)}
+                        className="sr-only peer"
+                      />
+                      <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all dark:border-slate-600 peer-checked:bg-emerald-600"></div>
+                      <span className="ml-2.5 text-xs font-semibold text-slate-800 dark:text-slate-200">
+                        Input Tax Credit (ITC) Eligible
+                      </span>
+                    </label>
+                    <span className="text-[10px] text-slate-500">
+                      (Claims tax credit in GSTR-2B)
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -890,7 +978,7 @@ export default function PurchaseScreen() {
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2">
                   <h3 className="font-semibold text-slate-900 dark:text-slate-100 text-sm">
-                    Products
+                    Inward Line Items & Stock Valuation
                   </h3>
                   <span className="text-xs text-slate-500 dark:text-slate-400">
                     ({items.length} item{items.length !== 1 ? "s" : ""})
@@ -921,20 +1009,22 @@ export default function PurchaseScreen() {
                 <table className="w-full text-xs text-left">
                   <thead>
                     <tr className="border-b border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 font-semibold">
-                      <th className="pb-2 min-w-[190px]">Product / Item Name *</th>
+                      <th className="pb-2 min-w-[200px]">Product / Item *</th>
+                      <th className="pb-2 w-20">HSN/SAC</th>
+                      <th className="pb-2 w-24">Batch #</th>
+                      <th className="pb-2 w-24">Expiry</th>
                       <th className="pb-2 w-16 text-center">Qty *</th>
-
-                      <th className="pb-2 w-24 text-right">Rate *</th>
-                      <th className="pb-2 w-20 text-center">GST %</th>
-                      <th className="pb-2 w-20 text-right">Discount</th>
-                      <th className="pb-2 w-24 text-right">Amount</th>
+                      <th className="pb-2 w-20 text-right">Rate (₹) *</th>
+                      <th className="pb-2 w-16 text-center">GST %</th>
+                      <th className="pb-2 w-16 text-right">Disc (₹)</th>
+                      <th className="pb-2 w-24 text-right">Amount (₹)</th>
                       <th className="pb-2 w-8 text-center"></th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                     {items.map((item, i) => (
-                      <tr key={i} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40">
-                        {/* Product Search / Free-form Input */}
+                      <tr key={i} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40 align-top">
+                        {/* Product Search & WAC Impact Preview */}
                         <td className="py-2.5 pr-2">
                           <div className="relative">
                             <input
@@ -964,26 +1054,66 @@ export default function PurchaseScreen() {
                                 (p.name && p.name.trim().toLowerCase() === trimmedName.toLowerCase())
                             );
                             if (matchedProduct) {
-                              const cur = Number(matchedProduct.stock || 0);
-                              const add = Number(item.qty || 0);
+                              const curStock = Math.max(0, Number(matchedProduct.stock || 0));
+                              const curCost = Number(matchedProduct.cost || 0);
+                              const inQty = Number(item.qty || 0);
+                              const inRate = Number(item.rate || 0);
+                              const wac = (curStock + inQty > 0 && inRate > 0)
+                                ? Math.round((((curStock * curCost) + (inQty * inRate)) / (curStock + inQty)) * 100) / 100
+                                : inRate > 0 ? inRate : curCost;
+                              const diffPercent = curCost > 0 ? (((wac - curCost) / curCost) * 100).toFixed(1) : 0;
+
                               return (
-                                <div className="flex items-center gap-1.5 mt-1 text-[10px] text-slate-500">
-                                  <span>In Stock: <strong className="text-slate-700 dark:text-slate-300 font-mono">{cur}</strong></span>
-                                  <span>➔</span>
-                                  <span className="font-semibold text-emerald-600 dark:text-emerald-400">
-                                    After Bill: {cur + add} {matchedProduct.unit || "Piece"}
+                                <div className="flex items-center gap-1.5 mt-1.5 flex-wrap text-[10px]">
+                                  <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                                    Stock: <strong className="font-mono">{curStock}</strong> ➔ <strong className="text-emerald-600 font-mono">{curStock + inQty}</strong> {matchedProduct.unit || "Piece"}
+                                  </span>
+                                  <span className="px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300">
+                                    Cost: ₹{curCost} ➔ <strong>New WAC: ₹{wac.toFixed(2)}</strong> {diffPercent !== "0.0" && diffPercent !== 0 && `(${Number(diffPercent) > 0 ? "+" : ""}${diffPercent}%)`}
                                   </span>
                                 </div>
                               );
                             } else {
                               return (
-                                <div className="flex items-center gap-1 mt-1 text-[10px] text-purple-600 dark:text-purple-400 font-medium">
+                                <div className="flex items-center gap-1 mt-1.5 text-[10px] text-purple-600 dark:text-purple-400 font-medium">
                                   <Sparkles className="w-3 h-3" />
-                                  <span>New item: will be auto-added to your catalog</span>
+                                  <span>Auto-catalogs new item at unit cost ₹{Number(item.rate || 0)}</span>
                                 </div>
                               );
                             }
                           })()}
+                        </td>
+
+                        {/* HSN Code */}
+                        <td className="py-2.5 px-1">
+                          <input
+                            type="text"
+                            value={item.hsnCode || ""}
+                            onChange={(e) => updateItem(i, "hsnCode", e.target.value)}
+                            placeholder="HSN"
+                            className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md px-1.5 py-1.5 text-xs text-slate-900 dark:text-white outline-none focus:border-blue-500 font-mono placeholder-slate-400"
+                          />
+                        </td>
+
+                        {/* Batch No */}
+                        <td className="py-2.5 px-1">
+                          <input
+                            type="text"
+                            value={item.batchNo || ""}
+                            onChange={(e) => updateItem(i, "batchNo", e.target.value)}
+                            placeholder="Batch #"
+                            className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md px-1.5 py-1.5 text-xs text-slate-900 dark:text-white outline-none focus:border-blue-500 font-mono placeholder-slate-400"
+                          />
+                        </td>
+
+                        {/* Expiry Date */}
+                        <td className="py-2.5 px-1">
+                          <input
+                            type="date"
+                            value={item.expiryDate ? item.expiryDate.slice(0, 10) : ""}
+                            onChange={(e) => updateItem(i, "expiryDate", e.target.value)}
+                            className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md px-1 py-1.5 text-[11px] text-slate-900 dark:text-white outline-none focus:border-blue-500"
+                          />
                         </td>
 
                         {/* Qty */}
@@ -995,8 +1125,6 @@ export default function PurchaseScreen() {
                             inputClassName="w-12 py-1.5 font-mono"
                           />
                         </td>
-
-
 
                         {/* Rate */}
                         <td className="py-2.5 px-1">
@@ -1089,23 +1217,23 @@ export default function PurchaseScreen() {
             </div>
           </div>
 
-          {/* ── Right Column: Payment Summary ── */}
+          {/* ── Right Column: Payment & Tax Summary ── */}
           <div className="space-y-4">
             <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-sm">
               <h3 className="font-semibold text-slate-900 dark:text-slate-100 text-sm mb-4">
-                Payment Summary
+                Tax & Payment Summary
               </h3>
 
               <div className="space-y-2.5 text-xs">
                 <div className="flex justify-between text-slate-600 dark:text-slate-400">
-                  <span>Subtotal</span>
+                  <span>Taxable Subtotal</span>
                   <span className="font-mono text-slate-900 dark:text-slate-100 font-medium">
                     {fmt(subtotal)}
                   </span>
                 </div>
 
                 <div className="flex justify-between text-slate-600 dark:text-slate-400">
-                  <span>GST</span>
+                  <span>Total Inward GST</span>
                   <span className="font-mono text-emerald-600 dark:text-emerald-400 font-medium">
                     + {fmt(totalGst)}
                   </span>
@@ -1121,11 +1249,23 @@ export default function PurchaseScreen() {
                 )}
 
                 <div className="flex justify-between border-t border-slate-200 dark:border-slate-800 pt-3 text-sm font-bold text-slate-900 dark:text-white">
-                  <span>Total Amount</span>
+                  <span>Gross Invoice Total</span>
                   <span className="font-mono text-blue-600 dark:text-blue-400">
                     {fmt(totalAmount)}
                   </span>
                 </div>
+
+                {/* ITC Claim Summary Pill */}
+                {itcEligible ? (
+                  <div className="mt-2 p-2.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/80 flex items-center gap-2 text-[11px] text-emerald-700 dark:text-emerald-300 font-medium">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span>₹{totalGst.toLocaleString("en-IN")} Eligible for GSTR-2B ITC Claim</span>
+                  </div>
+                ) : (
+                  <div className="mt-2 p-2.5 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/80 text-[11px] text-amber-700 dark:text-amber-300">
+                    ITC Ineligible (Tax will be booked to expense)
+                  </div>
+                )}
               </div>
 
               <div className="mt-5 space-y-4 pt-4 border-t border-slate-100 dark:border-slate-800">

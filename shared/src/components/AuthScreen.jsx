@@ -12,6 +12,8 @@ import {
   Mail,
   Phone,
   Send,
+  ShieldAlert,
+  X,
 } from "lucide-react";
 import {
   Btn,
@@ -116,6 +118,23 @@ export default function AuthScreen({ view, onNav, onLogin, fixedRole }) {
   const [registerPhoneError, setRegisterPhoneError] = useState("");
   const [registerNameError, setRegisterNameError] = useState("");
   const [formError, setFormError] = useState("");
+  const [suspensionNotice, setSuspensionNotice] = useState(null); // { reason: string, message: string }
+
+  // Check for any redirect suspension notice from active session
+  useEffect(() => {
+    if (view === "login") {
+      try {
+        const storedNotice = sessionStorage.getItem("smartbill_suspension_notice");
+        if (storedNotice) {
+          const parsed = JSON.parse(storedNotice);
+          if (parsed && (parsed.reason || parsed.message)) {
+            setSuspensionNotice(parsed);
+          }
+          sessionStorage.removeItem("smartbill_suspension_notice");
+        }
+      } catch {}
+    }
+  }, [view]);
 
   const [toast, setToast] = useState(null);
   const showToast = (msg, type) => {
@@ -189,6 +208,7 @@ export default function AuthScreen({ view, onNav, onLogin, fixedRole }) {
     setLoginPhoneError(errPhone);
     setLoginPasswordError(errPassword);
     setFormError("");
+    setSuspensionNotice(null);
 
     if (errEmail || errPhone || errPassword) return;
 
@@ -227,7 +247,22 @@ export default function AuthScreen({ view, onNav, onLogin, fixedRole }) {
         window.location.href = "/app";
       }
     } catch (err) {
-      setFormError(err.message || "Login failed. Please try again.");
+      if (
+        err.isSuspended ||
+        err.status === 403 && (err.suspensionReason || /suspended/i.test(err.message))
+      ) {
+        let reason = err.suspensionReason || "";
+        if (!reason && err.message && /reason:\s*/i.test(err.message)) {
+          const match = err.message.match(/reason:\s*(.*)$/i);
+          if (match && match[1]) reason = match[1].trim();
+        }
+        setSuspensionNotice({
+          reason: reason || err.suspensionReason || "",
+          message: err.message || "Your business account has been suspended by administration.",
+        });
+      } else {
+        setFormError(err.message || "Login failed. Please try again.");
+      }
     } finally {
       setLoading(false);
     }
@@ -309,11 +344,23 @@ export default function AuthScreen({ view, onNav, onLogin, fixedRole }) {
 
     setOtpSending(true);
     try {
-      const data = await sendOtp({ phone: getCleanPhone() });
+      const cleanEmail = email && typeof email === "string" ? email.trim() : undefined;
+      const data = await sendOtp({
+        phone: getCleanPhone(),
+        email: cleanEmail && isValidEmail(cleanEmail) ? cleanEmail : undefined,
+      });
       setOtpSent(true);
       setPhoneVerified(false);
-      setOtp("");
-      showToast("OTP sent successfully. Please check your phone.", "success");
+      if (data?.otp) {
+        setOtp(String(data.otp));
+      }
+      setResendCooldown(60);
+      showToast(
+        data?.otp
+          ? `Verification OTP: ${data.otp}`
+          : "OTP sent successfully! Please check your phone/email.",
+        "success"
+      );
     } catch (err) {
       if (err.field === "phone") {
         setRegisterPhoneError(err.message);
@@ -336,7 +383,7 @@ export default function AuthScreen({ view, onNav, onLogin, fixedRole }) {
       await verifyOtp({ phone: getCleanPhone(), otp: cleanOtp });
       setPhoneVerified(true);
       setOtpError("");
-      showToast("Phone number verified successfully.", "success");
+      showToast("Phone number verified successfully! You can now create your account.", "success");
     } catch (err) {
       setOtpError(err.message || "OTP verification failed. Please try again.");
     } finally {
@@ -536,6 +583,31 @@ export default function AuthScreen({ view, onNav, onLogin, fixedRole }) {
               <p className="text-sm text-slate-500 mb-6">
                 Sign in to your SmartBill account
               </p>
+
+              {/* Simple 2-Line Suspension Reason Alert */}
+              {suspensionNotice && (
+                <div className="mb-4 flex items-start gap-2.5 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800/80 text-red-700 dark:text-red-300 text-xs rounded-xl p-3 animate-in fade-in duration-150">
+                  <AlertCircle className="w-4 h-4 flex-shrink-0 text-red-600 dark:text-red-400 mt-0.5" />
+                  <div className="flex-1 min-w-0">
+                    <div className="font-semibold text-red-900 dark:text-red-200">
+                      Account Suspended
+                    </div>
+                    <div className="text-[11px] text-red-800 dark:text-red-300 mt-0.5 break-words">
+                      <span className="font-medium text-red-950 dark:text-red-100">Reason:</span>{" "}
+                      {suspensionNotice.reason ? `"${suspensionNotice.reason}"` : "Suspended by administration. Please contact support."}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSuspensionNotice(null)}
+                    className="text-red-400 hover:text-red-600 p-0.5 rounded transition-colors"
+                    title="Dismiss"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
+
               <div className="space-y-4">
                 {formError && (
                   <div className="flex items-center gap-2 bg-red-50 border border-red-200 text-red-600 text-xs rounded-lg px-3 py-2">
@@ -558,6 +630,8 @@ export default function AuthScreen({ view, onNav, onLogin, fixedRole }) {
                             setLoginMethod(m);
                             setLoginEmailError("");
                             setLoginPhoneError("");
+                            setSuspensionNotice(null);
+                            setFormError("");
                           }}
                           className={`flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 ${active ? "bg-white text-blue-700 shadow-sm ring-1 ring-slate-200" : "text-slate-500 hover:text-slate-700"}`}
                         >
@@ -584,6 +658,7 @@ export default function AuthScreen({ view, onNav, onLogin, fixedRole }) {
                     onChange={(v) => {
                       const trimmed = String(v ?? "").trimStart();
                       setEmail(trimmed);
+                      setSuspensionNotice(null);
                       if (trimmed && isValidEmail(trimmed))
                         setLoginEmailError("");
                       else setLoginEmailError(getLoginEmailError(trimmed));
@@ -601,6 +676,7 @@ export default function AuthScreen({ view, onNav, onLogin, fixedRole }) {
                       value={loginPhone}
                       onChange={(value) => {
                         setLoginPhone(value);
+                        setSuspensionNotice(null);
                         setLoginPhoneError(validatePhone(value, false));
                       }}
                       error={loginPhoneError}
@@ -613,6 +689,7 @@ export default function AuthScreen({ view, onNav, onLogin, fixedRole }) {
                   value={password}
                   onChange={(v) => {
                     setPassword(v);
+                    setSuspensionNotice(null);
                     const err = validateLoginPassword(v);
                     if (!err) setLoginPasswordError("");
                     else setLoginPasswordError(err);
@@ -764,29 +841,67 @@ export default function AuthScreen({ view, onNav, onLogin, fixedRole }) {
                           : "Send OTP"}
                     </Btn>
                   </div>
-                  {otpSent && (
-                    <p className="text-xs text-emerald-600">
-                      OTP sent to {phone}. Use the code shown below.
-                    </p>
+                  {phoneVerified && (
+                    <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs rounded-lg px-3 py-2 mt-1">
+                      <CheckCircle className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                      <span className="font-medium">Phone number verified successfully.</span>
+                    </div>
                   )}
-                  {otpError && !otpSent && (
+                  {otpError && !otpSent && !phoneVerified && (
                     <p className="text-xs text-red-600 mt-0.5">{otpError}</p>
                   )}
                 </div>
 
                 {otpSent && !phoneVerified && (
-                  <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 -mt-1">
+                  <div className="bg-blue-50/60 border border-blue-200/80 rounded-xl p-3.5 space-y-3 animate-in fade-in duration-200">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-semibold text-blue-950 flex items-center gap-1.5">
+                        <KeyRound className="w-3.5 h-3.5 text-blue-600" />
+                        Verification Code
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handleSendOtp}
+                        disabled={otpSending || resendCooldown > 0}
+                        className={`text-[11px] ${
+                          resendCooldown > 0
+                            ? "text-slate-400 cursor-not-allowed"
+                            : "text-blue-600 font-medium hover:underline cursor-pointer"
+                        }`}
+                      >
+                        {resendCooldown > 0 ? `Resend in ${resendCooldown}s` : "Resend OTP"}
+                      </button>
+                    </div>
+
+                    {otp && (
+                      <div className="flex items-center justify-between bg-white border border-blue-200 rounded-lg px-3 py-2">
+                        <div>
+                          <span className="text-[11px] text-slate-500 block">Your 6-Digit OTP:</span>
+                          <span className="font-mono text-base font-bold text-blue-700 tracking-widest">{otp}</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            handleVerifyOtp();
+                          }}
+                          className="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-md transition-colors cursor-pointer shadow-xs"
+                        >
+                          Verify Now →
+                        </button>
+                      </div>
+                    )}
+
                     <div className="flex items-start gap-2">
                       <div className="flex-1">
                         <Input
-                          label="Enter OTP"
+                          label="Enter 6-Digit Code"
                           value={otp}
                           onChange={(v) => {
                             setOtp(v.replace(/\D/g, "").slice(0, 6));
                             setOtpError("");
                           }}
-                          placeholder="6-digit code"
-                          inputClassName="tracking-widest"
+                          placeholder="6-digit OTP"
+                          inputClassName="tracking-widest font-mono text-center font-bold text-base"
                           error={otpError}
                         />
                       </div>
@@ -794,12 +909,14 @@ export default function AuthScreen({ view, onNav, onLogin, fixedRole }) {
                         variant="primary"
                         size="md"
                         onClick={handleVerifyOtp}
-                        disabled={otpVerifying}
+                        disabled={otpVerifying || String(otp || "").length !== 6}
                         className="h-[42px] mt-[18px] shrink-0"
                         icon={
                           otpVerifying ? (
                             <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                          ) : undefined
+                          ) : (
+                            <Check className="w-4 h-4" />
+                          )
                         }
                       >
                         {otpVerifying ? "Verifying..." : "Verify"}

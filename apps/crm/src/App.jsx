@@ -91,12 +91,15 @@ function AppRoutes() {
   useEffect(() => {
     const syncUser = () => {
       try {
+        const token = localStorage.getItem("smartbill_token");
         const raw = localStorage.getItem("smartbill_user");
-        if (raw) {
-          const parsed = JSON.parse(raw);
-          setUser(parsed);
-          if (parsed.role) setRole(parsed.role);
+        if (!token || !raw) {
+          setUser(null);
+          return;
         }
+        const parsed = JSON.parse(raw);
+        setUser(parsed);
+        if (parsed.role) setRole(parsed.role);
       } catch {}
     };
     const token = localStorage.getItem("smartbill_token");

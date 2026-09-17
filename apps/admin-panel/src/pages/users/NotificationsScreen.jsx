@@ -10,41 +10,40 @@ import {
   RefreshCw,
   Search,
   ArrowRight,
-  Package,
-  ShoppingCart,
-  Receipt,
-  CreditCard,
-  Users,
-  ShieldCheck,
   Check,
 } from "lucide-react";
 import { useNotifications } from "@shared/hooks/useNotifications";
 import { Btn, Card, Badge, EmptyState, ConfirmDialog } from "@shared/components/common/ui";
 
 function formatRelativeTime(dateString) {
-  if (!dateString) return "Recently";
-  const date = new Date(dateString);
-  if (isNaN(date.getTime())) return "Recently";
+  try {
+    if (!dateString) return "Recently";
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) return "Recently";
 
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffSec = Math.floor(diffMs / 1000);
-  const diffMin = Math.floor(diffSec / 60);
-  const diffHour = Math.floor(diffMin / 60);
-  const diffDay = Math.floor(diffHour / 24);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    if (diffMs < 0) return "Just now";
+    const diffSec = Math.floor(diffMs / 1000);
+    const diffMin = Math.floor(diffSec / 60);
+    const diffHour = Math.floor(diffMin / 60);
+    const diffDay = Math.floor(diffHour / 24);
 
-  if (diffSec < 45) return "Just now";
-  if (diffMin < 60) return `${diffMin}m ago`;
-  if (diffHour < 24) return `${diffHour}h ago`;
-  if (diffDay === 1) return "Yesterday";
-  if (diffDay < 7) return `${diffDay}d ago`;
+    if (diffSec < 45) return "Just now";
+    if (diffMin < 60) return `${diffMin}m ago`;
+    if (diffHour < 24) return `${diffHour}h ago`;
+    if (diffDay === 1) return "Yesterday";
+    if (diffDay < 7) return `${diffDay}d ago`;
 
-  return date.toLocaleDateString("en-IN", {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+    return date.toLocaleDateString("en-IN", {
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch (_) {
+    return "Recently";
+  }
 }
 
 const SUPER_ADMIN_CATEGORIES = [
@@ -71,9 +70,9 @@ export default function NotificationsScreen({ onNav, user, role }) {
   const categoryOptions = isSuperAdmin ? SUPER_ADMIN_CATEGORIES : OWNER_CATEGORIES;
 
   const {
-    notifications,
-    unreadCount,
-    loading,
+    notifications = [],
+    unreadCount = 0,
+    loading = false,
     markAsRead,
     markAllAsRead,
     deleteNotification,
@@ -89,12 +88,15 @@ export default function NotificationsScreen({ onNav, user, role }) {
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
-    await refresh();
+    if (refresh) await refresh();
     setTimeout(() => setIsRefreshing(false), 400);
   };
 
+  const safeNotifications = Array.isArray(notifications) ? notifications : [];
+
   const filteredNotifications = useMemo(() => {
-    return notifications.filter((notif) => {
+    return safeNotifications.filter((notif) => {
+      if (!notif) return false;
       // If superadmin, completely filter out any stock notifications that might exist in memory
       if (isSuperAdmin && notif.category === "stock") return false;
 
@@ -104,13 +106,13 @@ export default function NotificationsScreen({ onNav, user, role }) {
       }
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
-        const titleMatch = (notif.title || "").toLowerCase().includes(q);
-        const msgMatch = (notif.message || "").toLowerCase().includes(q);
+        const titleMatch = String(notif.title || "").toLowerCase().includes(q);
+        const msgMatch = String(notif.message || "").toLowerCase().includes(q);
         if (!titleMatch && !msgMatch) return false;
       }
       return true;
     });
-  }, [notifications, activeTab, selectedCategory, searchQuery, isSuperAdmin]);
+  }, [safeNotifications, activeTab, selectedCategory, searchQuery, isSuperAdmin]);
 
   const getTypeIcon = (type) => {
     switch (type) {
@@ -195,10 +197,10 @@ export default function NotificationsScreen({ onNav, user, role }) {
   return (
     <div className="max-w-4xl mx-auto space-y-4">
       {/* ── Page Header ── */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-gray-200">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-gray-200 dark:border-slate-800">
         <div>
-          <h2 className="text-lg font-bold text-slate-900">Notifications</h2>
-          <p className="text-xs text-slate-500">
+          <h2 className="text-lg font-bold text-slate-900 dark:text-white">Notifications</h2>
+          <p className="text-xs text-slate-500 dark:text-slate-400">
             {unreadCount > 0
               ? `${unreadCount} unread notification${unreadCount > 1 ? "s" : ""}`
               : "All notifications are read"}
@@ -212,7 +214,7 @@ export default function NotificationsScreen({ onNav, user, role }) {
             size="sm"
             onClick={handleRefresh}
             disabled={isRefreshing}
-            className="text-xs text-slate-600 hover:text-slate-900"
+            className="text-xs text-slate-600 dark:text-slate-300 hover:text-slate-900"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? "animate-spin" : ""}`} />
             Refresh
@@ -222,7 +224,7 @@ export default function NotificationsScreen({ onNav, user, role }) {
             <Btn
               variant="outline"
               size="sm"
-              onClick={markAllAsRead}
+              onClick={() => markAllAsRead && markAllAsRead()}
               className="text-xs"
             >
               <CheckCheck className="w-3.5 h-3.5 mr-1" />
@@ -230,12 +232,12 @@ export default function NotificationsScreen({ onNav, user, role }) {
             </Btn>
           )}
 
-          {notifications.length > 0 && (
+          {safeNotifications.length > 0 && (
             <Btn
               variant="ghost"
               size="sm"
               onClick={() => setShowClearConfirm(true)}
-              className="text-xs text-red-600 hover:text-red-700 hover:bg-red-50"
+              className="text-xs text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/30"
             >
               <Trash2 className="w-3.5 h-3.5 mr-1" />
               Clear all
@@ -247,25 +249,25 @@ export default function NotificationsScreen({ onNav, user, role }) {
       {/* ── Controls: Tabs + Filter + Search ── */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         {/* All / Unread Tabs */}
-        <div className="flex items-center bg-gray-100 p-0.5 rounded-lg border border-gray-200 w-fit">
+        <div className="flex items-center bg-gray-100 dark:bg-slate-800 p-0.5 rounded-lg border border-gray-200 dark:border-slate-700 w-fit">
           <button
             type="button"
             onClick={() => setActiveTab("all")}
             className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors cursor-pointer ${
               activeTab === "all"
-                ? "bg-white text-slate-900 shadow-xs"
-                : "text-slate-600 hover:text-slate-900"
+                ? "bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs"
+                : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
             }`}
           >
-            All ({notifications.length})
+            All ({safeNotifications.length})
           </button>
           <button
             type="button"
             onClick={() => setActiveTab("unread")}
             className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors cursor-pointer ${
               activeTab === "unread"
-                ? "bg-white text-slate-900 shadow-xs"
-                : "text-slate-600 hover:text-slate-900"
+                ? "bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs"
+                : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
             }`}
           >
             <span>Unread</span>
@@ -282,7 +284,7 @@ export default function NotificationsScreen({ onNav, user, role }) {
           <select
             value={selectedCategory}
             onChange={(e) => setSelectedCategory(e.target.value)}
-            className="border border-gray-300 rounded-md bg-white text-xs text-gray-700 px-2.5 py-1.5 outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 cursor-pointer"
+            className="border border-gray-300 dark:border-slate-700 rounded-md bg-white dark:bg-slate-800 text-xs text-gray-700 dark:text-slate-200 px-2.5 py-1.5 outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 cursor-pointer"
           >
             {categoryOptions.map((opt) => (
               <option key={opt.value} value={opt.value}>
@@ -295,9 +297,10 @@ export default function NotificationsScreen({ onNav, user, role }) {
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
             <input
               type="text"
+              placeholder="Search notifications..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-8 pr-3 py-1.5 text-xs bg-white border border-gray-300 rounded-md text-gray-900 placeholder:text-gray-400 outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+              className="w-full pl-8 pr-3 py-1.5 text-xs bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-700 rounded-md text-gray-900 dark:text-white placeholder:text-gray-400 outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
             />
           </div>
         </div>
@@ -305,7 +308,7 @@ export default function NotificationsScreen({ onNav, user, role }) {
 
       {/* ── Main Notifications Card ── */}
       <Card className="overflow-hidden">
-        {loading && notifications.length === 0 ? (
+        {loading && safeNotifications.length === 0 ? (
           <div className="p-8 text-center text-xs text-slate-400">
             <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2 text-slate-400" />
             Loading notifications...
@@ -323,7 +326,7 @@ export default function NotificationsScreen({ onNav, user, role }) {
                   : "You're all caught up! New sales, inventory alerts, and updates will appear here."
               }
               action={
-                (searchQuery || selectedCategory !== "all" || activeTab === "unread") && (
+                (searchQuery || selectedCategory !== "all" || activeTab === "unread") ? (
                   <Btn
                     variant="outline"
                     size="sm"
@@ -336,22 +339,29 @@ export default function NotificationsScreen({ onNav, user, role }) {
                   >
                     Reset filters
                   </Btn>
-                )
+                ) : null
               }
             />
           </div>
         ) : (
-          <div className="divide-y divide-gray-100">
-            {filteredNotifications.map((n) => {
-              const notifId = n._id || n.id;
+          <div className="divide-y divide-gray-100 dark:divide-slate-800">
+            {filteredNotifications.map((n, idx) => {
+              if (!n) return null;
+              const notifId = n._id || n.id || `temp-notif-${idx}`;
               const notifType = n.type || "info";
               const isUnread = !n.read;
+              const categoryStr = typeof n.category === "string" ? n.category : "";
+              const categoryLabel = categoryStr
+                ? categoryStr.charAt(0).toUpperCase() + categoryStr.slice(1)
+                : "";
 
               return (
                 <div
                   key={notifId}
                   className={`group p-4 flex items-start gap-3.5 transition-colors ${
-                    isUnread ? "bg-white hover:bg-slate-50/80" : "bg-slate-50/40 hover:bg-slate-100/60 opacity-85 hover:opacity-100"
+                    isUnread
+                      ? "bg-white dark:bg-slate-900 hover:bg-slate-50/80 dark:hover:bg-slate-800/60"
+                      : "bg-slate-50/40 dark:bg-slate-950/40 hover:bg-slate-100/60 dark:hover:bg-slate-800/40 opacity-85 hover:opacity-100"
                   }`}
                 >
                   {/* Type Icon */}
@@ -371,14 +381,20 @@ export default function NotificationsScreen({ onNav, user, role }) {
                         <span className="w-2 h-2 rounded-full bg-blue-600 flex-shrink-0" />
                       )}
 
-                      <h4 className={`text-sm font-semibold ${isUnread ? "text-slate-900" : "text-slate-700"}`}>
-                        {n.title}
+                      <h4
+                        className={`text-sm font-semibold ${
+                          isUnread
+                            ? "text-slate-900 dark:text-white"
+                            : "text-slate-700 dark:text-slate-300"
+                        }`}
+                      >
+                        {n.title || "Notification"}
                       </h4>
 
-                      {n.category && (
+                      {categoryStr && (
                         <Badge
-                          label={n.category.charAt(0).toUpperCase() + n.category.slice(1)}
-                          variant={getCategoryBadgeVariant(n.category)}
+                          label={categoryLabel}
+                          variant={getCategoryBadgeVariant(categoryStr)}
                         />
                       )}
 
@@ -387,8 +403,8 @@ export default function NotificationsScreen({ onNav, user, role }) {
                       </span>
                     </div>
 
-                    <p className="text-xs text-slate-600 leading-relaxed">
-                      {n.message}
+                    <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+                      {n.message || ""}
                     </p>
 
                     {/* Navigation Link */}
@@ -397,10 +413,10 @@ export default function NotificationsScreen({ onNav, user, role }) {
                         <button
                           type="button"
                           onClick={() => {
-                            if (isUnread) markAsRead(notifId);
+                            if (isUnread && markAsRead) markAsRead(notifId);
                             onNav(n.link);
                           }}
-                          className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 hover:text-blue-700 transition-colors cursor-pointer"
+                          className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-700 transition-colors cursor-pointer"
                         >
                           <span>{getLinkDestinationLabel(n.link)}</span>
                           <ArrowRight className="w-3 h-3" />
@@ -414,8 +430,11 @@ export default function NotificationsScreen({ onNav, user, role }) {
                     {isUnread && (
                       <button
                         type="button"
-                        onClick={() => markAsRead(notifId)}
-                        className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors cursor-pointer"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (markAsRead) markAsRead(notifId);
+                        }}
+                        className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/30 rounded-md transition-colors cursor-pointer"
                         title="Mark as read"
                       >
                         <Check className="w-3.5 h-3.5" />
@@ -423,8 +442,11 @@ export default function NotificationsScreen({ onNav, user, role }) {
                     )}
                     <button
                       type="button"
-                      onClick={() => deleteNotification(notifId)}
-                      className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors cursor-pointer"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (deleteNotification) deleteNotification(notifId);
+                      }}
+                      className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-md transition-colors cursor-pointer"
                       title="Delete"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
@@ -441,9 +463,11 @@ export default function NotificationsScreen({ onNav, user, role }) {
       {showClearConfirm && (
         <ConfirmDialog
           message="Are you sure you want to clear all notifications? This action cannot be undone."
-          onConfirm={() => {
-            clearAllNotifications();
+          onConfirm={async () => {
             setShowClearConfirm(false);
+            if (clearAllNotifications) {
+              await clearAllNotifications();
+            }
           }}
           onCancel={() => setShowClearConfirm(false)}
         />
@@ -451,6 +475,3 @@ export default function NotificationsScreen({ onNav, user, role }) {
     </div>
   );
 }
-
-
-

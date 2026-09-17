@@ -394,16 +394,23 @@ export default function Revenue() {
                   </Pie>
                   <Tooltip
                     contentStyle={{
-                      background: "#0F172A",
-                      color: "#fff",
-                      borderRadius: "8px",
+                      backgroundColor: "#0F172A",
+                      color: "#ffffff",
+                      borderRadius: "10px",
                       fontSize: "12px",
-                      border: "none",
+                      border: "1px solid #334155",
+                      boxShadow: "0 10px 25px -5px rgba(0,0,0,0.5)",
                     }}
-                    formatter={(value, name, item) => [
-                      `${value} Businesses (${fmt(item.payload.revenue)}/mo)`,
-                      item.payload.name + " Plan",
-                    ]}
+                    itemStyle={{ color: "#38BDF8", fontSize: "12px", fontWeight: "600" }}
+                    labelStyle={{ color: "#F8FAFC", fontSize: "12px", fontWeight: "700" }}
+                    formatter={(value, name, item) => {
+                      const total = planDistribution.reduce((s, p) => s + (Number(p.count) || 0), 0);
+                      const pct = total > 0 ? ((Number(value) / total) * 100).toFixed(1) : "0.0";
+                      return [
+                        `${value} Businesses (${pct}%) • ${fmt(item.payload.revenue)}/mo`,
+                        item.payload.name + " Plan",
+                      ];
+                    }}
                   />
                 </RechartsPie>
               </ResponsiveContainer>
@@ -500,13 +507,23 @@ export default function Revenue() {
                   </Pie>
                   <Tooltip
                     contentStyle={{
-                      background: "#0F172A",
-                      color: "#fff",
-                      borderRadius: "8px",
+                      backgroundColor: "#0F172A",
+                      color: "#ffffff",
+                      borderRadius: "10px",
                       fontSize: "12px",
-                      border: "none",
+                      border: "1px solid #334155",
+                      boxShadow: "0 10px 25px -5px rgba(0,0,0,0.5)",
                     }}
-                    formatter={(value) => fmt(value)}
+                    itemStyle={{ color: "#38BDF8", fontSize: "12px", fontWeight: "600" }}
+                    labelStyle={{ color: "#F8FAFC", fontSize: "12px", fontWeight: "700" }}
+                    formatter={(value, name, item) => {
+                      const total = paymentMethodData.reduce((s, p) => s + (Number(p.value) || 0), 0);
+                      const pct = total > 0 ? ((Number(value) / total) * 100).toFixed(1) : "0.0";
+                      return [
+                        `${fmt(value)} (${pct}%)`,
+                        item?.payload?.name || name || "Payment Method",
+                      ];
+                    }}
                   />
                 </RechartsPie>
               </ResponsiveContainer>

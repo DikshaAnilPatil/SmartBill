@@ -21,11 +21,11 @@ export const NotificationContext = createContext({
   unreadCount: 0,
   loading: false,
   connected: false,
-  markAsRead: async () => { },
-  markAllAsRead: async () => { },
-  deleteNotification: async () => { },
-  clearAllNotifications: async () => { },
-  refresh: async () => { },
+  markAsRead: async () => {},
+  markAllAsRead: async () => {},
+  deleteNotification: async () => {},
+  clearAllNotifications: async () => {},
+  refresh: async () => {},
 });
 
 export const useNotifications = () => {
@@ -56,45 +56,62 @@ export function NotificationProvider({ children, onNav }) {
     try {
       setLoading(true);
       const res = await fetchNotificationsAPI();
-      if (res && res.notifications) {
+      if (res && Array.isArray(res.notifications)) {
         setNotifications(res.notifications);
-        setUnreadCount(res.unreadCount ?? res.notifications.filter((n) => !n.read).length);
+        setUnreadCount(
+          typeof res.unreadCount === "number"
+            ? res.unreadCount
+            : res.notifications.filter((n) => n && !n.read).length
+        );
       }
     } catch (err) {
-      console.warn("[Notifications] Failed to load notifications:", err.message);
+      console.warn("[Notifications] Failed to load notifications:", err?.message || err);
     } finally {
       setLoading(false);
     }
   }, []);
 
   // Mark single notification as read
-  const markAsRead = useCallback(async (id) => {
-    try {
-      // Optimistic update
-      setNotifications((prev) =>
-        prev.map((n) => (n._id === id || n.id === id ? { ...n, read: true } : n))
-      );
-      setUnreadCount((prev) => Math.max(0, prev - 1));
+  const markAsRead = useCallback(
+    async (id) => {
+      if (!id) return;
+      const targetId = String(id);
+      try {
+        // Optimistic update
+        setNotifications((prev) => {
+          const list = Array.isArray(prev) ? prev : [];
+          return list.map((n) =>
+            n && String(n._id || n.id) === targetId ? { ...n, read: true } : n
+          );
+        });
+        setUnreadCount((prev) => Math.max(0, prev - 1));
 
-      const res = await apiMarkAsRead(id);
-      if (res && typeof res.unreadCount === "number") {
-        setUnreadCount(res.unreadCount);
+        const res = await apiMarkAsRead(id);
+        if (res && typeof res.unreadCount === "number") {
+          setUnreadCount(res.unreadCount);
+        }
+      } catch (err) {
+        console.error("[Notifications] markAsRead error:", err);
+        refresh();
       }
-    } catch (err) {
-      console.error("[Notifications] markAsRead error:", err);
-      refresh();
-    }
-  }, [refresh]);
+    },
+    [refresh]
+  );
 
   // Mark all notifications as read
   const markAllAsRead = useCallback(async () => {
     try {
       // Optimistic update
-      setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+      setNotifications((prev) => {
+        const list = Array.isArray(prev) ? prev : [];
+        return list.map((n) => (n ? { ...n, read: true } : n));
+      });
       setUnreadCount(0);
 
       await apiMarkAllAsRead();
-      toast.success("All notifications marked as read");
+      try {
+        toast.success("All notifications marked as read");
+      } catch (_) {}
     } catch (err) {
       console.error("[Notifications] markAllAsRead error:", err);
       refresh();
@@ -102,21 +119,32 @@ export function NotificationProvider({ children, onNav }) {
   }, [refresh]);
 
   // Delete single notification
-  const deleteNotification = useCallback(async (id) => {
-    try {
-      setNotifications((prev) =>
-        prev.filter((n) => n._id !== id && n.id !== id)
-      );
+  const deleteNotification = useCallback(
+    async (id) => {
+      if (!id) return;
+      const targetId = String(id);
+      try {
+        // Optimistic update
+        setNotifications((prev) => {
+          const list = Array.isArray(prev) ? prev : [];
+          return list.filter((n) => n && String(n._id || n.id) !== targetId);
+        });
+        setUnreadCount((prev) => Math.max(0, prev - 1));
 
-      const res = await apiDeleteNotification(id);
-      if (res && typeof res.unreadCount === "number") {
-        setUnreadCount(res.unreadCount);
+        const res = await apiDeleteNotification(id);
+        if (res && typeof res.unreadCount === "number") {
+          setUnreadCount(res.unreadCount);
+        }
+        try {
+          toast.success("Notification removed");
+        } catch (_) {}
+      } catch (err) {
+        console.error("[Notifications] deleteNotification error:", err);
+        refresh();
       }
-    } catch (err) {
-      console.error("[Notifications] deleteNotification error:", err);
-      refresh();
-    }
-  }, [refresh]);
+    },
+    [refresh]
+  );
 
   // Clear all notifications
   const clearAllNotifications = useCallback(async () => {
@@ -125,7 +153,9 @@ export function NotificationProvider({ children, onNav }) {
       setUnreadCount(0);
 
       await apiClearAll();
-      toast.success("All notifications cleared");
+      try {
+        toast.success("All notifications cleared");
+      } catch (_) {}
     } catch (err) {
       console.error("[Notifications] clearAllNotifications error:", err);
       refresh();
@@ -146,7 +176,7 @@ export function NotificationProvider({ children, onNav }) {
       if (eventSourceRef.current) {
         try {
           eventSourceRef.current.close();
-        } catch (_) { }
+        } catch (_) {}
       }
 
       try {
@@ -177,16 +207,48 @@ export function NotificationProvider({ children, onNav }) {
                 const newNotif = data.notification;
                 if (!newNotif) break;
 
-                const notifIdStr = String(newNotif._id || newNotif.id || "");
+                if (
+                  newNotif.metadata?.status === "Suspended" ||
+                  newNotif.title === "Account Suspended"
+                ) {
+                  const suspReason = newNotif.metadata?.reason || "";
+                  const suspMsg =
+                    newNotif.message ||
+                    "Your business account has been suspended by administration.";
+                  try {
+                    sessionStorage.setItem(
+                      "smartbill_suspension_notice",
+                      JSON.stringify({
+                        reason: suspReason,
+                        message: suspMsg,
+                      })
+                    );
+                    localStorage.removeItem("smartbill_token");
+                    localStorage.removeItem("smartbill_user");
+                    window.dispatchEvent(new Event("userUpdated"));
+                  } catch (_) {}
+                  try {
+                    es.close();
+                  } catch (_) {}
+                  if (!window.location.pathname.includes("/login")) {
+                    window.location.href = "/login";
+                  }
+                  return;
+                }
 
+                const newNotifId = String(newNotif._id || newNotif.id || "");
 
                 setNotifications((prev) => {
-                  const exists = prev.some((item) => {
-                    const id = String(item._id || item.id || "");
-                    return id && id === notifIdStr;
-                  });
-                  if (exists) return prev;
-                  return [newNotif, ...prev];
+                  const safeList = Array.isArray(prev) ? prev : [];
+                  if (newNotifId) {
+                    const exists = safeList.some((item) => {
+                      if (!item) return false;
+                      const itemId = String(item._id || item.id || "");
+                      return itemId === newNotifId;
+                    });
+                    if (exists) return safeList;
+                  }
+                  return [newNotif, ...safeList];
                 });
 
                 if (typeof data.unreadCount === "number") {
@@ -195,90 +257,142 @@ export function NotificationProvider({ children, onNav }) {
                   setUnreadCount((prev) => prev + 1);
                 }
 
-                const toastFn =
-                  newNotif.type === "error"
-                    ? toast.error
-                    : newNotif.type === "warning"
+                try {
+                  const toastFn =
+                    newNotif.type === "error"
+                      ? toast.error
+                      : newNotif.type === "warning"
                       ? toast.warning
                       : newNotif.type === "success"
-                        ? toast.success
-                        : toast.info;
+                      ? toast.success
+                      : toast.info;
 
-                toastFn(newNotif.title, {
-                  description: newNotif.message,
-                  duration: 6000,
-                  action:
-                    newNotif.link && onNav
-                      ? {
-                        label: "View",
-                        onClick: () => onNav(newNotif.link),
-                      }
-                      : undefined,
-                });
+                  toastFn(newNotif.title, {
+                    description: newNotif.message,
+                    duration: 6000,
+                    action:
+                      newNotif.link && onNav
+                        ? {
+                            label: "View",
+                            onClick: () => onNav(newNotif.link),
+                          }
+                        : undefined,
+                  });
+                } catch (_) {}
                 break;
               }
 
-              case "NOTIFICATION_READ":
-                setNotifications((prev) =>
-                  prev.map((n) =>
-                    String(n._id || n.id) === String(data.notificationId)
-                      ? { ...n, read: true }
-                      : n
-                  )
-                );
+              case "NOTIFICATION_READ": {
+                const targetId = String(data.notificationId || "");
+                if (targetId) {
+                  setNotifications((prev) => {
+                    const safeList = Array.isArray(prev) ? prev : [];
+                    return safeList.map((n) =>
+                      n && String(n._id || n.id) === targetId
+                        ? { ...n, read: true }
+                        : n
+                    );
+                  });
+                }
                 if (typeof data.unreadCount === "number") {
                   setUnreadCount(data.unreadCount);
                 }
                 break;
+              }
 
-              case "ALL_READ":
-                setNotifications((prev) =>
-                  prev.map((n) => ({ ...n, read: true }))
-                );
+              case "ALL_READ": {
+                setNotifications((prev) => {
+                  const safeList = Array.isArray(prev) ? prev : [];
+                  return safeList.map((n) => (n ? { ...n, read: true } : n));
+                });
                 setUnreadCount(0);
                 break;
+              }
 
-              case "NOTIFICATION_DELETED":
-                setNotifications((prev) =>
-                  prev.filter(
-                    (n) =>
-                      String(n._id || n.id) !== String(data.notificationId)
-                  )
-                );
+              case "NOTIFICATION_DELETED": {
+                const delId = String(data.notificationId || "");
+                if (delId) {
+                  setNotifications((prev) => {
+                    const safeList = Array.isArray(prev) ? prev : [];
+                    return safeList.filter(
+                      (n) => n && String(n._id || n.id) !== delId
+                    );
+                  });
+                }
                 if (typeof data.unreadCount === "number") {
                   setUnreadCount(data.unreadCount);
                 }
                 break;
+              }
 
-              case "ALL_CLEARED":
+              case "ALL_CLEARED": {
                 setNotifications([]);
                 setUnreadCount(0);
                 break;
+              }
 
-              case "UNREAD_COUNT_UPDATED":
+              case "UNREAD_COUNT_UPDATED": {
                 if (typeof data.unreadCount === "number") {
                   setUnreadCount(data.unreadCount);
                 }
                 break;
+              }
 
-              case "INVENTORY_SETTINGS_UPDATED":
+              case "INVENTORY_SETTINGS_UPDATED": {
                 if (data.settings) {
                   try {
-                    localStorage.setItem("smartbill_inventorySettings", JSON.stringify(data.settings));
-                    window.dispatchEvent(new CustomEvent("inventorySettingsUpdated", { detail: data.settings }));
-                  } catch (_) { }
+                    localStorage.setItem(
+                      "smartbill_inventorySettings",
+                      JSON.stringify(data.settings)
+                    );
+                    window.dispatchEvent(
+                      new CustomEvent("inventorySettingsUpdated", {
+                        detail: data.settings,
+                      })
+                    );
+                  } catch (_) {}
                 }
                 break;
+              }
+
+              case "ACCOUNT_SUSPENDED": {
+                const suspReason = data.reason || "";
+                const suspMsg =
+                  data.message ||
+                  "Your business account has been suspended by administration.";
+                try {
+                  sessionStorage.setItem(
+                    "smartbill_suspension_notice",
+                    JSON.stringify({
+                      reason: suspReason,
+                      message: suspMsg,
+                    })
+                  );
+                  localStorage.removeItem("smartbill_token");
+                  localStorage.removeItem("smartbill_user");
+                  window.dispatchEvent(new Event("userUpdated"));
+                } catch (_) {}
+                try {
+                  es.close();
+                } catch (_) {}
+                if (!window.location.pathname.includes("/login")) {
+                  window.location.href = "/login";
+                }
+                break;
+              }
 
               default:
                 break;
             }
 
-            if (data.type === "NEW_NOTIFICATION" && data.notification?.category === "stock") {
+            if (
+              data.type === "NEW_NOTIFICATION" &&
+              data.notification?.category === "stock"
+            ) {
               window.dispatchEvent(new CustomEvent("stockUpdated"));
             }
           } catch (parseErr) {
-            console.debug("[SSE] parse warning:", parseErr.message);
+            console.debug("[SSE] parse warning:", parseErr?.message);
           }
         };
 
@@ -287,8 +401,7 @@ export function NotificationProvider({ children, onNav }) {
           setConnected(false);
           try {
             es.close();
-          } catch (_) { }
-
+          } catch (_) {}
 
           if (reconnectTimeoutRef.current) {
             clearTimeout(reconnectTimeoutRef.current);
@@ -298,7 +411,7 @@ export function NotificationProvider({ children, onNav }) {
           }, 3000);
         };
       } catch (err) {
-        console.error("[SSE] Connection setup error:", err.message);
+        console.error("[SSE] Connection setup error:", err?.message);
         setConnected(false);
       }
     };
@@ -306,20 +419,20 @@ export function NotificationProvider({ children, onNav }) {
     refresh();
     connectSSE();
 
-
     const pollInterval = setInterval(() => {
       if (isSubscribed && localStorage.getItem("smartbill_token")) {
         fetchNotificationsAPI()
           .then((res) => {
-            if (res && res.notifications) {
+            if (res && Array.isArray(res.notifications)) {
               setNotifications(res.notifications);
               setUnreadCount(
-                res.unreadCount ??
-                res.notifications.filter((n) => !n.read).length
+                typeof res.unreadCount === "number"
+                  ? res.unreadCount
+                  : res.notifications.filter((n) => n && !n.read).length
               );
             }
           })
-          .catch(() => { });
+          .catch(() => {});
       }
     }, 8000);
 
@@ -341,7 +454,7 @@ export function NotificationProvider({ children, onNav }) {
       if (eventSourceRef.current) {
         try {
           eventSourceRef.current.close();
-        } catch (_) { }
+        } catch (_) {}
       }
       window.removeEventListener("userUpdated", handleAuthChange);
       window.removeEventListener("storage", handleAuthChange);
@@ -350,7 +463,7 @@ export function NotificationProvider({ children, onNav }) {
   }, [refresh, onNav]);
 
   const value = {
-    notifications,
+    notifications: Array.isArray(notifications) ? notifications : [],
     unreadCount,
     loading,
     connected,
@@ -367,6 +480,3 @@ export function NotificationProvider({ children, onNav }) {
     </NotificationContext.Provider>
   );
 }
-
-
-

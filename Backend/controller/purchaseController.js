@@ -126,6 +126,9 @@ export const createPurchase = async (req, res) => {
       supplierName,
       supplierInvoiceNo = "",
       purchaseOrderNo = "",
+      eWayBillNo = "",
+      taxType = "GST Regular",
+      itcEligible = true,
       purchaseDate,
       dueDate,
       items = [],
@@ -193,6 +196,10 @@ export const createPurchase = async (req, res) => {
         gstAmount,
         discount: disc,
         itemAmount: itemAmount + gstAmount,
+        hsnCode: item.hsnCode ? String(item.hsnCode).trim() : "",
+        batchNo: item.batchNo ? String(item.batchNo).trim() : "",
+        expiryDate: item.expiryDate ? new Date(item.expiryDate) : null,
+        itcEligible: item.itcEligible !== false,
       });
     }
 
@@ -251,6 +258,9 @@ export const createPurchase = async (req, res) => {
       supplierName: String(supplierName).trim(),
       supplierInvoiceNo: String(supplierInvoiceNo).trim(),
       purchaseOrderNo: String(purchaseOrderNo).trim(),
+      eWayBillNo: String(eWayBillNo).trim(),
+      taxType: taxType || "GST Regular",
+      itcEligible: itcEligible !== false,
       purchaseDate: new Date(purchaseDate),
       dueDate: dueDate ? new Date(dueDate) : null,
       items: validatedItems,
@@ -268,7 +278,7 @@ export const createPurchase = async (req, res) => {
       paymentHistory: initialPaymentHistory,
     });
 
-    // 3. Inventory Integration: Atomically increment stock for purchased products
+    // 3. Inventory Integration: Atomically increment stock & update Weighted Average Cost (WAC)
     for (const item of validatedItems) {
       let product = null;
       const ownershipFilter = {
@@ -291,15 +301,53 @@ export const createPurchase = async (req, res) => {
       }
 
       if (product) {
-        const updateFields = {
-          $inc: { stock: Number(item.quantity) },
-        };
-        if (item.purchaseRate > 0) {
-          updateFields.$set = { cost: Number(item.purchaseRate) };
+        const currentStock = Math.max(0, Number(product.stock) || 0);
+        const currentCost = Number(product.cost) || 0;
+        const incomingQty = Number(item.quantity) || 0;
+        const incomingRate = Number(item.purchaseRate) || 0;
+
+        // Enterprise Weighted Average Costing (WAC) formula
+        let newWeightedCost = incomingRate > 0 ? incomingRate : currentCost;
+        if (currentStock + incomingQty > 0 && incomingRate > 0) {
+          newWeightedCost = Math.round((((currentStock * currentCost) + (incomingQty * incomingRate)) / (currentStock + incomingQty)) * 100) / 100;
         }
+
+        const updateFields = {
+          $inc: { stock: incomingQty },
+          $push: {
+            stockHistory: {
+              date: new Date(purchaseDate),
+              type: "Purchase",
+              quantity: incomingQty,
+              previousStock: currentStock,
+              newStock: currentStock + incomingQty,
+              reason: `Purchase Inward Bill #${newPurchase.supplierInvoiceNo || newPurchase.purchaseOrderNo || "Bill"}`,
+              referenceNo: newPurchase.supplierInvoiceNo || "",
+              performedBy: req.user.name || "User",
+            },
+          },
+          $set: {},
+        };
+        if (incomingRate > 0) {
+          updateFields.$set.cost = newWeightedCost;
+        }
+        if (item.hsnCode) {
+          updateFields.$set.hsnCode = item.hsnCode;
+        }
+        if (item.batchNo) {
+          updateFields.$set.batchNo = item.batchNo;
+        }
+        if (item.expiryDate) {
+          updateFields.$set.expiryDate = item.expiryDate;
+        }
+
+        if (Object.keys(updateFields.$set).length === 0) {
+          delete updateFields.$set;
+        }
+
         await Product.findByIdAndUpdate(product._id, updateFields);
       } else {
-        // Auto-create product in inventory if it does not exist yet
+        // Auto-create product in inventory with provided procurement metadata
         await Product.create({
           userId: actualUserId,
           ownerId,
@@ -311,23 +359,54 @@ export const createPurchase = async (req, res) => {
           stock: Number(item.quantity) || 0,
           unit: item.unit || "Piece",
           gst: Number(item.gstRate) || 0,
+          hsnCode: item.hsnCode || "",
+          batchNo: item.batchNo || "",
+          expiryDate: item.expiryDate || null,
           status: "Active",
+          stockHistory: [
+            {
+              date: new Date(purchaseDate),
+              type: "Purchase",
+              quantity: Number(item.quantity) || 0,
+              previousStock: 0,
+              newStock: Number(item.quantity) || 0,
+              reason: `Initial Inward Bill #${newPurchase.supplierInvoiceNo || "Bill"}`,
+              referenceNo: newPurchase.supplierInvoiceNo || "",
+              performedBy: req.user.name || "User",
+            },
+          ],
         });
       }
     }
 
-    // 4. Supplier Balance Integration: Atomically increase supplier payable balance
-    if (finalRemaining > 0) {
-      if (supplierId && mongoose.isValidObjectId(supplierId)) {
-        await Supplier.findByIdAndUpdate(supplierId, {
-          $inc: { balance: finalRemaining },
-        });
-      } else if (supplierName) {
-        await Supplier.findOneAndUpdate(
-          { name: String(supplierName).trim(), ownerId },
-          { $inc: { balance: finalRemaining } }
-        );
-      }
+    // 4. Supplier Balance Integration: Atomically update supplier totals & balance
+    const supplierUpdate = {
+      $inc: {
+        totalPurchases: computedGrandTotal,
+        totalPaid: finalPaid,
+        balance: finalRemaining,
+      },
+    };
+    if (finalPaid > 0) {
+      supplierUpdate.$push = {
+        paymentHistory: {
+          amount: finalPaid,
+          paymentMethod: finalPaymentMethod,
+          date: new Date(purchaseDate),
+          referenceNo: "",
+          notes: `Payment for Purchase #${newPurchase.supplierInvoiceNo || newPurchase._id}`,
+          purchaseBillNo: newPurchase.supplierInvoiceNo || "",
+        },
+      };
+    }
+
+    if (supplierId && mongoose.isValidObjectId(supplierId)) {
+      await Supplier.findByIdAndUpdate(supplierId, supplierUpdate);
+    } else if (supplierName) {
+      await Supplier.findOneAndUpdate(
+        { name: String(supplierName).trim(), ownerId },
+        supplierUpdate
+      );
     }
 
     try {
@@ -417,17 +496,32 @@ export const markPurchaseAsPaid = async (req, res) => {
 
     await purchase.save();
 
-    // Adjust supplier balance
-    if (previousRemaining > newRemaining) {
-      const balanceReduction = previousRemaining - newRemaining;
-      if (purchase.supplierId && mongoose.isValidObjectId(purchase.supplierId)) {
-        await Supplier.findByIdAndUpdate(purchase.supplierId, { $inc: { balance: -balanceReduction } });
-      } else if (purchase.supplierName) {
-        await Supplier.findOneAndUpdate(
-          { name: purchase.supplierName, ownerId },
-          { $inc: { balance: -balanceReduction } }
-        );
-      }
+    // Adjust supplier balance & totalPaid
+    const balanceReduction = payAmount;
+    const supplierUpdate = {
+      $inc: {
+        totalPaid: balanceReduction,
+        balance: -balanceReduction,
+      },
+      $push: {
+        paymentHistory: {
+          amount: payAmount,
+          paymentMethod,
+          date: paymentDate ? new Date(paymentDate) : new Date(),
+          referenceNo: String(referenceNo || "").trim(),
+          notes: notes || `Payment for Bill #${purchase.supplierInvoiceNo || purchase._id}`,
+          purchaseBillNo: purchase.supplierInvoiceNo || "",
+        },
+      },
+    };
+
+    if (purchase.supplierId && mongoose.isValidObjectId(purchase.supplierId)) {
+      await Supplier.findByIdAndUpdate(purchase.supplierId, supplierUpdate);
+    } else if (purchase.supplierName) {
+      await Supplier.findOneAndUpdate(
+        { name: purchase.supplierName, ownerId },
+        supplierUpdate
+      );
     }
 
     return res.status(200).json({
@@ -437,6 +531,181 @@ export const markPurchaseAsPaid = async (req, res) => {
     });
   } catch (err) {
     return res.status(500).json({ message: err.message || "Failed to record payment." });
+  }
+};
+
+/**
+ * Purchase Return / Debit Note
+ */
+export const createPurchaseReturn = async (req, res) => {
+  const ownerId = req.user.ownerId || req.user._id;
+  const actualUserId = req.user.actualUserId || req.user._id;
+
+  try {
+    const purchase = await Purchase.findOne({ _id: req.params.id, ownerId });
+    if (!purchase) {
+      return res.status(404).json({ message: "Purchase record not found." });
+    }
+
+    const {
+      returnedItems = [],
+      refundAmount = 0,
+      refundMode = "Credit", // "Credit" (reduces payable balance), "Cash", "Bank"
+      reason = "Goods Defective / Damaged",
+      returnDate = new Date(),
+    } = req.body;
+
+    if (!Array.isArray(returnedItems) || returnedItems.length === 0) {
+      return res.status(400).json({ message: "At least one item must be specified for return." });
+    }
+
+    let calculatedReturnTotal = 0;
+    const validatedReturnedItems = [];
+
+    for (const retItem of returnedItems) {
+      const retQty = Number(retItem.qty ?? retItem.quantity);
+      if (!Number.isFinite(retQty) || retQty <= 0) {
+        return res.status(400).json({ message: `Invalid return quantity for ${retItem.productName || "item"}.` });
+      }
+
+      // Check original item in purchase
+      const originalItem = purchase.items.find(
+        (i) => (retItem.productId && String(i.productId) === String(retItem.productId)) ||
+               (retItem.productName && i.productName.toLowerCase() === String(retItem.productName).toLowerCase())
+      );
+
+      if (!originalItem) {
+        return res.status(400).json({
+          message: `Product "${retItem.productName}" was not found in purchase bill.`,
+        });
+      }
+
+      const itemRate = Number(originalItem.purchaseRate) || 0;
+      const itemGstRate = Number(originalItem.gstRate) || 0;
+      const lineTaxable = itemRate * retQty;
+      const lineGst = (lineTaxable * itemGstRate) / 100;
+      const lineReturnTotal = Math.round((lineTaxable + lineGst) * 100) / 100;
+
+      calculatedReturnTotal += lineReturnTotal;
+
+      validatedReturnedItems.push({
+        productId: originalItem.productId,
+        productName: originalItem.productName,
+        quantity: retQty,
+        unit: originalItem.unit,
+        purchaseRate: itemRate,
+        gstRate: itemGstRate,
+        gstAmount: lineGst,
+        discount: 0,
+        itemAmount: lineReturnTotal,
+        hsnCode: originalItem.hsnCode,
+        batchNo: originalItem.batchNo,
+        expiryDate: originalItem.expiryDate,
+        itcEligible: originalItem.itcEligible,
+      });
+
+      // Deduct product stock in inventory
+      if (originalItem.productId && mongoose.isValidObjectId(originalItem.productId)) {
+        const prod = await Product.findById(originalItem.productId);
+        if (prod) {
+          const prevStock = Number(prod.stock || 0);
+          const newStock = Math.max(0, prevStock - retQty);
+          await Product.findByIdAndUpdate(originalItem.productId, {
+            $inc: { stock: -retQty },
+            $push: {
+              stockHistory: {
+                date: new Date(returnDate),
+                type: "Purchase Return",
+                quantity: -retQty,
+                previousStock: prevStock,
+                newStock,
+                reason: `Purchase Return to ${purchase.supplierName}: ${reason}`,
+                referenceNo: purchase.supplierInvoiceNo || "",
+                performedBy: req.user.name || "User",
+              },
+            },
+          });
+        }
+      }
+    }
+
+    const finalDebitAmount = Math.min(
+      calculatedReturnTotal,
+      Number(refundAmount) > 0 ? Number(refundAmount) : calculatedReturnTotal
+    );
+
+    const debitNoteNo = `DN-${purchase.supplierInvoiceNo || purchase._id.toString().slice(-6)}-${(purchase.purchaseReturns?.length || 0) + 1}`;
+
+    if (!Array.isArray(purchase.purchaseReturns)) {
+      purchase.purchaseReturns = [];
+    }
+
+    purchase.purchaseReturns.push({
+      returnNo: debitNoteNo,
+      returnDate: new Date(returnDate),
+      reason,
+      refundAmount: finalDebitAmount,
+      paymentMode: refundMode,
+      items: validatedReturnedItems,
+    });
+
+    purchase.returnStatus = "Partial";
+    await purchase.save();
+
+    // Adjust supplier balance (payable decrease)
+    if (refundMode === "Credit") {
+      const supplierUpdate = {
+        $inc: {
+          totalPurchases: -finalDebitAmount,
+          balance: -finalDebitAmount,
+        },
+        $push: {
+          paymentHistory: {
+            amount: finalDebitAmount,
+            paymentMethod: "Debit Note",
+            date: new Date(returnDate),
+            referenceNo: debitNoteNo,
+            notes: `Debit Note #${debitNoteNo} for Purchase Return against Bill #${purchase.supplierInvoiceNo || ""}`,
+            purchaseBillNo: purchase.supplierInvoiceNo || "",
+          },
+        },
+      };
+
+      if (purchase.supplierId && mongoose.isValidObjectId(purchase.supplierId)) {
+        await Supplier.findByIdAndUpdate(purchase.supplierId, supplierUpdate);
+      } else if (purchase.supplierName) {
+        await Supplier.findOneAndUpdate(
+          { name: purchase.supplierName, ownerId },
+          supplierUpdate
+        );
+      }
+    }
+
+    try {
+      await createNotification({
+        ownerId,
+        userId: actualUserId,
+        title: `Debit Note Created: ${debitNoteNo}`,
+        message: `Debit note ${debitNoteNo} for ₹${finalDebitAmount.toLocaleString("en-IN")} issued to ${purchase.supplierName}.`,
+        type: "warning",
+        category: "purchase",
+        link: "purchase",
+        metadata: { purchaseId: purchase._id, debitNoteNo, refundAmount: finalDebitAmount },
+      });
+    } catch (notifErr) {
+      console.error("Debit note notification error:", notifErr.message);
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: `Debit note issued successfully. Reference: ${debitNoteNo}`,
+      debitNoteNo,
+      refundAmount: finalDebitAmount,
+      purchase,
+    });
+  } catch (error) {
+    console.error("CREATE PURCHASE RETURN ERROR:", error.message);
+    return res.status(500).json({ message: error.message || "Failed to issue debit note." });
   }
 };
 
@@ -487,29 +756,60 @@ export const deletePurchase = async (req, res) => {
       for (const item of purchase.items) {
         const qty = Number(item.quantity || item.qty) || 0;
         if (qty > 0) {
-          if (item.product && mongoose.isValidObjectId(item.product)) {
-            await Product.findByIdAndUpdate(item.product, { $inc: { stock: -qty } });
+          if (item.productId && mongoose.isValidObjectId(item.productId)) {
+            await Product.findByIdAndUpdate(item.productId, {
+              $inc: { stock: -qty },
+              $push: {
+                stockHistory: {
+                  date: new Date(),
+                  type: "Stock Adjustment",
+                  quantity: -qty,
+                  reason: `Cancelled Purchase Bill #${purchase.supplierInvoiceNo || purchase._id}`,
+                  performedBy: req.user.name || "User",
+                },
+              },
+            });
           } else if (item.productName) {
             await Product.findOneAndUpdate(
               { name: item.productName, ownerId },
-              { $inc: { stock: -qty } }
+              {
+                $inc: { stock: -qty },
+                $push: {
+                  stockHistory: {
+                    date: new Date(),
+                    type: "Stock Adjustment",
+                    quantity: -qty,
+                    reason: `Cancelled Purchase Bill #${purchase.supplierInvoiceNo || purchase._id}`,
+                    performedBy: req.user.name || "User",
+                  },
+                },
+              }
             );
           }
         }
       }
     }
 
-    // Revert supplier balance
+    // Revert supplier balance & totalPurchases & totalPaid
+    const totalAmount = Number(purchase.totalAmount) || 0;
+    const amountPaid = Number(purchase.amountPaid) || 0;
     const remainingDue = Number(purchase.remainingAmount) || 0;
-    if (remainingDue > 0) {
-      if (purchase.supplierId && mongoose.isValidObjectId(purchase.supplierId)) {
-        await Supplier.findByIdAndUpdate(purchase.supplierId, { $inc: { balance: -remainingDue } });
-      } else if (purchase.supplierName) {
-        await Supplier.findOneAndUpdate(
-          { name: purchase.supplierName, ownerId },
-          { $inc: { balance: -remainingDue } }
-        );
-      }
+
+    const supplierUpdate = {
+      $inc: {
+        totalPurchases: -totalAmount,
+        totalPaid: -amountPaid,
+        balance: -remainingDue,
+      },
+    };
+
+    if (purchase.supplierId && mongoose.isValidObjectId(purchase.supplierId)) {
+      await Supplier.findByIdAndUpdate(purchase.supplierId, supplierUpdate);
+    } else if (purchase.supplierName) {
+      await Supplier.findOneAndUpdate(
+        { name: purchase.supplierName, ownerId },
+        supplierUpdate
+      );
     }
 
     await Purchase.deleteOne({ _id: purchase._id, ownerId });

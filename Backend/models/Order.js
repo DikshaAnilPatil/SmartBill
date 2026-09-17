@@ -5,6 +5,9 @@ const orderItemSchema = new mongoose.Schema(
     productId: { type: mongoose.Schema.Types.Mixed, default: null },
     name: { type: String, default: "" },
     sku: { type: String, default: "" },
+    hsnCode: { type: String, default: "" },
+    unit: { type: String, default: "Piece" },
+    batchNo: { type: String, default: "" },
     price: { type: Number, default: 0 },
     cost: { type: Number, default: 0 },
     qty: { type: Number, default: 1 },
@@ -34,6 +37,23 @@ const orderSchema = new mongoose.Schema(
       type: String,
       default: "Walk-in Customer",
     },
+    customerPhone: {
+      type: String,
+      default: "",
+    },
+    customerGst: {
+      type: String,
+      default: "",
+    },
+    placeOfSupply: {
+      type: String,
+      default: "",
+    },
+    taxType: {
+      type: String,
+      enum: ["Intra-State", "Inter-State"],
+      default: "Intra-State",
+    },
     invoiceNo: {
       type: String,
       required: true,
@@ -54,6 +74,21 @@ const orderSchema = new mongoose.Schema(
       min: 0,
     },
     gst: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    cgst: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    sgst: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    igst: {
       type: Number,
       default: 0,
       min: 0,
@@ -86,9 +121,18 @@ const orderSchema = new mongoose.Schema(
       ],
       default: [],
     },
+    paymentHistory: [
+      {
+        amount: { type: Number, required: true },
+        paymentMode: { type: String, default: "Cash" },
+        date: { type: Date, default: Date.now },
+        referenceNo: { type: String, default: "" },
+        notes: { type: String, default: "" },
+      },
+    ],
     status: {
       type: String,
-      enum: ["Paid", "Partial", "Due"],
+      enum: ["Paid", "Partial", "Due", "Cancelled"],
       default: "Due",
     },
     returnStatus: {
@@ -104,6 +148,16 @@ const orderSchema = new mongoose.Schema(
       type: [orderItemSchema],
       default: [],
     },
+    salesReturns: [
+      {
+        returnNo: { type: String, default: "" },
+        returnDate: { type: Date, default: Date.now },
+        reason: { type: String, default: "" },
+        refundAmount: { type: Number, default: 0 },
+        paymentMode: { type: String, default: "Cash" },
+        items: [orderItemSchema],
+      },
+    ],
     discount: {
       type: Number,
       default: 0,
@@ -113,6 +167,14 @@ const orderSchema = new mongoose.Schema(
       type: Number,
       default: 0,
       min: 0,
+    },
+    notes: {
+      type: String,
+      default: "",
+    },
+    terms: {
+      type: String,
+      default: "",
     },
     date: {
       type: Date,
