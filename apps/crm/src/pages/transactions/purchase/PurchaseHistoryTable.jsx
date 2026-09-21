@@ -8,6 +8,7 @@ import {
   Upload,
   Eye,
   Paperclip,
+  RotateCcw,
 } from "lucide-react";
 
 export default function PurchaseHistoryTable({
@@ -18,6 +19,7 @@ export default function PurchaseHistoryTable({
   setFilterMonth,
   handleOpenPaymentModal,
   handleOpenSupplierDetails,
+  handleOpenReturnModal,
   handleDeletePurchase,
   fmt,
 }) {
@@ -222,6 +224,15 @@ export default function PurchaseHistoryTable({
                             Pay
                           </button>
                         ) : null}
+
+                        <button
+                          type="button"
+                          onClick={() => handleOpenReturnModal && handleOpenReturnModal(purchase)}
+                          className="p-1.5 rounded-lg text-slate-500 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/40 transition-colors cursor-pointer"
+                          title="Create Purchase Return / Debit Note"
+                        >
+                          <RotateCcw className="w-4 h-4" />
+                        </button>
 
                         <button
                           type="button"

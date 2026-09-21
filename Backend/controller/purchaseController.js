@@ -236,12 +236,14 @@ export const createPurchase = async (req, res) => {
 
     // Enforce Strict Negative Cash Rule
     if (finalPaid > 0 && finalPaymentMethod === "Cash") {
-      const settings = await AccountingSettings.findOne({ userId: ownerId }).lean();
-      if (settings?.strictNegativeCash) {
+      const settings = await AccountingSettings.findOne({
+        $or: [{ userId: ownerId }, { ownerId: ownerId }],
+      }).lean();
+      if (settings?.strictNegativeCash === true) {
         const cashBalance = await getCashBalance(ownerId);
         if (cashBalance - finalPaid < 0) {
           return res.status(400).json({ 
-            message: `Strict Negative Cash Rule is enabled. Your cash balance is ₹${cashBalance}, which is insufficient for this ₹${finalPaid} payment.`
+            message: `Strict Negative Cash Rule is enabled in your Accounting Settings. Your cash balance is ₹${cashBalance}, which is insufficient for this ₹${finalPaid} payment. You can disable this rule under Settings > Accounting or choose another payment method.`
           });
         }
       }
@@ -517,12 +519,14 @@ export const markPurchaseAsPaid = async (req, res) => {
 
     // Enforce Strict Negative Cash Rule
     if (paymentMethod === "Cash") {
-      const settings = await AccountingSettings.findOne({ userId: ownerId }).lean();
-      if (settings?.strictNegativeCash) {
+      const settings = await AccountingSettings.findOne({
+        $or: [{ userId: ownerId }, { ownerId: ownerId }],
+      }).lean();
+      if (settings?.strictNegativeCash === true) {
         const cashBalance = await getCashBalance(ownerId);
         if (cashBalance - paymentApplied < 0) {
           return res.status(400).json({
-            message: `Strict Negative Cash Rule is enabled. Your cash balance is ₹${cashBalance}, which is insufficient for this ₹${paymentApplied} payment.`,
+            message: `Strict Negative Cash Rule is enabled in your Accounting Settings. Your cash balance is ₹${cashBalance}, which is insufficient for this ₹${paymentApplied} payment. You can disable this rule under Settings > Accounting or choose another payment method.`,
           });
         }
       }
@@ -792,9 +796,6 @@ export const createPurchaseReturn = async (req, res) => {
       message: `Debit note issued successfully. Reference: ${debitNoteNo}`,
       debitNoteNo,
       refundAmount: finalDebitAmount,
-=======
-      message: "Purchase marked as fully paid & cleared.",
->>>>>>> origin/main
       purchase,
     });
   } catch (error) {

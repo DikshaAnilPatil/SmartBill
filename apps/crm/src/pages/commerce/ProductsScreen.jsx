@@ -38,6 +38,7 @@ import {
   Input,
   Modal,
   Select,
+  GstRateSelect,
   Toast,
   statusBadge,
 } from "@shared/components/common/ui";
@@ -856,8 +857,8 @@ export default function ProductsScreen({ onNav }) {
                 value={editForm.price}
                 onChange={(v) => setEditForm((f) => ({ ...f, price: v }))}
               />
-              <Input
-                label="GST %"
+              <GstRateSelect
+                label="GST Rate"
                 value={editForm.gst}
                 onChange={(v) => setEditForm((f) => ({ ...f, gst: v }))}
               />
@@ -1226,10 +1227,8 @@ export default function ProductsScreen({ onNav }) {
                 value={form.price}
                 onChange={(v) => setForm((f) => ({ ...f, price: v }))}
               />
-              <Input
-                label="GST %"
-                type="number"
-                placeholder="e.g. 18"
+              <GstRateSelect
+                label="GST Rate"
                 value={form.gst}
                 onChange={(v) => setForm((f) => ({ ...f, gst: v }))}
               />

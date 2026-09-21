@@ -952,7 +952,7 @@ export const forgotPassword = async (req, res) => {
         console.error("Real email dispatch failed:", mailRes.error || mailRes.reason);
         if (identifier.type === "email") {
           return res.status(500).json({
-            message: mailRes.reason || "Failed to send email. Please ensure EMAIL_USER and EMAIL_PASS are set in Backend/.env.",
+            message: mailRes.error || mailRes.reason || "Failed to send email. Please check your email configuration.",
           });
         }
       }

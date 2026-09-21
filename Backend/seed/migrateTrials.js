@@ -1,13 +1,20 @@
 import "dotenv/config";
 import connectDB from "../config/db.js";
 import User from "../models/User.js";
+import AccountingSettings from "../models/AccountingSettings.js";
 
 /**
- * Migration script to initialize 14-day trial for existing users.
+ * Migration script to initialize 14-day trial for existing users and sync accounting settings.
  * Grants existing users a 14-day trial starting from today so their work is uninterrupted.
  */
 export const migrateExistingUserTrials = async () => {
   try {
+    // Disable strictNegativeCash legacy default so initial purchases/expenses are not blocked
+    await AccountingSettings.updateMany(
+      { strictNegativeCash: true },
+      { $set: { strictNegativeCash: false } }
+    );
+
     const usersWithoutSubscription = await User.find({
       $or: [
         { subscription: { $exists: false } },

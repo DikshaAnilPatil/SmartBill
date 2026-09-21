@@ -56,15 +56,24 @@ const getTransporter = async () => {
   const dbPort = Number(dbSettings?.smtpPort || 587);
 
   if (dbUser && dbPass) {
-    const host = dbHost || "smtp.gmail.com";
-    console.log(`[SMTP] Using dynamic DB SMTP settings (${dbUser} via ${host}:${dbPort})`);
+    const isGmail = (dbHost && dbHost.toLowerCase().includes("gmail")) || dbUser.toLowerCase().includes("@gmail.com");
+    console.log(`[SMTP] Using dynamic DB SMTP settings (${dbUser} via ${isGmail ? "gmail" : `${dbHost}:${dbPort}`})`);
     return {
-      transporter: nodemailer.createTransport({
-        host,
-        port: dbPort,
-        secure: dbPort === 465,
-        auth: { user: dbUser, pass: dbPass },
-      }),
+      transporter: nodemailer.createTransport(
+        isGmail
+          ? {
+              service: "gmail",
+              auth: { user: dbUser, pass: dbPass },
+              tls: { rejectUnauthorized: false },
+            }
+          : {
+              host: dbHost || "smtp.gmail.com",
+              port: dbPort,
+              secure: dbPort === 465,
+              auth: { user: dbUser, pass: dbPass },
+              tls: { rejectUnauthorized: false },
+            }
+      ),
       fromAddress: dbSettings?.smtpFrom || `"Smart Bill System" <${dbUser}>`,
       isTest: false,
     };
@@ -77,16 +86,25 @@ const getTransporter = async () => {
   const envPass = process.env.SMTP_PASS || process.env.EMAIL_PASS;
 
   if (envUser && envPass && !envUser.includes("your_email")) {
-    const host = envHost || "smtp.gmail.com";
-    console.log(`[SMTP] Using environment process.env SMTP settings (${envUser} via ${host}:${envPort})`);
+    const isGmail = (envHost && envHost.toLowerCase().includes("gmail")) || (envUser && envUser.toLowerCase().includes("@gmail.com"));
+    console.log(`[SMTP] Using environment process.env SMTP settings (${envUser} via ${isGmail ? "gmail" : `${envHost}:${envPort}`})`);
     return {
-      transporter: nodemailer.createTransport({
-        host,
-        port: envPort,
-        secure: envPort === 465,
-        auth: { user: envUser, pass: envPass },
-      }),
-      fromAddress: process.env.SMTP_FROM || `"Smart Bill System" <${envUser}>`,
+      transporter: nodemailer.createTransport(
+        isGmail
+          ? {
+              service: "gmail",
+              auth: { user: envUser, pass: envPass },
+              tls: { rejectUnauthorized: false },
+            }
+          : {
+              host: envHost || "smtp.gmail.com",
+              port: envPort,
+              secure: envPort === 465,
+              auth: { user: envUser, pass: envPass },
+              tls: { rejectUnauthorized: false },
+            }
+      ),
+      fromAddress: process.env.SMTP_FROM || process.env.EMAIL_FROM || `"Smart Bill System" <${envUser}>`,
       isTest: false,
     };
   }
@@ -103,6 +121,7 @@ const getTransporter = async () => {
           user: testAccount.user,
           pass: testAccount.pass,
         },
+        tls: { rejectUnauthorized: false },
       }),
       fromAddress: `"Smart Bill System" <${testAccount.user}>`,
       isTest: true,

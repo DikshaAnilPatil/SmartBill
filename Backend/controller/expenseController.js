@@ -47,12 +47,14 @@ export const createExpense = async (req, res) => {
     
     // Enforce Strict Negative Cash Rule
     if (finalPaymentMode === "Cash") {
-      const settings = await AccountingSettings.findOne({ userId: effectiveOwnerId }).lean();
-      if (settings?.strictNegativeCash) {
+      const settings = await AccountingSettings.findOne({
+        $or: [{ userId: effectiveOwnerId }, { ownerId: effectiveOwnerId }],
+      }).lean();
+      if (settings?.strictNegativeCash === true) {
         const cashBalance = await getCashBalance(effectiveOwnerId);
         if (cashBalance - amountNumber < 0) {
           return res.status(400).json({ 
-            message: `Strict Negative Cash Rule is enabled. Your cash balance is ₹${cashBalance}, which is insufficient for this ₹${amountNumber} expense.`
+            message: `Strict Negative Cash Rule is enabled in your Accounting Settings. Your cash balance is ₹${cashBalance}, which is insufficient for this ₹${amountNumber} expense. You can disable this rule under Settings > Accounting or choose another payment method.`
           });
         }
       }

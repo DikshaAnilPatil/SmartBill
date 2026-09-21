@@ -94,7 +94,7 @@ export default function AccountingSettingsTab() {
     defaultCashAccount: "Cash in Hand",
     enableJournalSettings: true,
     documentNumbering: "Auto",
-    strictNegativeCash: true,
+    strictNegativeCash: false,
     enableCostCenters: false,
   });
 

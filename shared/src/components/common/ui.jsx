@@ -14,6 +14,10 @@ import {
   ChevronDown,
   Check,
 } from "lucide-react";
+import GstRateSelect from "./GstRateSelect";
+import { GST_RATES, GST_RATE_NUMBERS, formatGstLabel } from "../../constants/gstRates";
+
+export { GstRateSelect, GST_RATES, GST_RATE_NUMBERS, formatGstLabel };
 
 export function Btn({
   children,

@@ -41,7 +41,7 @@ const accountingSettingsSchema = new mongoose.Schema(
     documentNumbering: { type: String, default: "Auto" },
 
     // Advanced Settings
-    strictNegativeCash: { type: Boolean, default: true },
+    strictNegativeCash: { type: Boolean, default: false },
     enableCostCenters: { type: Boolean, default: false },
   },
   { timestamps: true }

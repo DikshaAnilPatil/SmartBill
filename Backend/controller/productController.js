@@ -22,6 +22,12 @@ export const addProduct = async (req, res) => {
       hsnCode = "",
       batchNo = "",
       expiryDate = null,
+      size = "",
+      color = "",
+      packSize = "",
+      minOrderQty = 1,
+      warrantyMonths = 0,
+      isPrescriptionOnly = false,
       status = "Active",
     } = req.body;
 

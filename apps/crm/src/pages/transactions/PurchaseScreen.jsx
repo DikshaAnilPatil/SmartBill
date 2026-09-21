@@ -17,17 +17,23 @@ import {
   Upload,
   Package,
   Sparkles,
+  RotateCcw,
+  Printer,
+  AlertTriangle,
+  Eye,
 } from "lucide-react";
 import {
   createPurchase,
   fetchPurchases,
   markPurchaseAsPaid,
   deletePurchase,
+  fetchPurchaseReturns,
+  createPurchaseReturn,
 } from "@shared/api/purchaseAPI";
 import { getProducts, createProduct } from "@shared/api/productAPI";
 import { fetchSuppliers } from "@shared/api/supplierAPI";
 import { fmt } from "@shared/utils/format";
-import { Toast, StepperInput, Modal, Input, Select, Btn } from "@shared/components/common/ui";
+import { Toast, StepperInput, Modal, Input, Select, Btn, GstRateSelect, GST_RATES, GST_RATE_NUMBERS } from "@shared/components/common/ui";
 import {
   parseExcelOrCsvFile,
   normalizePurchaseInvoiceRows,
@@ -36,7 +42,7 @@ import {
 import PurchaseHistoryTable from "./purchase/PurchaseHistoryTable";
 import PurchaseSupplierDetailsModal from "./purchase/PurchaseSupplierDetailsModal";
 
-const GST_OPTIONS = [0, 5, 12, 18, 28];
+const GST_OPTIONS = GST_RATE_NUMBERS;
 const PAYMENT_METHODS = [
   "Cash",
   "UPI",
@@ -44,6 +50,23 @@ const PAYMENT_METHODS = [
   "Card",
   "Cheque",
   "Other",
+];
+
+const RETURN_REASONS = [
+  "Damaged / Defective",
+  "Wrong Item Received",
+  "Expired / Near Expiry",
+  "Quality Not as Expected",
+  "Overstocked / Excess Delivery",
+  "Other",
+];
+
+const RETURN_CONDITIONS = ["Damaged", "Faulty", "Good / Resalable", "Opened / Incomplete"];
+
+const SETTLEMENT_TYPES = [
+  "Adjust from Supplier Balance",
+  "Direct Cash / Bank Refund",
+  "Replacement Expected",
 ];
 
 export default function PurchaseScreen() {
@@ -151,6 +174,30 @@ export default function PurchaseScreen() {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 3500);
   };
+
+  // Purchase Returns / Debit Notes States
+  const [purchaseReturnsList, setPurchaseReturnsList] = useState([]);
+  const [searchReturns, setSearchReturns] = useState("");
+  const [filterReturnReason, setFilterReturnReason] = useState("");
+
+  // Create Purchase Return (Debit Note) Modal State
+  const [showReturnModal, setShowReturnModal] = useState(false);
+  const [savingReturn, setSavingReturn] = useState(false);
+  const [returnPurchaseId, setReturnPurchaseId] = useState(null);
+  const [returnSupplierId, setReturnSupplierId] = useState(null);
+  const [returnSupplier, setReturnSupplier] = useState("");
+  const [returnInvoiceNo, setReturnInvoiceNo] = useState("");
+  const [returnDate, setReturnDate] = useState(
+    new Date().toISOString().slice(0, 10)
+  );
+  const [returnItems, setReturnItems] = useState([]);
+  const [returnSettlementType, setReturnSettlementType] = useState(
+    "Adjust from Supplier Balance"
+  );
+  const [returnNotes, setReturnNotes] = useState("");
+
+  // Debit Note View Modal State
+  const [activeDebitNote, setActiveDebitNote] = useState(null);
 
   // Import Supplier Bill / Invoice Modal States
   const [showImportBillModal, setShowImportBillModal] = useState(false);
@@ -269,10 +316,11 @@ export default function PurchaseScreen() {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [prodRes, suppRes, purchRes] = await Promise.allSettled([
+      const [prodRes, suppRes, purchRes, returnRes] = await Promise.allSettled([
         getProducts(),
         fetchSuppliers(),
         fetchPurchases(),
+        fetchPurchaseReturns(),
       ]);
 
       if (prodRes.status === "fulfilled") {
@@ -293,6 +341,9 @@ export default function PurchaseScreen() {
       if (purchRes.status === "fulfilled") {
         setPurchaseList(purchRes.value?.purchases || []);
       }
+      if (returnRes.status === "fulfilled") {
+        setPurchaseReturnsList(returnRes.value?.purchaseReturns || returnRes.value || []);
+      }
     } catch (err) {
       console.error("Failed to load purchase page data", err);
     } finally {
@@ -310,12 +361,14 @@ export default function PurchaseScreen() {
     window.addEventListener("stockUpdated", handleUpdate);
     window.addEventListener("productUpdated", handleUpdate);
     window.addEventListener("purchaseCreated", handleUpdate);
+    window.addEventListener("purchaseReturnCreated", handleUpdate);
     window.addEventListener("orderCreated", handleUpdate);
 
     return () => {
       window.removeEventListener("stockUpdated", handleUpdate);
       window.removeEventListener("productUpdated", handleUpdate);
       window.removeEventListener("purchaseCreated", handleUpdate);
+      window.removeEventListener("purchaseReturnCreated", handleUpdate);
       window.removeEventListener("orderCreated", handleUpdate);
     };
   }, [loadData]);
@@ -763,6 +816,235 @@ export default function PurchaseScreen() {
     }
   };
 
+  // Return Modal Openers
+  const openReturnModalForPurchase = (purchase) => {
+    setReturnPurchaseId(purchase._id || purchase.id);
+    setReturnSupplierId(purchase.supplierId || null);
+    setReturnSupplier(purchase.supplierName || purchase.supplier || "");
+    setReturnInvoiceNo(purchase.supplierInvoiceNo || purchase.invoiceNo || "");
+    setReturnDate(new Date().toISOString().slice(0, 10));
+    setReturnSettlementType("Adjust from Supplier Balance");
+    setReturnNotes("");
+
+    if (Array.isArray(purchase.items) && purchase.items.length > 0) {
+      setReturnItems(
+        purchase.items.map((it) => {
+          const qty = Number(it.quantity || it.qty || 1);
+          const rate = Number(it.purchaseRate || it.rate || 0);
+          const gstR = Number(it.gstRate || it.gst || 0);
+          const base = qty * rate;
+          return {
+            productId: it.productId || null,
+            productName: it.productName || it.product || "",
+            quantity: String(qty),
+            maxQuantity: qty,
+            unit: it.unit || "pcs",
+            purchaseRate: String(rate),
+            gstRate: gstR,
+            gstAmount: base * (gstR / 100),
+            itemAmount: base,
+            reason: "Damaged / Defective",
+            condition: "Damaged",
+          };
+        })
+      );
+    } else {
+      setReturnItems([
+        {
+          productId: null,
+          productName: "",
+          quantity: "1",
+          maxQuantity: null,
+          unit: "pcs",
+          purchaseRate: "0",
+          gstRate: 18,
+          gstAmount: 0,
+          itemAmount: 0,
+          reason: "Damaged / Defective",
+          condition: "Damaged",
+        },
+      ]);
+    }
+    setShowReturnModal(true);
+  };
+
+  const openNewBlankReturnModal = () => {
+    setReturnPurchaseId(null);
+    setReturnSupplierId(null);
+    setReturnSupplier(supplierList[0]?.name || "");
+    setReturnInvoiceNo("");
+    setReturnDate(new Date().toISOString().slice(0, 10));
+    setReturnSettlementType("Adjust from Supplier Balance");
+    setReturnNotes("");
+    setReturnItems([
+      {
+        productId: null,
+        productName: "",
+        quantity: "1",
+        maxQuantity: null,
+        unit: "pcs",
+        purchaseRate: "0",
+        gstRate: 18,
+        gstAmount: 0,
+        itemAmount: 0,
+        reason: "Damaged / Defective",
+        condition: "Damaged",
+      },
+    ]);
+    setShowReturnModal(true);
+  };
+
+  const updateReturnItem = (index, field, value) => {
+    setReturnItems((prev) =>
+      prev.map((item, i) => {
+        if (i !== index) return item;
+
+        const next = { ...item, [field]: value };
+
+        if (field === "productName") {
+          const selected = productList.find(
+            (p) => p.name === value || (p._id || p.id) === value
+          );
+          if (selected) {
+            next.productId = selected._id || selected.id;
+            next.productName = selected.name;
+            next.unit = selected.unit || "pcs";
+            next.purchaseRate = String(
+              selected.cost !== undefined && selected.cost > 0
+                ? selected.cost
+                : selected.price || 0
+            );
+            next.gstRate = selected.gst !== undefined ? selected.gst : 18;
+          }
+        }
+
+        const qty = parseFloat(next.quantity) || 0;
+        const rate = parseFloat(next.purchaseRate) || 0;
+        const gstR = Number(next.gstRate) || 0;
+
+        const baseAmount = qty * rate;
+        const calculatedGst = baseAmount * (gstR / 100);
+
+        next.itemAmount = baseAmount;
+        next.gstAmount = calculatedGst;
+
+        return next;
+      })
+    );
+  };
+
+  const addReturnItemRow = () => {
+    setReturnItems((prev) => [
+      ...prev,
+      {
+        productId: null,
+        productName: "",
+        quantity: "1",
+        maxQuantity: null,
+        unit: "pcs",
+        purchaseRate: "0",
+        gstRate: 18,
+        gstAmount: 0,
+        itemAmount: 0,
+        reason: "Damaged / Defective",
+        condition: "Damaged",
+      },
+    ]);
+  };
+
+  const removeReturnItemRow = (index) => {
+    if (returnItems.length <= 1) return;
+    setReturnItems((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  // Return calculation summaries
+  const returnSubtotal = useMemo(() => {
+    return returnItems.reduce(
+      (sum, item) => sum + (Number(item.itemAmount) || 0),
+      0
+    );
+  }, [returnItems]);
+
+  const returnGstTotal = useMemo(() => {
+    return returnItems.reduce(
+      (sum, item) => sum + (Number(item.gstAmount) || 0),
+      0
+    );
+  }, [returnItems]);
+
+  const totalReturnAmount = useMemo(() => {
+    return returnSubtotal + returnGstTotal;
+  }, [returnSubtotal, returnGstTotal]);
+
+  const handleSavePurchaseReturn = async () => {
+    if (!returnSupplier || !returnSupplier.trim()) {
+      showToast("Please select a supplier for the return.", "error");
+      return;
+    }
+    if (returnItems.length === 0) {
+      showToast("At least one product item is required for return.", "error");
+      return;
+    }
+
+    const invalidItem = returnItems.find(
+      (it) => !it.productName || Number(it.quantity) <= 0 || Number(it.purchaseRate) < 0
+    );
+    if (invalidItem) {
+      showToast(
+        "Please provide a valid product name, return quantity (> 0), and rate for all return items.",
+        "error"
+      );
+      return;
+    }
+
+    const payload = {
+      purchaseId: returnPurchaseId || null,
+      supplierId: returnSupplierId || null,
+      supplierName: returnSupplier.trim(),
+      supplierInvoiceNo: returnInvoiceNo.trim(),
+      returnDate,
+      items: returnItems.map((it) => ({
+        productId: it.productId || null,
+        productName: it.productName.trim(),
+        quantity: Number(it.quantity),
+        unit: it.unit || "pcs",
+        purchaseRate: Number(it.purchaseRate),
+        gstRate: Number(it.gstRate) || 0,
+        reason: it.reason || "Damaged / Defective",
+        condition: it.condition || "Damaged",
+      })),
+      subtotal: returnSubtotal,
+      gstTotal: returnGstTotal,
+      totalReturnAmount,
+      settlementType: returnSettlementType,
+      notes: returnNotes.trim(),
+    };
+
+    setSavingReturn(true);
+    try {
+      const res = await createPurchaseReturn(payload);
+      showToast("Purchase Return (Debit Note) created successfully!", "success");
+      setShowReturnModal(false);
+      window.dispatchEvent(new CustomEvent("stockUpdated"));
+      window.dispatchEvent(new CustomEvent("purchaseReturnCreated", { detail: res }));
+      await loadData();
+      setActiveTab("returns");
+      if (res?.purchaseReturn) {
+        setActiveDebitNote(res.purchaseReturn);
+      }
+    } catch (err) {
+      console.error("SAVE PURCHASE RETURN ERROR:", err);
+      showToast(
+        err.response?.data?.message ||
+          err.message ||
+          "Failed to process purchase return",
+        "error"
+      );
+    } finally {
+      setSavingReturn(false);
+    }
+  };
+
   // Filtered purchases for History tab
   const filteredPurchases = useMemo(() => {
     return purchaseList.filter((purchase) => {
@@ -779,18 +1061,76 @@ export default function PurchaseScreen() {
         ""
       ).toLowerCase();
       const po = (purchase.purchaseOrderNo || "").toLowerCase();
-      
-      const searchMatch = inv.includes(q) || supp.includes(q) || po.includes(q);
-      
+
+      const searchMatch =
+        inv.includes(q) || supp.includes(q) || po.includes(q);
+
       let dateMatch = true;
       if (filterMonth) {
         const pDate = purchase.purchaseDate || purchase.date || "";
         dateMatch = pDate.startsWith(filterMonth);
       }
-      
+
       return searchMatch && dateMatch;
     });
   }, [purchaseList, searchHistory, filterMonth]);
+
+  // Filtered purchase returns
+  const filteredReturns = useMemo(() => {
+    return purchaseReturnsList.filter((ret) => {
+      const q = searchReturns.toLowerCase();
+      const dn = (ret.debitNoteNo || "").toLowerCase();
+      const supp = (ret.supplierName || "").toLowerCase();
+      const inv = (ret.supplierInvoiceNo || "").toLowerCase();
+      const hasItem = (ret.items || []).some((it) =>
+        (it.productName || "").toLowerCase().includes(q)
+      );
+
+      const searchMatch =
+        dn.includes(q) || supp.includes(q) || inv.includes(q) || hasItem;
+
+      let reasonMatch = true;
+      if (filterReturnReason) {
+        reasonMatch = (ret.items || []).some(
+          (it) => it.reason === filterReturnReason
+        );
+      }
+
+      return searchMatch && reasonMatch;
+    });
+  }, [purchaseReturnsList, searchReturns, filterReturnReason]);
+
+  // KPI calculations for Returns tab
+  const totalReturnsValue = useMemo(() => {
+    return purchaseReturnsList.reduce(
+      (sum, r) => sum + (Number(r.totalReturnAmount) || 0),
+      0
+    );
+  }, [purchaseReturnsList]);
+
+  const totalReturnedItemsCount = useMemo(() => {
+    return purchaseReturnsList.reduce((sum, r) => {
+      const itemCount = (r.items || []).reduce(
+        (isum, it) => isum + (Number(it.quantity) || 0),
+        0
+      );
+      return sum + itemCount;
+    }, 0);
+  }, [purchaseReturnsList]);
+
+  const damagedItemsCount = useMemo(() => {
+    return purchaseReturnsList.reduce((sum, r) => {
+      const dCount = (r.items || []).reduce((isum, it) => {
+        return (
+          isum +
+          (it.reason === "Damaged / Defective" || it.condition === "Damaged"
+            ? Number(it.quantity) || 0
+            : 0)
+        );
+      }, 0);
+      return sum + dCount;
+    }, 0);
+  }, [purchaseReturnsList]);
 
   return (
     <div className="space-y-4">
@@ -826,6 +1166,19 @@ export default function PurchaseScreen() {
             <span>Purchase History</span>
             <span className="text-xs px-1.5 py-0.2 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-mono">
               {purchaseList.length}
+            </span>
+          </button>
+          <button
+            onClick={() => setActiveTab("returns")}
+            className={`pb-2.5 text-sm font-semibold transition-colors cursor-pointer border-b-2 -mb-[9px] flex items-center gap-1.5 ${
+              activeTab === "returns"
+                ? "border-amber-600 text-amber-600 dark:text-amber-400 font-bold"
+                : "border-transparent text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200"
+            }`}
+          >
+            <span>Purchase Returns (Debit Notes)</span>
+            <span className="text-xs px-1.5 py-0.2 rounded bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 font-mono font-bold">
+              {purchaseReturnsList.length}
             </span>
           </button>
         </div>
@@ -1152,11 +1505,11 @@ export default function PurchaseScreen() {
                             onChange={(e) =>
                               updateItem(i, "gstRate", Number(e.target.value))
                             }
-                            className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md py-1.5 text-xs text-slate-900 dark:text-white outline-none focus:border-blue-500 text-center font-mono"
+                            className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md py-1.5 text-xs text-slate-900 dark:text-white outline-none focus:border-blue-500 text-center font-mono cursor-pointer"
                           >
-                            {GST_OPTIONS.map((g) => (
-                              <option key={g} value={g}>
-                                {g}%
+                            {GST_RATES.map((g) => (
+                              <option key={g.value} value={g.value}>
+                                {g.value}%
                               </option>
                             ))}
                           </select>
@@ -1365,7 +1718,7 @@ export default function PurchaseScreen() {
             </div>
           </div>
         </div>
-      ) : (
+      ) : activeTab === "history" ? (
         /* ── Purchase History Tab ── */
         <PurchaseHistoryTable
           filteredPurchases={filteredPurchases}
@@ -1375,9 +1728,226 @@ export default function PurchaseScreen() {
           setFilterMonth={setFilterMonth}
           handleOpenPaymentModal={handleOpenPaymentModal}
           handleOpenSupplierDetails={(p) => setSelectedSupplierPurchase(p)}
+          handleOpenReturnModal={openReturnModalForPurchase}
           handleDeletePurchase={handleDeletePurchase}
           fmt={fmt}
         />
+      ) : (
+        /* ── Purchase Returns / Debit Notes Tab ── */
+        <div className="space-y-4">
+          {/* Top KPI Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm flex items-center gap-3.5">
+              <div className="w-11 h-11 bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 rounded-xl flex items-center justify-center border border-amber-200 dark:border-amber-800">
+                <RotateCcw className="w-5 h-5" />
+              </div>
+              <div>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Debit Notes Issued
+                </p>
+                <p className="text-lg font-bold text-slate-900 dark:text-white font-mono">
+                  {purchaseReturnsList.length}
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm flex items-center gap-3.5">
+              <div className="w-11 h-11 bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 rounded-xl flex items-center justify-center border border-rose-200 dark:border-rose-800">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Damaged / Faulty Goods
+                </p>
+                <p className="text-lg font-bold text-rose-600 dark:text-rose-400 font-mono">
+                  {damagedItemsCount} units
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm flex items-center gap-3.5">
+              <div className="w-11 h-11 bg-purple-50 dark:bg-purple-950/60 text-purple-600 dark:text-purple-400 rounded-xl flex items-center justify-center border border-purple-200 dark:border-purple-800">
+                <Package className="w-5 h-5" />
+              </div>
+              <div>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Total Items Returned
+                </p>
+                <p className="text-lg font-bold text-slate-900 dark:text-white font-mono">
+                  {totalReturnedItemsCount} items
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Returns Table */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden shadow-sm">
+            {/* Search and Reason Filter */}
+            <div className="p-3.5 border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3">
+              <div className="relative flex-1 min-w-[240px] max-w-sm">
+                <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
+                <input
+                  value={searchReturns}
+                  onChange={(e) => setSearchReturns(e.target.value)}
+                  placeholder="Search Debit Note #, supplier, or product..."
+                  className="w-full pl-9 pr-3 py-1.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-xs text-slate-900 dark:text-white placeholder-slate-400 outline-none focus:border-amber-500"
+                />
+              </div>
+
+              <div className="flex items-center gap-2">
+                <label className="text-xs font-semibold text-slate-500 whitespace-nowrap">
+                  Return Reason:
+                </label>
+                <select
+                  value={filterReturnReason}
+                  onChange={(e) => setFilterReturnReason(e.target.value)}
+                  className="px-2.5 py-1.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-xs text-slate-900 dark:text-white outline-none focus:border-amber-500"
+                >
+                  <option value="">All Reasons</option>
+                  {RETURN_REASONS.map((r) => (
+                    <option key={r} value={r}>
+                      {r}
+                    </option>
+                  ))}
+                </select>
+                {filterReturnReason && (
+                  <button
+                    onClick={() => setFilterReturnReason("")}
+                    className="text-xs text-amber-600 hover:underline whitespace-nowrap"
+                  >
+                    Clear
+                  </button>
+                )}
+
+                <button
+                  onClick={openNewBlankReturnModal}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-semibold shadow-xs transition cursor-pointer ml-2"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>+ New Return</span>
+                </button>
+              </div>
+            </div>
+
+            {filteredReturns.length === 0 ? (
+              <div className="py-14 text-center space-y-3">
+                <div className="w-12 h-12 bg-amber-50 dark:bg-amber-950/40 text-amber-500 rounded-full flex items-center justify-center mx-auto border border-amber-200 dark:border-amber-800">
+                  <RotateCcw className="w-6 h-6" />
+                </div>
+                <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">
+                  No Purchase Returns / Debit Notes recorded yet
+                </p>
+                <p className="text-xs text-slate-500 dark:text-slate-400 max-w-sm mx-auto">
+                  If products received from your supplier are damaged or faulty, you can return them to adjust your balance and deduct stock.
+                </p>
+                <button
+                  onClick={openNewBlankReturnModal}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-semibold shadow-sm transition-colors cursor-pointer mt-1"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Create First Purchase Return</span>
+                </button>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs text-left">
+                  <thead>
+                    <tr className="border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 text-slate-600 dark:text-slate-400 font-semibold">
+                      <th className="px-4 py-3">Debit Note #</th>
+                      <th className="px-4 py-3">Return Date</th>
+                      <th className="px-4 py-3">Supplier & Invoice</th>
+                      <th className="px-4 py-3">Returned Items & Reason</th>
+                      <th className="px-4 py-3">Settlement</th>
+                      <th className="px-4 py-3 text-right">Subtotal</th>
+                      <th className="px-4 py-3 text-right">GST Reversal</th>
+                      <th className="px-4 py-3 text-right">Debit Total</th>
+                      <th className="px-4 py-3 text-center">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                    {filteredReturns.map((ret) => {
+                      const dateStr = ret.returnDate
+                        ? new Date(ret.returnDate).toISOString().slice(0, 10)
+                        : "-";
+
+                      return (
+                        <tr
+                          key={ret._id || ret.id}
+                          className="hover:bg-slate-50 dark:hover:bg-slate-800/30"
+                        >
+                          <td className="px-4 py-3 font-mono font-bold text-amber-600 dark:text-amber-400">
+                            {ret.debitNoteNo}
+                          </td>
+                          <td className="px-4 py-3 text-slate-500 dark:text-slate-400 font-mono">
+                            {dateStr}
+                          </td>
+                          <td className="px-4 py-3">
+                            <p className="font-semibold text-slate-900 dark:text-white">
+                              {ret.supplierName}
+                            </p>
+                            {ret.supplierInvoiceNo && (
+                              <p className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">
+                                Ref Bill: #{ret.supplierInvoiceNo}
+                              </p>
+                            )}
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="space-y-1 max-w-xs">
+                              {(ret.items || []).map((it, idx) => (
+                                <div
+                                  key={idx}
+                                  className="flex items-center gap-1.5 flex-wrap"
+                                >
+                                  <span className="font-medium text-slate-800 dark:text-slate-200">
+                                    {it.productName} ({it.quantity} {it.unit || "pcs"})
+                                  </span>
+                                  <span
+                                    className={`px-1.5 py-0.2 rounded text-[10px] font-semibold ${
+                                      it.reason === "Damaged / Defective" ||
+                                      it.condition === "Damaged"
+                                        ? "bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-300"
+                                        : "bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300"
+                                    }`}
+                                  >
+                                    {it.reason || "Return"}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className="inline-block px-2 py-0.5 rounded text-[11px] font-medium bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                              {ret.settlementType || "Balance Adjusted"}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 font-mono text-slate-700 dark:text-slate-300 text-right">
+                            {fmt(ret.subtotal || 0)}
+                          </td>
+                          <td className="px-4 py-3 font-mono text-emerald-600 dark:text-emerald-400 text-right">
+                            {fmt(ret.gstTotal || 0)}
+                          </td>
+                          <td className="px-4 py-3 font-bold text-amber-700 dark:text-amber-300 font-mono text-right text-sm">
+                            {fmt(ret.totalReturnAmount || 0)}
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            <button
+                              type="button"
+                              onClick={() => setActiveDebitNote(ret)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md bg-slate-900 hover:bg-slate-800 text-white text-[11px] font-semibold transition-colors cursor-pointer shadow-sm"
+                            >
+                              <Eye className="w-3 h-3" />
+                              <span>View Note</span>
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
       )}
 
       {/* ── SUPPLIER & PURCHASE PAYMENT DETAILS MODAL ── */}
@@ -1667,10 +2237,8 @@ export default function PurchaseScreen() {
                 value={quickProductForm.price}
                 onChange={(v) => setQuickProductForm((f) => ({ ...f, price: v }))}
               />
-              <Input
-                label="GST %"
-                type="number"
-                placeholder="18"
+              <GstRateSelect
+                label="GST Rate"
                 value={quickProductForm.gst}
                 onChange={(v) => setQuickProductForm((f) => ({ ...f, gst: v }))}
               />
@@ -1887,6 +2455,558 @@ export default function PurchaseScreen() {
             </div>
           </div>
         </Modal>
+      )}
+
+      {/* ─────────────────────────────────────────────────────────────
+          MODAL 1: CREATE PURCHASE RETURN (DEBIT NOTE)
+      ───────────────────────────────────────────────────────────── */}
+      {showReturnModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-4xl w-full max-h-[90vh] flex flex-col overflow-hidden">
+            {/* Modal Header */}
+            <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-amber-500/10">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-amber-500 text-white flex items-center justify-center font-bold">
+                  <RotateCcw className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-900 dark:text-white text-base">
+                    Create Purchase Return (Debit Note)
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Deduct damaged/returned inventory stock and adjust supplier ledger balance.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowReturnModal(false)}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 overflow-y-auto space-y-5 flex-1">
+              {/* Supplier & Reference Info */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 bg-slate-50 dark:bg-slate-800/40 p-3.5 rounded-xl border border-slate-200 dark:border-slate-700/60">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    Supplier / Vendor <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    value={returnSupplier}
+                    onChange={(e) => {
+                      setReturnSupplier(e.target.value);
+                      const sObj = supplierList.find(
+                        (s) => s.name === e.target.value
+                      );
+                      setReturnSupplierId(sObj?._id || sObj?.id || null);
+                    }}
+                    className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-900 dark:text-white outline-none focus:border-amber-500 font-medium"
+                  >
+                    <option value="">Select Supplier</option>
+                    {supplierList.map((s) => (
+                      <option key={s._id || s.id} value={s.name}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    Original Bill / Invoice Ref #
+                  </label>
+                  <input
+                    type="text"
+                    value={returnInvoiceNo}
+                    onChange={(e) => setReturnInvoiceNo(e.target.value)}
+                    placeholder="e.g. BILL-9921"
+                    className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-900 dark:text-white placeholder-slate-400 outline-none focus:border-amber-500 font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    Return Date <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="date"
+                    value={returnDate}
+                    onChange={(e) => setReturnDate(e.target.value)}
+                    className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-900 dark:text-white outline-none focus:border-amber-500 font-mono"
+                  />
+                </div>
+              </div>
+
+              {/* Items to Return Table */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-bold text-slate-800 dark:text-slate-200">
+                    Returned Line Items (Stock will be deducted from Inventory)
+                  </label>
+                  <span className="text-[11px] text-amber-700 dark:text-amber-400 font-medium">
+                    ⚠️ Returning stock will decrease current inventory levels.
+                  </span>
+                </div>
+
+                <div className="border border-slate-200 dark:border-slate-800 rounded-xl overflow-x-auto shadow-xs">
+                  <table className="w-full text-xs text-left">
+                    <thead className="bg-slate-100 dark:bg-slate-800/80 text-slate-600 dark:text-slate-400 font-semibold border-b border-slate-200 dark:border-slate-700">
+                      <tr>
+                        <th className="p-2.5 min-w-[200px]">Product / Item</th>
+                        <th className="p-2.5 w-24 text-center">Return Qty</th>
+                        <th className="p-2.5 w-28 text-right">Purchase Rate (₹)</th>
+                        <th className="p-2.5 w-20 text-center">GST %</th>
+                        <th className="p-2.5 min-w-[150px]">Return Reason</th>
+                        <th className="p-2.5 min-w-[130px]">Condition</th>
+                        <th className="p-2.5 w-28 text-right">Total (₹)</th>
+                        <th className="p-2.5 w-10 text-center"></th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                      {returnItems.map((item, i) => (
+                        <tr
+                          key={i}
+                          className="hover:bg-slate-50 dark:hover:bg-slate-800/40"
+                        >
+                          <td className="p-2.5">
+                            <input
+                              type="text"
+                              value={item.productName}
+                              onChange={(e) =>
+                                updateReturnItem(i, "productName", e.target.value)
+                              }
+                              list={`return-products-${i}`}
+                              placeholder="Type or select product..."
+                              className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded px-2.5 py-1.5 text-xs text-slate-900 dark:text-white outline-none focus:border-amber-500 font-medium"
+                            />
+                            <datalist id={`return-products-${i}`}>
+                              {productList.map((p) => (
+                                <option key={p._id || p.id} value={p.name}>
+                                  Stock: {p.stock} | Cost: ₹{p.cost || p.price}
+                                </option>
+                              ))}
+                            </datalist>
+                          </td>
+
+                          <td className="p-2.5">
+                            <input
+                              type="number"
+                              min="1"
+                              max={item.maxQuantity || undefined}
+                              value={item.quantity}
+                              onChange={(e) =>
+                                updateReturnItem(i, "quantity", e.target.value)
+                              }
+                              className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded px-2 py-1.5 text-xs text-slate-900 dark:text-white font-mono text-center outline-none focus:border-amber-500"
+                            />
+                            {item.maxQuantity !== null && item.maxQuantity !== undefined && (
+                              <span className="text-[10px] text-slate-400 text-center block mt-0.5">
+                                max: {item.maxQuantity}
+                              </span>
+                            )}
+                          </td>
+
+                          <td className="p-2.5">
+                            <input
+                              type="number"
+                              min="0"
+                              value={item.purchaseRate}
+                              onChange={(e) =>
+                                updateReturnItem(i, "purchaseRate", e.target.value)
+                              }
+                              className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded px-2 py-1.5 text-xs text-slate-900 dark:text-white font-mono text-right outline-none focus:border-amber-500"
+                            />
+                          </td>
+
+                          <td className="p-2.5">
+                            <select
+                              value={item.gstRate}
+                              onChange={(e) =>
+                                updateReturnItem(i, "gstRate", Number(e.target.value))
+                              }
+                              className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded px-1.5 py-1.5 text-xs text-slate-900 dark:text-white text-center outline-none focus:border-amber-500 cursor-pointer font-mono"
+                            >
+                              {GST_RATES.map((g) => (
+                                <option key={g.value} value={g.value}>
+                                  {g.value}%
+                                </option>
+                              ))}
+                            </select>
+                          </td>
+
+                          <td className="p-2.5">
+                            <select
+                              value={item.reason}
+                              onChange={(e) =>
+                                updateReturnItem(i, "reason", e.target.value)
+                              }
+                              className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded px-2 py-1.5 text-xs text-slate-900 dark:text-white outline-none focus:border-amber-500"
+                            >
+                              {RETURN_REASONS.map((r) => (
+                                <option key={r} value={r}>
+                                  {r}
+                                </option>
+                              ))}
+                            </select>
+                          </td>
+
+                          <td className="p-2.5">
+                            <select
+                              value={item.condition}
+                              onChange={(e) =>
+                                updateReturnItem(i, "condition", e.target.value)
+                              }
+                              className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded px-2 py-1.5 text-xs text-slate-900 dark:text-white outline-none focus:border-amber-500"
+                            >
+                              {RETURN_CONDITIONS.map((c) => (
+                                <option key={c} value={c}>
+                                  {c}
+                                </option>
+                              ))}
+                            </select>
+                          </td>
+
+                          <td className="p-2.5 text-right font-mono font-bold text-amber-700 dark:text-amber-300">
+                            {fmt(item.itemAmount + item.gstAmount)}
+                          </td>
+
+                          <td className="p-2.5 text-center">
+                            {returnItems.length > 1 && (
+                              <button
+                                type="button"
+                                onClick={() => removeReturnItemRow(i)}
+                                className="text-red-500 hover:text-red-700 p-1 cursor-pointer"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={addReturnItemRow}
+                  className="inline-flex items-center gap-1.5 text-xs font-semibold text-amber-600 dark:text-amber-400 hover:underline cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Add Another Item to Return</span>
+                </button>
+              </div>
+
+              {/* Settlement & Notes */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-3 border-t border-slate-200 dark:border-slate-800">
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                      Settlement Mode
+                    </label>
+                    <select
+                      value={returnSettlementType}
+                      onChange={(e) => setReturnSettlementType(e.target.value)}
+                      className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-900 dark:text-white outline-none focus:border-amber-500 font-medium"
+                    >
+                      {SETTLEMENT_TYPES.map((st) => (
+                        <option key={st} value={st}>
+                          {st}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-[11px] text-slate-500 mt-1">
+                      {returnSettlementType === "Adjust from Supplier Balance"
+                        ? "✓ Automatically deducts this amount from the supplier's payable ledger."
+                        : "✓ Records this return as a refund settlement."}
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                      Notes / Damage Details
+                    </label>
+                    <textarea
+                      rows={2}
+                      value={returnNotes}
+                      onChange={(e) => setReturnNotes(e.target.value)}
+                      placeholder="Specify packaging damage, serial numbers, or defect notes..."
+                      className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-900 dark:text-white placeholder-slate-400 outline-none focus:border-amber-500"
+                    />
+                  </div>
+                </div>
+
+                {/* Return Total Calculation Summary */}
+                <div className="bg-amber-50/60 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/60 rounded-xl p-4 flex flex-col justify-between">
+                  <div className="space-y-2">
+                    <div className="flex justify-between text-slate-600 dark:text-slate-400">
+                      <span>Return Subtotal:</span>
+                      <span className="font-mono text-slate-900 dark:text-white font-semibold">
+                        {fmt(returnSubtotal)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-slate-600 dark:text-slate-400">
+                      <span>GST Reversal:</span>
+                      <span className="font-mono text-emerald-600 dark:text-emerald-400 font-semibold">
+                        +{fmt(returnGstTotal)}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="pt-3 border-t border-amber-200 dark:border-amber-800 flex justify-between items-baseline mt-3">
+                    <div>
+                      <p className="text-xs font-bold text-slate-900 dark:text-white">
+                        Total Debit Note Amount
+                      </p>
+                      <p className="text-[10px] text-slate-500">
+                        (Stock will be deducted)
+                      </p>
+                    </div>
+                    <span className="text-xl font-extrabold font-mono text-amber-700 dark:text-amber-300">
+                      {fmt(totalReturnAmount)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="px-6 py-3.5 border-t border-slate-200 dark:border-slate-800 flex items-center justify-end gap-3 bg-slate-50 dark:bg-slate-950">
+              <button
+                type="button"
+                onClick={() => setShowReturnModal(false)}
+                className="px-4 py-2 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSavePurchaseReturn}
+                disabled={savingReturn}
+                className="px-5 py-2 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 text-white rounded-lg text-xs font-bold shadow-sm transition flex items-center gap-2 cursor-pointer disabled:opacity-50"
+              >
+                {savingReturn ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>Processing Return & Stock Reversal...</span>
+                  </>
+                ) : (
+                  <>
+                    <Check className="w-3.5 h-3.5" />
+                    <span>Generate Debit Note</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─────────────────────────────────────────────────────────────
+          MODAL 2: PRINTABLE GST DEBIT NOTE VOUCHER
+      ───────────────────────────────────────────────────────────── */}
+      {activeDebitNote && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-2xl w-full max-h-[95vh] flex flex-col overflow-hidden">
+            {/* Header / Action toolbar */}
+            <div className="px-6 py-3.5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-800/60">
+              <div className="flex items-center gap-2">
+                <FileText className="w-4 h-4 text-amber-600" />
+                <span className="font-bold text-sm text-slate-900 dark:text-white">
+                  Debit Note Voucher: {activeDebitNote.debitNoteNo}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => window.print()}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold shadow-xs transition cursor-pointer"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  <span>Print Note</span>
+                </button>
+                <button
+                  onClick={() => setActiveDebitNote(null)}
+                  className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            {/* Printable Voucher Paper */}
+            <div
+              id="printable-debit-note"
+              className="p-8 overflow-y-auto space-y-6 flex-1 bg-white text-slate-900 text-xs font-sans"
+            >
+              {/* Top Banner */}
+              <div className="border-b-2 border-slate-900 pb-4 flex justify-between items-start">
+                <div>
+                  <h1 className="text-xl font-extrabold tracking-tight text-slate-900 uppercase">
+                    DEBIT NOTE / PURCHASE RETURN
+                  </h1>
+                  <p className="text-[11px] text-slate-500 font-medium">
+                    Issued under GST (Section 34 of CGST Act)
+                  </p>
+                </div>
+                <div className="text-right">
+                  <p className="text-sm font-mono font-extrabold text-amber-700">
+                    {activeDebitNote.debitNoteNo}
+                  </p>
+                  <p className="text-[11px] text-slate-500 font-mono">
+                    Date:{" "}
+                    {activeDebitNote.returnDate
+                      ? new Date(activeDebitNote.returnDate)
+                          .toISOString()
+                          .slice(0, 10)
+                      : "-"}
+                  </p>
+                </div>
+              </div>
+
+              {/* Parties Section */}
+              <div className="grid grid-cols-2 gap-6 bg-slate-50 p-4 rounded-xl border border-slate-200">
+                <div>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+                    Debit Issued To (Supplier)
+                  </p>
+                  <p className="font-bold text-slate-900 text-sm">
+                    {activeDebitNote.supplierName}
+                  </p>
+                  {activeDebitNote.supplierInvoiceNo && (
+                    <p className="text-slate-600 text-[11px] mt-0.5">
+                      Against Invoice:{" "}
+                      <span className="font-mono font-semibold">
+                        #{activeDebitNote.supplierInvoiceNo}
+                      </span>
+                    </p>
+                  )}
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+                    Settlement & Accounting Details
+                  </p>
+                  <p className="font-semibold text-slate-800">
+                    Mode: {activeDebitNote.settlementType}
+                  </p>
+                  <p className="text-emerald-700 font-semibold text-[11px] mt-0.5">
+                    Status: Settled (Inventory Stock Adjusted)
+                  </p>
+                </div>
+              </div>
+
+              {/* Items Table */}
+              <table className="w-full border-collapse border border-slate-200 text-left">
+                <thead>
+                  <tr className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200">
+                    <th className="p-2 border-r border-slate-200 w-8 text-center">
+                      #
+                    </th>
+                    <th className="p-2 border-r border-slate-200">
+                      Product Description
+                    </th>
+                    <th className="p-2 border-r border-slate-200 w-16 text-center">
+                      Qty
+                    </th>
+                    <th className="p-2 border-r border-slate-200 w-20 text-right">
+                      Rate (₹)
+                    </th>
+                    <th className="p-2 border-r border-slate-200 min-w-[120px]">
+                      Reason / Condition
+                    </th>
+                    <th className="p-2 border-r border-slate-200 w-16 text-center">
+                      GST
+                    </th>
+                    <th className="p-2 text-right w-24">Amount (₹)</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200">
+                  {(activeDebitNote.items || []).map((it, idx) => (
+                    <tr key={idx} className="hover:bg-slate-50/50">
+                      <td className="p-2 text-center border-r border-slate-200 font-mono text-slate-500">
+                        {idx + 1}
+                      </td>
+                      <td className="p-2 border-r border-slate-200 font-semibold">
+                        {it.productName}
+                      </td>
+                      <td className="p-2 text-center border-r border-slate-200 font-mono font-bold">
+                        {it.quantity} {it.unit || "pcs"}
+                      </td>
+                      <td className="p-2 text-right border-r border-slate-200 font-mono">
+                        {fmt(it.purchaseRate)}
+                      </td>
+                      <td className="p-2 border-r border-slate-200">
+                        <span className="font-semibold text-rose-600 block">
+                          {it.reason || "Damaged"}
+                        </span>
+                        <span className="text-[10px] text-slate-500">
+                          Condition: {it.condition || "Damaged"}
+                        </span>
+                      </td>
+                      <td className="p-2 text-center border-r border-slate-200 font-mono">
+                        {it.gstRate || 0}%
+                      </td>
+                      <td className="p-2 text-right font-mono font-bold text-slate-900">
+                        {fmt(it.itemAmount + (it.gstAmount || 0))}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+
+              {/* Financial Totals */}
+              <div className="flex justify-end">
+                <div className="w-64 space-y-1.5 border border-slate-200 rounded-xl p-3 bg-slate-50">
+                  <div className="flex justify-between text-slate-600">
+                    <span>Taxable Subtotal:</span>
+                    <span className="font-mono font-semibold">
+                      {fmt(activeDebitNote.subtotal || 0)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-slate-600">
+                    <span>Total GST Reversal:</span>
+                    <span className="font-mono font-semibold text-emerald-600">
+                      {fmt(activeDebitNote.gstTotal || 0)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-sm font-extrabold text-slate-900 pt-2 border-t border-slate-300">
+                    <span>Net Debit Value:</span>
+                    <span className="font-mono text-amber-700">
+                      {fmt(activeDebitNote.totalReturnAmount || 0)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Notes */}
+              {activeDebitNote.notes && (
+                <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-slate-600 text-[11px]">
+                  <strong>Remarks / Note:</strong> {activeDebitNote.notes}
+                </div>
+              )}
+
+              {/* Signature Blocks */}
+              <div className="pt-8 grid grid-cols-2 gap-8 text-center text-slate-500 text-[11px]">
+                <div>
+                  <div className="border-t border-slate-300 pt-1 font-semibold text-slate-700">
+                    Authorized Signatory
+                  </div>
+                  <p className="text-[10px] text-slate-400">SmartBill Business</p>
+                </div>
+                <div>
+                  <div className="border-t border-slate-300 pt-1 font-semibold text-slate-700">
+                    Supplier Acknowledgment
+                  </div>
+                  <p className="text-[10px] text-slate-400">
+                    {activeDebitNote.supplierName}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

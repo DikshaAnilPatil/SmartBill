@@ -43,7 +43,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { fmt } from "@shared/utils/format";
-import { Badge, Btn, Card, Input, Select, Modal, StepperInput } from "@shared/components/common/ui";
+import { Badge, Btn, Card, Input, Select, Modal, StepperInput, GST_RATES } from "@shared/components/common/ui";
 import { createOrder } from "@shared/api/orderAPI";
 import { fetchCustomers, createCustomer } from "@shared/api/customerAPI";
 import { getProducts } from "@shared/api/productAPI";
@@ -510,6 +510,15 @@ export default function POSScreen() {
     );
   };
 
+  const updateItemGstRate = (id, val) => {
+    const numericGst = Math.max(0, Number(val) || 0);
+    setCart((c) =>
+      c.map((i) =>
+        getProductId(i.product) === id ? { ...i, gstRate: numericGst } : i
+      )
+    );
+  };
+
   const updateItemDiscount = (id, val) => {
     const numericVal = Math.max(0, Number(val) || 0);
     if (discountType === "Percentage" && maxDiscountLimit < 100 && numericVal > maxDiscountLimit) {
@@ -551,7 +560,9 @@ export default function POSScreen() {
       }
 
       const productGstRate = Number(
-        i?.product?.gst ?? i?.product?.gstRate ?? 18
+        i?.gstRate !== undefined
+          ? i.gstRate
+          : (i?.product?.gst ?? i?.product?.gstRate ?? 18)
       );
       const itemGst = (itemSubtotal * productGstRate) / 100;
 
@@ -1100,6 +1111,7 @@ export default function POSScreen() {
       price: i.unitPrice,
       qty: i.qty,
       discount: Number(i.discount) || 0,
+      gstRate: i.productGstRate,
       amount: i.itemSubtotal,
     }));
 
@@ -1875,6 +1887,22 @@ export default function POSScreen() {
                         />
                       </div>
                     )}
+
+                    {/* Item GST Slab Dropdown */}
+                    <div className="flex items-center gap-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded px-1.5 py-0.5" title="GST Rate Slab">
+                      <span className="text-[9px] text-slate-400 font-mono">GST</span>
+                      <select
+                        value={item.gstRate !== undefined ? item.gstRate : (item.product?.gst ?? item.product?.gstRate ?? 18)}
+                        onChange={(e) => updateItemGstRate(itemId, e.target.value)}
+                        className="bg-transparent text-xs font-mono font-semibold text-slate-700 dark:text-slate-300 outline-none cursor-pointer"
+                      >
+                        {GST_RATES.map((g) => (
+                          <option key={g.value} value={g.value}>
+                            {g.value}%
+                          </option>
+                        ))}
+                      </select>
+                    </div>
 
                     {/* Line Total */}
                     <div className="text-right flex-shrink-0">
