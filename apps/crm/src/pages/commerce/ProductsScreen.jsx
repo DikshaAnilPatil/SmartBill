@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   AlertCircle,
   AlertTriangle,
@@ -272,58 +272,60 @@ export default function ProductsScreen({ onNav }) {
     }
   };
 
-  // --- DYNAMIC INDUSTRY-SPECIFIC PRODUCT CATEGORIES ---
-  const [categories, setCategories] = useState(() => {
-    const industryCats = getProductCategoriesForIndustry(userBizCat, userBizType);
-    const saved = localStorage.getItem("smartbill_categories");
-    if (saved) {
-      try {
+  // --- DYNAMIC INDUSTRY-SPECIFIC & RELATABLE PRODUCT CATEGORIES ---
+  const [customCategories, setCustomCategories] = useState(() => {
+    try {
+      const saved = localStorage.getItem("smartbill_custom_categories");
+      if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          // Merge industry categories with any custom saved categories
-          return Array.from(new Set([...industryCats, ...parsed]));
-        }
-      } catch {}
-    }
-    return industryCats;
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch (_) {}
+    return [];
   });
+
+  // Calculate only relatable categories for the active business type & category:
+  // 1. Industry standard preset categories for user's business
+  // 2. Any active categories present in the user's loaded products
+  // 3. Any custom categories added by the user
+  const categories = useMemo(() => {
+    const industryCats = getProductCategoriesForIndustry(userBizCat, userBizType);
+    const catSet = new Set(industryCats);
+
+    // Include categories actually used by products in inventory
+    (productList || []).forEach((p) => {
+      if (p?.category && String(p.category).trim() && String(p.category).trim().toLowerCase() !== "all") {
+        catSet.add(String(p.category).trim());
+      }
+    });
+
+    // Include custom user-defined categories
+    (customCategories || []).forEach((c) => {
+      if (c && String(c).trim() && String(c).trim().toLowerCase() !== "all") {
+        catSet.add(String(c).trim());
+      }
+    });
+
+    return Array.from(catSet);
+  }, [userBizCat, userBizType, productList, customCategories]);
+
+  const handleAddCategory = (catName) => {
+    const clean = String(catName || "").trim();
+    if (!clean) return;
+    setCustomCategories((prev) => {
+      const updated = Array.from(new Set([...prev, clean]));
+      try {
+        localStorage.setItem("smartbill_custom_categories", JSON.stringify(updated));
+      } catch (_) {}
+      return updated;
+    });
+  };
+
   const [newCategory, setNewCategory] = useState("");
   const [showCategoryInput, setShowCategoryInput] = useState(false);
   const [showEditCategoryInput, setShowEditCategoryInput] = useState(false);
   const [showCategoryManager, setShowCategoryManager] = useState(false);
   const [categoryToRemove, setCategoryToRemove] = useState(null);
-
-  // Synchronize category list whenever user updates business category/type in Settings/Profile
-  useEffect(() => {
-    const handleBizUpdate = () => {
-      try {
-        const raw = localStorage.getItem("smartbill_user");
-        const u = raw ? JSON.parse(raw) : {};
-        const newIndustryCats = getProductCategoriesForIndustry(u.businessCategory, u.businessType);
-        setCategories((prev) => {
-          const set = new Set([...newIndustryCats]);
-          productList.forEach((p) => {
-            if (p.category && String(p.category).trim()) {
-              set.add(String(p.category).trim());
-            }
-          });
-          return Array.from(set);
-        });
-      } catch (_) {}
-    };
-
-    window.addEventListener("userUpdated", handleBizUpdate);
-    window.addEventListener("businessInfoUpdated", handleBizUpdate);
-    return () => {
-      window.removeEventListener("userUpdated", handleBizUpdate);
-      window.removeEventListener("businessInfoUpdated", handleBizUpdate);
-    };
-  }, [productList]);
-
-  // Persist categories list to localStorage
-  useEffect(() => {
-    localStorage.setItem("smartbill_categories", JSON.stringify(categories));
-  }, [categories]);
 
   // =========================
   // EXPORT PRODUCTS
@@ -484,30 +486,18 @@ export default function ProductsScreen({ onNav }) {
     }
   }, [productList]);
 
-  // Automatically include any category from loaded products into the categories list
-  useEffect(() => {
-    if (productList.length > 0) {
-      setCategories((prev) => {
-        const set = new Set([...prev]);
-        productList.forEach((p) => {
-          if (p.category && String(p.category).trim()) {
-            set.add(String(p.category).trim());
-          }
-        });
-        const updated = Array.from(set);
-        return updated.length !== prev.length ? updated : prev;
-      });
-    }
-  }, [productList]);
-
   // Remove category function with product auto-reassignment to General
   const confirmRemoveCategory = async (catName) => {
     const affectedProducts = productList.filter((p) => p.category === catName);
 
-    // Remove category from list
-    const updated = categories.filter((c) => c !== catName);
-    const finalCategories = updated.length > 0 ? updated : ["General"];
-    setCategories(finalCategories);
+    // Remove custom category if present
+    setCustomCategories((prev) => {
+      const updated = prev.filter((c) => c !== catName);
+      try {
+        localStorage.setItem("smartbill_custom_categories", JSON.stringify(updated));
+      } catch (_) {}
+      return updated;
+    });
 
     if (catFilter === catName) {
       setCatFilter("All");
@@ -539,7 +529,7 @@ export default function ProductsScreen({ onNav }) {
     name: "",
     sku: "",
     barcode: "",
-    category: "Electronics",
+    category: "General",
     supplier: supplierList[0]?.name ?? "",
     cost: "0",
     price: "0",
@@ -712,8 +702,8 @@ export default function ProductsScreen({ onNav }) {
                     />
                     <button
                       onClick={() => {
-                        if (newCategory.trim() && !categories.includes(newCategory.trim())) {
-                          setCategories([...categories, newCategory.trim()]);
+                        if (newCategory.trim()) {
+                          handleAddCategory(newCategory.trim());
                         }
                         setNewCategory("");
                         setShowCategoryInput(false);
@@ -826,8 +816,8 @@ export default function ProductsScreen({ onNav }) {
                   size="sm"
                   onClick={() => {
                     if (newCategory.trim()) {
-                      setCategories([...categories, newCategory]);
-                      setEditForm((f) => ({ ...f, category: newCategory }));
+                      handleAddCategory(newCategory.trim());
+                      setEditForm((f) => ({ ...f, category: newCategory.trim() }));
                       setNewCategory("");
                       setShowEditCategoryInput(false);
                     }
@@ -1195,8 +1185,8 @@ export default function ProductsScreen({ onNav }) {
                   size="sm"
                   onClick={() => {
                     if (newCategory.trim()) {
-                      setCategories([...categories, newCategory]);
-                      setForm((f) => ({ ...f, category: newCategory }));
+                      handleAddCategory(newCategory.trim());
+                      setForm((f) => ({ ...f, category: newCategory.trim() }));
                       setNewCategory("");
                       setShowCategoryInput(false);
                     }
@@ -1909,6 +1899,30 @@ export default function ProductsScreen({ onNav }) {
             </Btn>
           </div>
 
+          {/* Relatable Category Filter Dropdown Menu */}
+          <div className="w-60 min-w-[200px]">
+            <div className="relative flex items-center">
+              <Filter className="w-3.5 h-3.5 text-slate-400 dark:text-slate-500 absolute left-3 pointer-events-none" />
+              <select
+                value={catFilter}
+                onChange={(e) => setCatFilter(e.target.value)}
+                className="w-full pl-9 pr-8 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-800 dark:text-slate-200 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 cursor-pointer shadow-xs appearance-none transition-all"
+                title="Filter products by relatable category"
+              >
+                <option value="All">All Categories ({productList.length})</option>
+                {categories.map((c) => {
+                  const count = productList.filter((p) => p.category === c).length;
+                  return (
+                    <option key={c} value={c}>
+                      {c} {count > 0 ? `(${count})` : ""}
+                    </option>
+                  );
+                })}
+              </select>
+              <ChevronDown className="w-3.5 h-3.5 text-slate-400 dark:text-slate-500 absolute right-3 pointer-events-none" />
+            </div>
+          </div>
+
           {/* Export Dropdown */}
           <div className="relative">
             <Btn
@@ -1921,17 +1935,17 @@ export default function ProductsScreen({ onNav }) {
               <ChevronDown className="w-3.5 h-3.5 ml-1 opacity-70" />
             </Btn>
             {showExportMenu && (
-              <div className="absolute right-0 mt-1 w-44 bg-white rounded-xl shadow-xl border border-slate-200 py-1.5 z-30">
+              <div className="absolute right-0 mt-1 w-44 bg-white dark:bg-slate-800 rounded-xl shadow-xl border border-slate-200 dark:border-slate-700 py-1.5 z-30">
                 <button
                   onClick={handleExportExcel}
-                  className="w-full px-3.5 py-2 text-left text-xs font-medium text-slate-700 hover:bg-emerald-50 hover:text-emerald-700 flex items-center gap-2 transition-colors"
+                  className="w-full px-3.5 py-2 text-left text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 hover:text-emerald-700 dark:hover:text-emerald-300 flex items-center gap-2 transition-colors"
                 >
                   <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
                   Export to Excel (.xlsx)
                 </button>
                 <button
                   onClick={handleExportCsv}
-                  className="w-full px-3.5 py-2 text-left text-xs font-medium text-slate-700 hover:bg-blue-50 hover:text-blue-700 flex items-center gap-2 transition-colors"
+                  className="w-full px-3.5 py-2 text-left text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-blue-50 dark:hover:bg-blue-950/40 hover:text-blue-700 dark:hover:text-blue-300 flex items-center gap-2 transition-colors"
                 >
                   <Download className="w-4 h-4 text-blue-600" />
                   Export to CSV (.csv)
@@ -1971,67 +1985,27 @@ export default function ProductsScreen({ onNav }) {
           </Btn>
         </div>
 
-        {/* Category Filter Chips */}
-        <div className="flex items-center gap-2 flex-wrap">
-          {["All", ...categories].map((c) => (
-            <div key={c} className="flex items-center">
-              {c === "All" ? (
-                <button
-                  onClick={() => setCatFilter("All")}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                    catFilter === "All"
-                      ? "bg-blue-600 text-white"
-                      : "bg-white border border-slate-200 text-slate-600 hover:border-blue-300"
-                  }`}
-                >
-                  All
-                </button>
-              ) : (
-                <div
-                  className={`group flex items-center rounded-lg border text-xs font-medium transition-all overflow-hidden ${
-                    catFilter === c
-                      ? "bg-blue-600 border-blue-600 text-white"
-                      : "bg-white border-slate-200 text-slate-600 hover:border-blue-400"
-                  }`}
-                >
-                  <button
-                    onClick={() => setCatFilter(c)}
-                    className={`pl-3 pr-2 py-1.5 transition-colors ${
-                      catFilter === c
-                        ? "text-white"
-                        : "hover:text-blue-700"
-                    }`}
-                  >
-                    {c}
-                    {productList.filter((p) => p.category === c).length > 0 && (
-                      <span
-                        className={`ml-1.5 text-[10px] font-mono ${
-                          catFilter === c ? "opacity-75" : "text-slate-400"
-                        }`}
-                      >
-                        ({productList.filter((p) => p.category === c).length})
-                      </span>
-                    )}
-                  </button>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setCategoryToRemove(c);
-                    }}
-                    title={`Remove "${c}" category`}
-                    className={`pr-2 pl-0.5 py-1.5 transition-all opacity-0 group-hover:opacity-100 ${
-                      catFilter === c
-                        ? "text-blue-200 hover:text-white"
-                        : "text-slate-400 hover:text-red-500"
-                    }`}
-                  >
-                    <X className="w-3 h-3" />
-                  </button>
-                </div>
-              )}
+        {/* Active Category Filter Tag */}
+        {catFilter !== "All" && (
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-slate-500 font-medium">Active Category:</span>
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 text-xs font-semibold shadow-xs">
+              <Layers className="w-3.5 h-3.5 text-blue-500" />
+              <span>{catFilter}</span>
+              <span className="text-[11px] opacity-75 font-mono">
+                ({productList.filter((p) => p.category === catFilter).length} items)
+              </span>
+              <button
+                type="button"
+                onClick={() => setCatFilter("All")}
+                className="ml-1 p-0.5 rounded-full hover:bg-blue-200 dark:hover:bg-blue-900 text-blue-600 dark:text-blue-300 transition-colors cursor-pointer"
+                title="Clear category filter"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
             </div>
-          ))}
-        </div>
+          </div>
+        )}
       </div>
 
       {/* TABLE SECTION */}

@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import "dotenv/config";
 import dns from "node:dns";
+import mongoose from "mongoose";
 import connectDB from "./config/db.js";
 import authRoutes from "./routes/authRoutes.js";
 import customerRoutes from "./routes/customerRoutes.js";
@@ -46,9 +47,6 @@ const port = process.env.PORT || 5000;
 app.set("trust proxy", 1);
 
 // Use reliable public DNS servers for Node's resolver.
-// Workaround: Node's c-ares auto-detection can pick a dead/unreachable DNS
-// path from a disconnected VPN/TAP adapter, causing "querySrv ECONNREFUSED"
-// even though the system DNS works fine.
 try {
   dns.setServers(["8.8.8.8", "1.1.1.1"]);
 } catch (err) {
@@ -75,6 +73,23 @@ app.use(configuredCors());
 
 // 3. Apply Global API Rate Limiter
 app.use("/api", apiLimiter);
+
+// 4. Production Cloud Health Check Endpoints (K8s / Render / Railway / AWS ALB)
+const healthHandler = (req, res) => {
+  const isDbConnected = mongoose.connection.readyState === 1;
+  const statusCode = isDbConnected ? 200 : 503;
+  res.status(statusCode).json({
+    status: isDbConnected ? "healthy" : "degraded",
+    uptime: Math.floor(process.uptime()),
+    timestamp: new Date().toISOString(),
+    database: isDbConnected ? "connected" : "disconnected",
+    version: "1.0.0",
+    environment: process.env.NODE_ENV || "development",
+  });
+};
+
+app.get("/health", healthHandler);
+app.get("/api/health", healthHandler);
 
 // Public routes
 app.use("/api/subscription-plans", subscriptionPublicRoutes);
@@ -109,7 +124,7 @@ app.use("/api/admin/subscription-plans", subscriptionPlanRoutes);
 app.use("/api/cash-vouchers", cashVoucherRoutes);
 
 app.get("/", (req, res) => {
-  res.send("API working");
+  res.json({ message: "SmartBill API is operating normally.", status: "running" });
 });
 
 // 404 handler for unknown API routes
@@ -122,6 +137,25 @@ app.use((req, res) => {
 // Global error handler
 app.use(errorHandler);
 
-app.listen(port, () => {
+const server = app.listen(port, () => {
   console.log(`Server started on port ${port} (http://localhost:${port} and http://127.0.0.1:${port})`);
 });
+
+// Graceful shutdown handling for container termination
+const gracefulShutdown = (signal) => {
+  console.log(`Received ${signal}. Starting graceful shutdown...`);
+  server.close(async () => {
+    console.log("HTTP server closed.");
+    try {
+      await mongoose.connection.close(false);
+      console.log("MongoDB connection closed.");
+      process.exit(0);
+    } catch (err) {
+      console.error("Error closing MongoDB connection:", err);
+      process.exit(1);
+    }
+  });
+};
+
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+process.on("SIGINT", () => gracefulShutdown("SIGINT"));

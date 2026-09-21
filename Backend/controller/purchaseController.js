@@ -792,9 +792,6 @@ export const createPurchaseReturn = async (req, res) => {
       message: `Debit note issued successfully. Reference: ${debitNoteNo}`,
       debitNoteNo,
       refundAmount: finalDebitAmount,
-=======
-      message: "Purchase marked as fully paid & cleared.",
->>>>>>> origin/main
       purchase,
     });
   } catch (error) {

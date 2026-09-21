@@ -26,9 +26,13 @@ export const authMiddleware = async (req, res, next) => {
     try {
       decoded = jwt.verify(token, secret);
     } catch (err) {
-      try {
-        decoded = jwt.verify(token, "smartbill_secret_key_123`");
-      } catch (err2) {
+      if (process.env.JWT_SECRET && secret !== "smartbill_secret_key_123") {
+        try {
+          decoded = jwt.verify(token, "smartbill_secret_key_123");
+        } catch (fallbackErr) {
+          throw err;
+        }
+      } else {
         throw err;
       }
     }
