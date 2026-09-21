@@ -1463,7 +1463,7 @@ export default function POSScreen() {
                       {/* Wholesale MOQ details */}
                       {posMode === "Wholesale" && (
                         <span className="text-[10px] font-bold px-1.5 py-0.2 bg-purple-50 text-purple-700 dark:bg-purple-950/50 dark:text-purple-300 rounded border border-purple-200 dark:border-purple-800">
-                          MOQ: {p.minOrderQty || 1} {p.packSize ? `(Pack: ${p.packSize})` : ""}
+                          MOQ: {p.minOrderQty || 1}
                         </span>
                       )}
                     </div>

@@ -187,7 +187,6 @@ export default function ProductsScreen({ onNav }) {
     price: "0",
     wholesalePrice: "0",
     minOrderQty: "1",
-    packSize: "",
     batchNo: "",
     expiryDate: "",
     size: "",
@@ -860,7 +859,7 @@ export default function ProductsScreen({ onNav }) {
                 <p className="text-xs font-bold text-amber-900 dark:text-amber-200 flex items-center gap-1.5">
                   <span>🏢 Wholesale & Bulk Order Settings</span>
                 </p>
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-2 gap-3">
                   <Input
                     label="Wholesale Price (₹)"
                     type="number"
@@ -874,12 +873,6 @@ export default function ProductsScreen({ onNav }) {
                     value={editForm.minOrderQty}
                     onChange={(v) => setEditForm((f) => ({ ...f, minOrderQty: v }))}
                     placeholder="e.g. 10"
-                  />
-                  <Input
-                    label="Case / Box Pack Qty"
-                    value={editForm.packSize}
-                    onChange={(v) => setEditForm((f) => ({ ...f, packSize: v }))}
-                    placeholder="e.g. 24 Pcs/Box"
                   />
                 </div>
               </div>
@@ -1068,7 +1061,6 @@ export default function ProductsScreen({ onNav }) {
                       price: Number(editForm.price || 0),
                       wholesalePrice: Number(editForm.wholesalePrice || 0),
                       minOrderQty: Number(editForm.minOrderQty || 1),
-                      packSize: editForm.packSize || "",
                       batchNo: editForm.batchNo || "",
                       expiryDate: editForm.expiryDate || null,
                       size: editForm.size || "",
@@ -1230,7 +1222,7 @@ export default function ProductsScreen({ onNav }) {
                 <p className="text-xs font-bold text-amber-900 dark:text-amber-200 flex items-center gap-1.5">
                   <span>🏢 Wholesale & Bulk Order Settings</span>
                 </p>
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-2 gap-3">
                   <Input
                     label="Wholesale Price (₹)"
                     type="number"
@@ -1244,12 +1236,6 @@ export default function ProductsScreen({ onNav }) {
                     value={form.minOrderQty}
                     onChange={(v) => setForm((f) => ({ ...f, minOrderQty: v }))}
                     placeholder="e.g. 10"
-                  />
-                  <Input
-                    label="Case / Box Pack Qty"
-                    value={form.packSize}
-                    onChange={(v) => setForm((f) => ({ ...f, packSize: v }))}
-                    placeholder="e.g. 24 Pcs/Box"
                   />
                 </div>
               </div>
@@ -1430,7 +1416,6 @@ export default function ProductsScreen({ onNav }) {
                       price: Number(form.price || 0),
                       wholesalePrice: Number(form.wholesalePrice || 0),
                       minOrderQty: Number(form.minOrderQty || 1),
-                      packSize: form.packSize || "",
                       batchNo: form.batchNo || "",
                       expiryDate: form.expiryDate || null,
                       size: form.size || "",
@@ -1458,7 +1443,6 @@ export default function ProductsScreen({ onNav }) {
                       price: "0",
                       wholesalePrice: "0",
                       minOrderQty: "1",
-                      packSize: "",
                       batchNo: "",
                       expiryDate: "",
                       size: "",
@@ -2071,11 +2055,6 @@ export default function ProductsScreen({ onNav }) {
                             {p.color}
                           </span>
                         )}
-                        {p.packSize && (
-                          <span className="text-[10px] bg-amber-50 text-amber-700 border border-amber-200 px-1.5 py-0.2 rounded font-medium">
-                            Pack: {p.packSize}
-                          </span>
-                        )}
                       </div>
                     </td>
                     <td className="px-5 py-4">
@@ -2181,7 +2160,6 @@ export default function ProductsScreen({ onNav }) {
                               price: String(p.price ?? 0),
                               wholesalePrice: String(p.wholesalePrice ?? 0),
                               minOrderQty: String(p.minOrderQty ?? 1),
-                              packSize: p.packSize || "",
                               batchNo: p.batchNo || "",
                               expiryDate: p.expiryDate ? String(p.expiryDate).split("T")[0] : "",
                               size: p.size || "",

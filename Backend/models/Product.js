@@ -158,13 +158,6 @@ const productSchema = new mongoose.Schema(
       default: "",
     },
 
-    /** Packaging size notation (e.g. '10x10 Tablets', '500g Jar') */
-    packSize: {
-      type: String,
-      trim: true,
-      default: "",
-    },
-
     /** Minimum order quantity for wholesale orders */
     minOrderQty: {
       type: Number,
