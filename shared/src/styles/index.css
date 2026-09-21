@@ -46,15 +46,19 @@
   }
 }
 
-/* Hide number input spinners globally for a cleaner, professional look */
+/* Hide number input spinners globally for a clean, professional appearance */
+input::-webkit-outer-spin-button,
+input::-webkit-inner-spin-button,
 input[type="number"]::-webkit-inner-spin-button,
 input[type="number"]::-webkit-outer-spin-button {
-  -webkit-appearance: none;
-  margin: 0;
+  -webkit-appearance: none !important;
+  margin: 0 !important;
+  display: none !important;
 }
+
 input[type="number"] {
-  -moz-appearance: textfield; /* Firefox */
-  appearance: textfield;
+  -moz-appearance: textfield !important;
+  appearance: textfield !important;
 }
 
 /* Recharts Tooltip High-Contrast Styling */

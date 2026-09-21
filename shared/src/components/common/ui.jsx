@@ -655,7 +655,7 @@ export function StepperInput({
         }}
         min={min}
         max={max}
-        className={`flex-1 text-center text-sm font-semibold text-slate-900 dark:text-white bg-transparent outline-none focus:ring-0 px-1 py-1 font-mono ${inputClassName}`}
+        className={`flex-1 text-center text-sm font-semibold text-slate-900 dark:text-white bg-transparent outline-none focus:ring-0 px-1 py-1 font-mono [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${inputClassName}`}
       />
       <button
         type="button"

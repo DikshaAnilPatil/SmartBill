@@ -4,6 +4,7 @@ import {
   getPurchases,
   getPurchaseById,
   createPurchase,
+  recordPurchasePayment,
   markPurchaseAsPaid,
   createPurchaseReturn,
   uploadPurchaseReceipt,
@@ -25,6 +26,9 @@ router.get("/:id", getPurchaseById);
 
 // Create purchase
 router.post("/", requireFeature("purchaseManagement"), createPurchase);
+
+// Record payment (partial or full installment) for purchase
+router.put("/:id/pay", recordPurchasePayment);
 
 // Mark an unpaid/partially paid purchase as fully paid / record payment
 router.put("/:id/mark-paid", markPurchaseAsPaid);

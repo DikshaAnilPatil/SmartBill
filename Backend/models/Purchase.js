@@ -65,6 +65,33 @@ const purchaseItemSchema = new mongoose.Schema({
   },
 });
 
+const purchasePaymentRecordSchema = new mongoose.Schema({
+  amount: {
+    type: Number,
+    required: true,
+    min: 0.01,
+  },
+  paymentMethod: {
+    type: String,
+    default: "Cash",
+    trim: true,
+  },
+  paymentDate: {
+    type: Date,
+    default: Date.now,
+  },
+  referenceNo: {
+    type: String,
+    default: "",
+    trim: true,
+  },
+  notes: {
+    type: String,
+    default: "",
+    trim: true,
+  },
+});
+
 const purchaseSchema = new mongoose.Schema(
   {
     ownerId: {
@@ -141,7 +168,7 @@ const purchaseSchema = new mongoose.Schema(
     },
     paymentStatus: {
       type: String,
-      enum: ["Unpaid", "Partially Paid", "Paid"],
+      enum: ["Unpaid", "Payment Due", "Due", "Partially Paid", "Paid"],
       default: "Unpaid",
     },
     returnStatus: {
@@ -173,6 +200,7 @@ const purchaseSchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
+    payments: [purchasePaymentRecordSchema],
     notes: {
       type: String,
       default: "",

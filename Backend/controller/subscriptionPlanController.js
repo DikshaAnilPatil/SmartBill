@@ -1,4 +1,5 @@
 import SubscriptionPlan from "../models/SubscriptionPlan.js";
+import { PLAN_LIMITS } from "../config/plans.js";
 
 const LIMIT_FIELDS = ["maxUsers", "maxInvoicesPerMonth", "maxCustomers", "maxProducts"];
 
@@ -108,7 +109,7 @@ export const getPublicSubscriptionPlans = async (
   res
 ) => {
   try {
-    const plans = await SubscriptionPlan.find({
+    let plans = await SubscriptionPlan.find({
       status: "active",
     })
       .select(
@@ -117,21 +118,59 @@ export const getPublicSubscriptionPlans = async (
       .sort({ price: 1 })
       .lean();
 
+    if (!plans || plans.length === 0) {
+      plans = Object.entries(PLAN_LIMITS).map(([key, config]) => ({
+        key,
+        name: config.name,
+        price: config.price,
+        billingCycle: "monthly",
+        maxUsers: config.maxUsers === Infinity ? null : config.maxUsers,
+        maxInvoicesPerMonth:
+          config.maxInvoicesPerMonth === Infinity
+            ? null
+            : config.maxInvoicesPerMonth,
+        maxCustomers:
+          config.maxCustomers === Infinity ? null : config.maxCustomers,
+        maxProducts:
+          config.maxProducts === Infinity ? null : config.maxProducts,
+        features: config.features,
+        status: "active",
+      }));
+    }
+
     return res.status(200).json({
       success: true,
       count: plans.length,
       data: plans,
     });
   } catch (error) {
-    console.error(
-      "GET PUBLIC SUBSCRIPTION PLANS ERROR:",
-      error
+    console.warn(
+      "GET PUBLIC SUBSCRIPTION PLANS DB WARNING, returning default plans:",
+      error.message
     );
 
-    return res.status(500).json({
-      message:
-        error.message ||
-        "Failed to fetch subscription plans.",
+    const fallbackPlans = Object.entries(PLAN_LIMITS).map(([key, config]) => ({
+      key,
+      name: config.name,
+      price: config.price,
+      billingCycle: "monthly",
+      maxUsers: config.maxUsers === Infinity ? null : config.maxUsers,
+      maxInvoicesPerMonth:
+        config.maxInvoicesPerMonth === Infinity
+          ? null
+          : config.maxInvoicesPerMonth,
+      maxCustomers:
+        config.maxCustomers === Infinity ? null : config.maxCustomers,
+      maxProducts:
+        config.maxProducts === Infinity ? null : config.maxProducts,
+      features: config.features,
+      status: "active",
+    }));
+
+    return res.status(200).json({
+      success: true,
+      count: fallbackPlans.length,
+      data: fallbackPlans,
     });
   }
 };

@@ -9,11 +9,13 @@ import orderRoutes from "./routes/orderRoutes.js";
 import expenseRoutes from "./routes/expenseRoutes.js";
 import supplierRoutes from "./routes/supplierRoutes.js";
 import seedAdmin from "./seed/admin.js";
+import seedSubscriptionPlans from "./seed/seedPlans.js";
 import migrateExistingUserTrials from "./seed/migrateTrials.js";
 import productRoutes from "./routes/productRoutes.js";
 import customizationRoutes from "./routes/customizationRoutes.js";
 import employeeRoutes from "./routes/employeeRoutes.js";
 import purchaseRoutes from "./routes/purchaseRoutes.js";
+import purchaseReturnRoutes from "./routes/purchaseReturnRoutes.js";
 import businessSettingsRoutes from "./routes/businessSettingsRoutes.js";
 import transactionSettingsRoutes from "./routes/transactionSettingsRoutes.js";
 import subscriptionRoutes from "./routes/subscriptionRoutes.js";
@@ -27,6 +29,7 @@ import subscriptionPlanRoutes from "./routes/subscriptionPlanRoutes.js";
 import inventorySettingsRoutes from "./routes/inventorySettingsRoutes.js";
 import subscriptionPublicRoutes from "./routes/subscriptionPublicRoutes.js";
 import couponRoutes from "./routes/couponRoutes.js";
+import cashVoucherRoutes from "./routes/cashVoucherRoutes.js";
 
 import {
   securityHeaders,
@@ -58,6 +61,9 @@ await connectDB();
 // Seed the default Super Admin account (idempotent).
 await seedAdmin();
 
+// Seed default subscription plans (idempotent).
+await seedSubscriptionPlans();
+
 // Migrate existing user accounts to 14-day trial status (idempotent)
 await migrateExistingUserTrials();
 
@@ -86,6 +92,7 @@ app.use("/api/products", productRoutes);
 app.use("/api/settings/customization", customizationRoutes);
 app.use("/api/employees", employeeRoutes);
 app.use("/api/purchases", purchaseRoutes);
+app.use("/api/purchase-returns", purchaseReturnRoutes);
 app.use("/api/settings/business", businessSettingsRoutes);
 app.use("/api/settings/invoice", invoiceSettingsRoutes);
 app.use("/api/settings/party", partySettingsRoutes);
@@ -99,6 +106,7 @@ app.use("/api/admin/coupons", couponRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/admin/subscription-plans", subscriptionPlanRoutes);
+app.use("/api/cash-vouchers", cashVoucherRoutes);
 
 app.get("/", (req, res) => {
   res.send("API working");
