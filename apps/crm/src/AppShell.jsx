@@ -1,28 +1,38 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, lazy, Suspense } from "react";
 import Sidebar from "@shared/layouts/Sidebar";
 import Topbar from "@shared/layouts/Topbar";
 import TrialBanner from "@shared/components/common/TrialBanner";
-import PromotionalBanner from "@shared/components/common/PromotionalBanner";
-import BusinessDashboard from "./pages/dashboard/BusinessDashboard";
-import CustomersScreen from "./pages/commerce/CustomersScreen";
-import SuppliersScreen from "./pages/commerce/SuppliersScreen";
-import ProductsScreen from "./pages/commerce/ProductsScreen";
-import POSScreen from "./pages/transactions/POSScreen";
-import PurchaseScreen from "./pages/transactions/PurchaseScreen";
-import InventoryScreen from "./pages/transactions/InventoryScreen";
-import ReportsScreen from "./pages/reports/ReportsScreen";
-import ExpensesScreen from "./pages/transactions/ExpensesScreen";
-import UsersScreen from "./pages/users/UsersScreen";
-import SettingsScreen from "./pages/settings/SettingsScreen";
-import NotificationsScreen from "./pages/users/NotificationsScreen";
-import ProfileScreen from "./pages/settings/ProfileScreen";
 import { useCustomization } from "@shared/hooks/useCustomization";
 import { useLowStock } from "@shared/hooks/useLowStock";
 import { useNotifications } from "@shared/hooks/useNotifications";
 import { Toaster } from "sonner";
-import { AlertTriangle, X, ShoppingCart, TrendingDown, ShieldAlert, Info } from "lucide-react";
+import { AlertTriangle, X, ShoppingCart, TrendingDown, ShieldAlert, Info, Loader2 } from "lucide-react";
 import { hasPermission } from "@shared/utils/permissions";
 import ErrorBoundary from "@shared/components/common/ErrorBoundary";
+
+// Lazy-loaded page components for optimal code splitting & fast initial load
+const BusinessDashboard = lazy(() => import("./pages/dashboard/BusinessDashboard"));
+const CustomersScreen = lazy(() => import("./pages/commerce/CustomersScreen"));
+const SuppliersScreen = lazy(() => import("./pages/commerce/SuppliersScreen"));
+const ProductsScreen = lazy(() => import("./pages/commerce/ProductsScreen"));
+const POSScreen = lazy(() => import("./pages/transactions/POSScreen"));
+const PurchaseScreen = lazy(() => import("./pages/transactions/PurchaseScreen"));
+const InventoryScreen = lazy(() => import("./pages/transactions/InventoryScreen"));
+const ReportsScreen = lazy(() => import("./pages/reports/ReportsScreen"));
+const ExpensesScreen = lazy(() => import("./pages/transactions/ExpensesScreen"));
+const UsersScreen = lazy(() => import("./pages/users/UsersScreen"));
+const SettingsScreen = lazy(() => import("./pages/settings/SettingsScreen"));
+const NotificationsScreen = lazy(() => import("./pages/users/NotificationsScreen"));
+const ProfileScreen = lazy(() => import("./pages/settings/ProfileScreen"));
+
+function PageLoadingFallback() {
+  return (
+    <div className="flex flex-col items-center justify-center min-h-[400px] w-full gap-3 text-slate-500 dark:text-slate-400">
+      <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+      <p className="text-sm font-medium animate-pulse">Loading module...</p>
+    </div>
+  );
+}
 
 function LowStockAlert({ lowStockItems, outOfStockItems, globalThreshold, onClose, onNav }) {
   const total = lowStockItems.length + outOfStockItems.length;
@@ -197,7 +207,6 @@ export default function AppShell({ role, user, onLogout, page, onNav }) {
         isPlatformAdmin={false}
       />
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        <PromotionalBanner isCrm onCtaClick={() => onNav("settings")} />
         <TrialBanner user={user} onNav={onNav} />
         <Topbar
           page={page}
@@ -210,7 +219,9 @@ export default function AppShell({ role, user, onLogout, page, onNav }) {
         <main className="flex-1 overflow-y-auto p-6 flex flex-col">
           <div className="flex-1">
             <ErrorBoundary key={page}>
-              {renderPage()}
+              <Suspense fallback={<PageLoadingFallback />}>
+                {renderPage()}
+              </Suspense>
             </ErrorBoundary>
           </div>
         </main>

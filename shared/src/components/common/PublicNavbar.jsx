@@ -3,7 +3,6 @@ import { BarChart2, X, Menu } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { getCrmUrl } from "../../utils/urlUtils";
 import { Btn } from "./ui";
-import PromotionalBanner from "./PromotionalBanner";
 
 export default function PublicNavbar({ onNav }) {
   const [mobileMenu, setMobileMenu] = useState(false);
@@ -18,9 +17,7 @@ export default function PublicNavbar({ onNav }) {
   };
 
   return (
-    <>
-      <PromotionalBanner onCtaClick={() => handleAuthNav("register")} />
-      <nav className="sticky top-0 z-40 bg-white/90 backdrop-blur-md border-b border-slate-200">
+    <nav className="sticky top-0 z-40 bg-white/90 backdrop-blur-md border-b border-slate-200">
         <div className="max-w-7xl mx-auto px-6 h-16 flex items-center gap-8">
           <Link to="/" className="flex items-center gap-2.5 flex-shrink-0">
             <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
@@ -89,6 +86,5 @@ export default function PublicNavbar({ onNav }) {
           </div>
         )}
       </nav>
-    </>
   );
 }

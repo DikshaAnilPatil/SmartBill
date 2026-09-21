@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from "react";
 
 import Footer from "@shared/components/common/Footer";
 import PublicNavbar from "@shared/components/common/PublicNavbar";
+import PromotionalOfferBox from "@shared/components/common/PromotionalOfferBox";
 
 import subscriptionAPI from "@shared/api/subscriptionAPI";
 
@@ -600,6 +601,22 @@ export default function LandingPage({ onNav }) {
               Flexible subscription plans designed
               to grow with your business.
             </p>
+
+            <PromotionalOfferBox
+              className="mt-8 text-left"
+              onCtaClick={(offer) => {
+                if (offer?.code) {
+                  try {
+                    localStorage.setItem("smartbill_applied_coupon", offer.code);
+                  } catch {}
+                }
+                if (onNav) {
+                  onNav("register");
+                } else {
+                  window.location.href = `/register${offer?.code ? `?coupon=${encodeURIComponent(offer.code)}` : ""}`;
+                }
+              }}
+            />
           </div>
 
           {/* ============================================================
@@ -914,6 +931,8 @@ export default function LandingPage({ onNav }) {
                 })}
               </div>
             )}
+
+
 
         </div>
       </section>

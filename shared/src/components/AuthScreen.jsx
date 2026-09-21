@@ -13,6 +13,8 @@ import {
   Phone,
   Send,
   ShieldAlert,
+  Sparkles,
+  Tag,
   X,
 } from "lucide-react";
 import {
@@ -24,6 +26,7 @@ import {
   Toast,
 } from "@shared/components/common/ui";
 import { registerUser, loginUser, sendOtp, verifyOtp, verifyLoginOtp, forgotPassword, verifyResetOtp, resetPassword } from "@shared/api/authAPI";
+import { validateCouponCode } from "@shared/api/couponAPI";
 import { setUserToStorage } from "@shared/utils/userUtils";
 import { getAdminUrl } from "@shared/utils/urlUtils";
 
@@ -50,6 +53,13 @@ export default function AuthScreen({ view, onNav, onLogin, fixedRole }) {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [bizType, setBizType] = useState("Retail");
   const [bizCategory, setBizCategory] = useState(RETAIL_CATEGORIES[0]);
+
+  // ---- Coupon / Promo Code State ----
+  const [couponCode, setCouponCode] = useState("");
+  const [appliedCoupon, setAppliedCoupon] = useState(null);
+  const [couponValidating, setCouponValidating] = useState(false);
+  const [couponError, setCouponError] = useState("");
+  const [showCouponInput, setShowCouponInput] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [sent, setSent] = useState(false);
@@ -99,6 +109,28 @@ export default function AuthScreen({ view, onNav, onLogin, fixedRole }) {
 
         if (otpParam) {
           setForgotOtp(decodeURIComponent(otpParam).trim().replace(/\D/g, "").slice(0, 6));
+        }
+      } else if (view === "register") {
+        const couponParam = params.get("coupon") || params.get("code") || params.get("promo");
+        let initialCode = "";
+        try {
+          const storedCoupon = localStorage.getItem("smartbill_applied_coupon");
+          initialCode = (couponParam || storedCoupon || "").trim().toUpperCase();
+        } catch {
+          initialCode = (couponParam || "").trim().toUpperCase();
+        }
+
+        if (initialCode) {
+          setCouponCode(initialCode);
+          setShowCouponInput(true);
+          validateCouponCode(initialCode)
+            .then((res) => {
+              if (res && res.valid && res.coupon) {
+                setAppliedCoupon(res.coupon);
+                setCouponError("");
+              }
+            })
+            .catch(() => {});
         }
       }
     } catch (e) {
@@ -343,6 +375,7 @@ export default function AuthScreen({ view, onNav, onLogin, fixedRole }) {
     try {
       const pendingPlan = localStorage.getItem("pending_subscription_plan");
       const normalizedBizType = String(bizType ?? "Retail").trim();
+      const finalCouponCode = appliedCoupon?.code || (couponCode ? couponCode.trim().toUpperCase() : undefined);
       const data = await registerUser({
         firstName: firstName.trim(),
         lastName: lastName.trim(),
@@ -353,11 +386,15 @@ export default function AuthScreen({ view, onNav, onLogin, fixedRole }) {
         phone: phone.replace(PHONE_PREFIX, "").replace(/\D/g, ""),
         password,
         ...(pendingPlan ? { planName: pendingPlan } : {}),
+        ...(finalCouponCode ? { couponCode: finalCouponCode } : {}),
       });
 
       if (pendingPlan) {
         localStorage.removeItem("pending_subscription_plan");
       }
+      try {
+        localStorage.removeItem("smartbill_applied_coupon");
+      } catch {}
 
       localStorage.setItem("smartbill_token", data.token);
       setUserToStorage(data.user);
@@ -443,6 +480,49 @@ export default function AuthScreen({ view, onNav, onLogin, fixedRole }) {
     } finally {
       setOtpVerifying(false);
     }
+  };
+
+  // ---- Coupon handlers ----
+  const handleApplyCoupon = async () => {
+    const code = couponCode.trim().toUpperCase();
+    if (!code) {
+      setCouponError("Please enter a promo / coupon code.");
+      return;
+    }
+    setCouponValidating(true);
+    setCouponError("");
+    try {
+      const res = await validateCouponCode(code);
+      if (res && res.valid && res.coupon) {
+        setAppliedCoupon(res.coupon);
+        setCouponCode(res.coupon.code);
+        setCouponError("");
+        showToast(
+          res.coupon.discountType === "trial_days"
+            ? `Coupon ${res.coupon.code} applied! +${res.coupon.discountValue} Days Free Trial.`
+            : `Coupon ${res.coupon.code} applied successfully!`,
+          "success"
+        );
+      } else {
+        setCouponError(res?.message || "Invalid coupon code.");
+      }
+    } catch (err) {
+      setCouponError(
+        err?.response?.data?.message || err?.message || "Invalid or expired coupon code."
+      );
+      setAppliedCoupon(null);
+    } finally {
+      setCouponValidating(false);
+    }
+  };
+
+  const handleRemoveCoupon = () => {
+    setAppliedCoupon(null);
+    setCouponCode("");
+    setCouponError("");
+    try {
+      localStorage.removeItem("smartbill_applied_coupon");
+    } catch {}
   };
 
   const handleSubmit = () => {
@@ -958,6 +1038,98 @@ export default function AuthScreen({ view, onNav, onLogin, fixedRole }) {
                     options={bizType === "Wholesale" ? WHOLESALE_CATEGORIES : RETAIL_CATEGORIES}
                   />
                 </div>
+
+                {/* Coupon Code Section */}
+                {!appliedCoupon ? (
+                  <div className="pt-1">
+                    {!showCouponInput ? (
+                      <button
+                        type="button"
+                        onClick={() => setShowCouponInput(true)}
+                        className="flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-700 font-medium transition cursor-pointer"
+                      >
+                        <Tag className="w-3.5 h-3.5" />
+                        <span>Have a coupon or promo code?</span>
+                      </button>
+                    ) : (
+                      <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-2 animate-in fade-in duration-150">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="font-semibold text-slate-700 flex items-center gap-1.5">
+                            <Tag className="w-3.5 h-3.5 text-blue-600" />
+                            Apply Coupon / Promo Code
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowCouponInput(false);
+                              setCouponError("");
+                            }}
+                            className="text-[11px] text-slate-400 hover:text-slate-600 cursor-pointer"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                        <div className="flex items-start gap-2">
+                          <div className="flex-1">
+                            <Input
+                              value={couponCode}
+                              onChange={(v) => {
+                                setCouponCode(String(v ?? "").toUpperCase().replace(/\s+/g, ""));
+                                setCouponError("");
+                              }}
+                              placeholder="e.g. WELCOME50"
+                              inputClassName="font-mono uppercase font-bold tracking-wider text-xs"
+                              error={couponError}
+                            />
+                          </div>
+                          <Btn
+                            type="button"
+                            variant="primary"
+                            size="md"
+                            onClick={handleApplyCoupon}
+                            disabled={couponValidating || !couponCode.trim()}
+                            className="h-[38px] shrink-0 text-xs px-3"
+                          >
+                            {couponValidating ? "Applying..." : "Apply"}
+                          </Btn>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-between bg-emerald-50/90 border border-emerald-200 rounded-xl px-3.5 py-2.5 text-emerald-900 animate-in fade-in duration-150">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="w-7 h-7 rounded-lg bg-emerald-500/20 text-emerald-700 flex items-center justify-center shrink-0">
+                        <Sparkles className="w-4 h-4 text-emerald-600" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="font-mono font-bold text-xs uppercase tracking-wider bg-emerald-200/80 text-emerald-900 px-1.5 py-0.5 rounded">
+                            {appliedCoupon.code}
+                          </span>
+                          <span className="text-xs font-semibold text-emerald-800">
+                            {appliedCoupon.discountType === "percentage"
+                              ? `${appliedCoupon.discountValue}% OFF`
+                              : appliedCoupon.discountType === "flat"
+                              ? `₹${appliedCoupon.discountValue} OFF`
+                              : `+${appliedCoupon.discountValue} Trial Days`}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-emerald-700 truncate mt-0.5">
+                          {appliedCoupon.title || "Coupon Applied Successfully"}
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleRemoveCoupon}
+                      title="Remove coupon"
+                      className="text-emerald-700 hover:text-emerald-900 p-1 hover:bg-emerald-200/50 rounded-md transition cursor-pointer shrink-0 ml-2"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
                 <Btn
                   variant="primary"
                   size="lg"

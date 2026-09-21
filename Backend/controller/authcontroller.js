@@ -2,6 +2,7 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
 import User from "../models/User.js";
+import Coupon from "../models/Coupon.js";
 import Verification from "../models/verifiy.js";
 import SystemSettings from "../models/SystemSettings.js";
 import { notifySuperAdmins } from "../services/notificationService.js";
@@ -192,8 +193,44 @@ export const register = async (req, res) => {
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
+    // Optional coupon processing
+    const rawCouponCode = req.body.couponCode || req.body.coupon || "";
+    let appliedCouponData = null;
+    let extraTrialDays = 0;
+
+    if (rawCouponCode && typeof rawCouponCode === "string" && rawCouponCode.trim()) {
+      const normalizedCoupon = rawCouponCode.trim().toUpperCase();
+      try {
+        const coupon = await Coupon.findOne({ code: normalizedCoupon });
+        const now = new Date();
+        if (
+          coupon &&
+          coupon.status === "active" &&
+          (!coupon.startDate || new Date(coupon.startDate) <= now) &&
+          (!coupon.expiryDate || new Date(coupon.expiryDate) >= now) &&
+          (coupon.maxUsageCount == null || coupon.usedCount < coupon.maxUsageCount)
+        ) {
+          appliedCouponData = {
+            couponId: coupon._id,
+            code: coupon.code,
+            title: coupon.title,
+            discountType: coupon.discountType,
+            discountValue: coupon.discountValue,
+          };
+          if (coupon.discountType === "trial_days") {
+            extraTrialDays = Number(coupon.discountValue) || 14;
+          }
+        }
+      } catch (couponErr) {
+        console.warn("Coupon check error during registration:", couponErr);
+      }
+    }
+
     const planToActivate = (req.body.planName || req.body.subscriptionPlan || "").toLowerCase().replace(/\s*plan\s*/gi, "").trim();
+    const defaultTrialDays = extraTrialDays > 0 ? (14 + extraTrialDays) : 14;
+    const trialEnd = new Date(Date.now() + defaultTrialDays * 24 * 60 * 60 * 1000);
     const periodEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+
     const subscriptionData = planToActivate
       ? {
           plan: planToActivate,
@@ -201,7 +238,12 @@ export const register = async (req, res) => {
           currentPeriodStart: new Date(),
           currentPeriodEnd: periodEnd,
         }
-      : undefined;
+      : {
+          plan: "starter",
+          status: "trialing",
+          trialEndsAt: trialEnd,
+          currentPeriodStart: new Date(),
+        };
 
     const user = await User.create({
       firstName: String(firstName).trim(),
@@ -212,8 +254,31 @@ export const register = async (req, res) => {
       email: normalizedEmail,
       phone: normalizedPhone,
       password: hashedPassword,
-      ...(subscriptionData ? { subscription: subscriptionData } : {}),
+      subscription: subscriptionData,
     });
+
+    if (appliedCouponData && appliedCouponData.couponId) {
+      try {
+        await Coupon.findByIdAndUpdate(appliedCouponData.couponId, {
+          $inc: { usedCount: 1 },
+          $push: {
+            redemptions: {
+              userId: user._id,
+              ownerId: user._id,
+              businessName: user.businessName,
+              email: user.email,
+              plan: planToActivate || "starter",
+              originalAmount: 0,
+              discountAmount: 0,
+              finalAmount: 0,
+              redeemedAt: new Date(),
+            },
+          },
+        });
+      } catch (cErr) {
+        console.warn("Failed to record coupon redemption on registration:", cErr);
+      }
+    }
 
     // Notify SuperAdmins about new business registration
     try {

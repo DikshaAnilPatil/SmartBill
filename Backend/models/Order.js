@@ -1,5 +1,20 @@
 import mongoose from "mongoose";
 
+/**
+ * ============================================================================
+ * ORDER DATA MODEL (POS Transactions, Immutable Invoices & Tax Audits)
+ * ============================================================================
+ * 
+ * PURPOSE:
+ * Stores finalized point-of-sale transactions, B2B/B2C invoices, applied line-item 
+ * discounts, statutory GST breakdowns (CGST/SGST/IGST), split payments, and sales returns.
+ * 
+ * ROLE IN ARCHITECTURE:
+ * - Immutable financial record: snapshots prices and taxes at time-of-sale.
+ * - Indexed by `invoiceNo` and `ownerId` with strict uniqueness to prevent duplicate bills.
+ * - Tracks partial payments, balances due, customer credit, and sales return history.
+ */
+
 const orderItemSchema = new mongoose.Schema(
   {
     productId: { type: mongoose.Schema.Types.Mixed, default: null },
@@ -21,12 +36,18 @@ const orderItemSchema = new mongoose.Schema(
 
 const orderSchema = new mongoose.Schema(
   {
+    // =========================================================================
+    // 1. TENANT & CUSTOMER IDENTITY
+    // =========================================================================
+    /** Tenant reference for multi-tenant isolation */
     ownerId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: true,
       index: true,
     },
+
+    /** Customer document reference (null for anonymous walk-in sales) */
     customerId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Customer",
@@ -45,24 +66,40 @@ const orderSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
+
+    // =========================================================================
+    // 2. GST STATUTORY & GEOGRAPHIC ATTRIBUTES
+    // =========================================================================
+    /** State / Union Territory of delivery for GST tax classification */
     placeOfSupply: {
       type: String,
       default: "",
     },
+    /** 'Intra-State' (CGST + SGST) vs 'Inter-State' (IGST) */
     taxType: {
       type: String,
       enum: ["Intra-State", "Inter-State"],
       default: "Intra-State",
     },
+
+    // =========================================================================
+    // 3. INVOICE IDENTIFIERS & LINE ITEMS
+    // =========================================================================
+    /** Sequential human-readable invoice code (e.g. 'INV-00124') */
     invoiceNo: {
       type: String,
       required: true,
       index: true,
     },
+    /** Array of purchased items with immutable price/tax snapshots */
     items: {
       type: [orderItemSchema],
       default: [],
     },
+
+    // =========================================================================
+    // 4. FINANCIAL TOTALS & TAX BREAKDOWN
+    // =========================================================================
     subtotal: {
       type: Number,
       default: 0,
@@ -78,26 +115,34 @@ const orderSchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
+    /** Central Goods and Services Tax (Intra-state sales) */
     cgst: {
       type: Number,
       default: 0,
       min: 0,
     },
+    /** State Goods and Services Tax (Intra-state sales) */
     sgst: {
       type: Number,
       default: 0,
       min: 0,
     },
+    /** Integrated Goods and Services Tax (Inter-state sales) */
     igst: {
       type: Number,
       default: 0,
       min: 0,
     },
+    /** Final payable invoice amount */
     totalOrderValue: {
       type: Number,
       default: 0,
       min: 0,
     },
+
+    // =========================================================================
+    // 5. PAYMENT SETTLEMENT & SPLIT TRANSACTIONS
+    // =========================================================================
     amountPaid: {
       type: Number,
       default: 0,
@@ -111,6 +156,7 @@ const orderSchema = new mongoose.Schema(
       type: String,
       default: "Cash",
     },
+    /** Multiple tenders (e.g. Cash ₹500 + UPI ₹250) */
     splitPayments: {
       type: [
         {
@@ -121,6 +167,7 @@ const orderSchema = new mongoose.Schema(
       ],
       default: [],
     },
+    /** Installment / credit repayment history */
     paymentHistory: [
       {
         amount: { type: Number, required: true },
@@ -135,6 +182,10 @@ const orderSchema = new mongoose.Schema(
       enum: ["Paid", "Partial", "Due", "Cancelled"],
       default: "Due",
     },
+
+    // =========================================================================
+    // 6. SALES RETURNS & REFUND AUDIT
+    // =========================================================================
     returnStatus: {
       type: String,
       enum: ["None", "Partial", "Returned"],
@@ -158,6 +209,10 @@ const orderSchema = new mongoose.Schema(
         items: [orderItemSchema],
       },
     ],
+
+    // =========================================================================
+    // 7. DISCOUNTS, METADATA & COST OF GOODS SOLD
+    // =========================================================================
     discount: {
       type: Number,
       default: 0,
@@ -180,6 +235,7 @@ const orderSchema = new mongoose.Schema(
       type: Date,
       default: Date.now,
     },
+    /** Total Cost of Goods Sold for profit & margin analysis */
     totalCogs: {
       type: Number,
       default: 0,
@@ -190,6 +246,7 @@ const orderSchema = new mongoose.Schema(
   },
 );
 
+// Compound indexes for optimal tenant queries, invoice lookups, and financial reporting
 orderSchema.index({ invoiceNo: 1, ownerId: 1 }, { unique: true });
 orderSchema.index({ ownerId: 1, createdAt: -1 });
 orderSchema.index({ ownerId: 1, status: 1 });
@@ -199,3 +256,4 @@ orderSchema.index({ ownerId: 1, date: -1 });
 const Order = mongoose.models.Order || mongoose.model("Order", orderSchema);
 
 export default Order;
+
