@@ -39,6 +39,7 @@ const buildAuthPayload = (user, ownerUser = null) => {
       lastName: user.lastName,
       businessName: effectiveBusinessName,
       businessType: effectiveBusinessType,
+      businessCategory: user.businessCategory || "",
       email: user.email,
       phone: user.phone,
       role: user.role,
@@ -66,14 +67,16 @@ const buildAuthPayload = (user, ownerUser = null) => {
       signatureUrl: user.signatureUrl || "",
       twoFactorEnabled: Boolean(user.twoFactorEnabled),
       // ✅ CRITICAL: Always include subscription so plan-based features work after upgrade
-      subscription: user.subscription
-        ? {
-            plan: user.subscription.plan || "starter",
-            status: user.subscription.status || "trial",
-            currentPeriodStart: user.subscription.currentPeriodStart || null,
-            currentPeriodEnd: user.subscription.currentPeriodEnd || null,
-          }
-        : { plan: "starter", status: "trial" },
+      subscription: (() => {
+        const sub = (user.ownerId && ownerUser ? ownerUser.subscription : user.subscription) || {};
+        return {
+          plan: sub.plan || "starter",
+          status: sub.status || "trialing",
+          trialEndsAt: sub.trialEndsAt || null,
+          currentPeriodStart: sub.currentPeriodStart || null,
+          currentPeriodEnd: sub.currentPeriodEnd || null,
+        };
+      })(),
     },
   };
 };
@@ -109,6 +112,7 @@ export const register = async (req, res) => {
       lastName,
       businessName,
       businessType,
+      businessCategory,
       email,
       phone,
       password,
@@ -119,6 +123,8 @@ export const register = async (req, res) => {
     )
       ? String(businessType ?? "Retail").trim()
       : "Retail";
+
+    const normalizedBusinessCategory = String(businessCategory ?? "").trim();
 
     const errors = [];
 
@@ -202,6 +208,7 @@ export const register = async (req, res) => {
       lastName: String(lastName).trim(),
       businessName: String(businessName).trim(),
       businessType: normalizedBusinessType,
+      businessCategory: normalizedBusinessCategory,
       email: normalizedEmail,
       phone: normalizedPhone,
       password: hashedPassword,

@@ -50,10 +50,39 @@ import { getProducts } from "@shared/api/productAPI";
 import { getInvoiceSettings } from "@shared/api/invoiceSettingsAPI";
 import { fetchPartySettings } from "@shared/api/partySettingsAPI";
 import { useTransactionSettings } from "@shared/hooks/useTransactionSettings";
+import CameraBarcodeScanner from "@shared/components/common/CameraBarcodeScanner";
+import { getProductCategoriesForIndustry } from "@shared/utils/businessCategories";
 import POSInvoiceModal from "./pos/POSInvoiceModal";
 
 export default function POSScreen() {
   const { settings: txSettings } = useTransactionSettings();
+
+  const activeBiz = useMemo(() => {
+    try {
+      const rawUser = localStorage.getItem("smartbill_user");
+      const u = rawUser ? JSON.parse(rawUser) : {};
+      const id = u?._id || u?.id;
+      const key = id ? `businessInfo_${id}` : "businessInfo";
+      const rawB =
+        localStorage.getItem(key) || localStorage.getItem("businessInfo");
+      const b = rawB ? JSON.parse(rawB) : {};
+      return { ...u, ...b };
+    } catch {
+      return {};
+    }
+  }, []);
+
+  const [posMode, setPosMode] = useState(() => {
+    try {
+      const rawUser = localStorage.getItem("smartbill_user");
+      const u = rawUser ? JSON.parse(rawUser) : {};
+      return String(u?.businessType || "").toLowerCase() === "wholesale" ? "Wholesale" : "Retail";
+    } catch {
+      return "Retail";
+    }
+  });
+  const [selectedCategory, setSelectedCategory] = useState("All");
+  const [cameraScannerOpen, setCameraScannerOpen] = useState(false);
 
   const [cart, setCart] = useState([]);
   const [isBillingSideOpen, setIsBillingSideOpen] = useState(true);
@@ -178,6 +207,13 @@ export default function POSScreen() {
   const getProductDefaultPrice = useCallback(
     (p) => {
       if (!p) return 0;
+      if (posMode === "Wholesale") {
+        return p.wholesalePrice && Number(p.wholesalePrice) > 0
+          ? Number(p.wholesalePrice)
+          : p.cost && Number(p.cost) > 0
+            ? Math.round(Number(p.cost) * 1.15)
+            : Number(p.price) || 0;
+      }
       const mode = txSettings?.salePrice || "Retail Price";
       if (mode === "Wholesale Price") {
         return p.wholesalePrice && Number(p.wholesalePrice) > 0
@@ -195,8 +231,24 @@ export default function POSScreen() {
       }
       return Number(p.price) || 0;
     },
-    [txSettings?.salePrice]
+    [posMode, txSettings?.salePrice]
   );
+
+  const handleTogglePosMode = (newMode) => {
+    setPosMode(newMode);
+    setCart((prev) =>
+      prev.map((item) => {
+        const newPrice =
+          newMode === "Wholesale"
+            ? item.product?.wholesalePrice && Number(item.product.wholesalePrice) > 0
+              ? Number(item.product.wholesalePrice)
+              : Number(item.product?.price) || item.price
+            : Number(item.product?.price) || item.price;
+        return { ...item, price: newPrice };
+      })
+    );
+    showToast(`✓ Switched to ${newMode === "Wholesale" ? "🏢 Wholesale B2B Mode" : "🛒 Retail B2C Mode"}`);
+  };
 
   // Derived selected customer matching current customer input
   const selectedCustomer = useMemo(() => {
@@ -308,11 +360,29 @@ export default function POSScreen() {
     [productList]
   );
 
+  const availableCategories = useMemo(() => {
+    const bizCategory = activeBiz?.businessCategory || "";
+    const industryPresets = getProductCategoriesForIndustry(bizCategory, posMode);
+    const cats = new Set(industryPresets);
+    (productList || []).forEach((p) => {
+      if (p.category && String(p.category).trim()) {
+        cats.add(String(p.category).trim());
+      }
+    });
+    return ["All", ...Array.from(cats)];
+  }, [productList, activeBiz?.businessCategory, posMode]);
+
   const filteredProducts = (productList || []).filter((p) => {
     if (!p) return false;
+    if (selectedCategory !== "All" && p.category !== selectedCategory) return false;
+    const searchClean = (search || "").toLowerCase().trim();
     const matchesSearch =
-      (p.name && String(p.name).toLowerCase().includes((search || "").toLowerCase())) ||
-      (p.sku && String(p.sku).toLowerCase().includes((search || "").toLowerCase()));
+      !searchClean ||
+      (p.name && String(p.name).toLowerCase().includes(searchClean)) ||
+      (p.sku && String(p.sku).toLowerCase().includes(searchClean)) ||
+      (p.barcode && String(p.barcode).toLowerCase().includes(searchClean)) ||
+      (p.batchNo && String(p.batchNo).toLowerCase().includes(searchClean)) ||
+      (p.size && String(p.size).toLowerCase().includes(searchClean));
     if (!matchesSearch) return false;
 
     const inStock = Number(p.stock) || 0;
@@ -586,20 +656,21 @@ export default function POSScreen() {
       r.mode.toLowerCase().includes("wallet")
   );
 
-  const activeBiz = (() => {
-    try {
-      const rawUser = localStorage.getItem("smartbill_user");
-      const u = rawUser ? JSON.parse(rawUser) : {};
-      const id = u?._id || u?.id;
-      const key = id ? `businessInfo_${id}` : "businessInfo";
-      const rawB =
-        localStorage.getItem(key) || localStorage.getItem("businessInfo");
-      const b = rawB ? JSON.parse(rawB) : {};
-      return { ...u, ...b };
-    } catch {
-      return {};
+  const cashSuggestions = useMemo(() => {
+    if (roundedTotal <= 0) return [];
+    const suggestions = [roundedTotal];
+    const standardNotes = [50, 100, 200, 500, 2000, 5000];
+    for (const note of standardNotes) {
+      if (note > roundedTotal && !suggestions.includes(note)) {
+        suggestions.push(note);
+      }
     }
-  })();
+    const next100 = Math.ceil(roundedTotal / 100) * 100;
+    if (next100 > roundedTotal && !suggestions.includes(next100)) {
+      suggestions.push(next100);
+    }
+    return suggestions.sort((a, b) => a - b).slice(0, 4);
+  }, [roundedTotal]);
 
   const bName = paymentSettings?.bankSettings?.accountHolderName || activeBiz.businessName || "Smart Bill Business";
   const bTagline = activeBiz.tagline || "";
@@ -666,12 +737,16 @@ export default function POSScreen() {
     const s = invSettings || {};
     const tpl = s.template === "Modern" 
       ? { headerBg: s.primaryColor || '#2563eb', headerColor: '#ffffff', border: `1px solid ${s.primaryColor || '#2563eb'}` }
+      : s.template === "Bold"
+      ? { headerBg: '#0f172a', headerColor: '#f8fafc', border: '2px solid #0f172a' }
+      : s.template === "GST_Detailed"
+      ? { headerBg: '#f1f5f9', headerColor: '#0f172a', border: '1px solid #94a3b8' }
       : s.template === "Minimal"
       ? { headerBg: 'transparent', headerColor: '#333333', border: '1px solid #eeeeee' }
       : { headerBg: '#f8fafc', headerColor: '#0f172a', border: '1px solid #e2e8f0' };
       
     const pSize = s.paperSize || "A4";
-    const isThermal = pSize.includes("Thermal") || pSize.includes("58") || pSize.includes("80");
+    const isThermal = s.template === "Thermal" || pSize.includes("Thermal") || pSize.includes("58") || pSize.includes("80");
     const isThermal58 = pSize.includes("58");
 
     // Dynamic UPI QR generation
@@ -1166,37 +1241,98 @@ export default function POSScreen() {
       )}
 
       {/* Left: Products List */}
-      <div className="flex-1 flex flex-col gap-4 min-w-0">
-        <div className="flex items-center gap-2.5">
-          <Input
-            value={search}
-            onChange={setSearch}
-            icon={<ScanLine className="w-4 h-4" />}
-            placeholder="Search products, SKU, barcode..."
-            className="flex-1"
-          />
-          <Btn
-            variant="outline"
-            size="md"
-            onClick={loadProductsList}
-            disabled={loadingProducts}
-            icon={
-              <RefreshCw
-                className={`w-4 h-4 ${loadingProducts ? "animate-spin" : ""}`}
-              />
-            }
-          >
-            Refresh
-          </Btn>
+      <div className="flex-1 flex flex-col gap-3.5 min-w-0">
+        {/* Top Bar: Mode Switcher & Search */}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
+          {/* Mode Switcher Buttons */}
+          <div className="flex items-center p-1 bg-slate-100 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 flex-shrink-0">
+            <button
+              type="button"
+              onClick={() => handleTogglePosMode("Retail")}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                posMode === "Retail"
+                  ? "bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-2xs font-extrabold ring-1 ring-blue-500/20"
+                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900"
+              }`}
+            >
+              <span>🛒 Retail B2C</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => handleTogglePosMode("Wholesale")}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                posMode === "Wholesale"
+                  ? "bg-white dark:bg-slate-900 text-purple-600 dark:text-purple-400 shadow-2xs font-extrabold ring-1 ring-purple-500/20"
+                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900"
+              }`}
+            >
+              <span>🏢 Wholesale B2B</span>
+            </button>
+          </div>
+
+          <div className="flex-1 flex items-center gap-2">
+            <Input
+              value={search}
+              onChange={setSearch}
+              icon={<ScanLine className="w-4 h-4" />}
+              placeholder="Search products, SKU, barcode, batch..."
+              className="flex-1"
+            />
+            <Btn
+              variant="outline"
+              size="md"
+              onClick={() => setCameraScannerOpen(true)}
+              icon={<ScanLine className="w-4 h-4 text-emerald-600" />}
+              className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-300 font-bold"
+              title="Open camera barcode scanner"
+            >
+              Scan Barcode
+            </Btn>
+            <Btn
+              variant="outline"
+              size="md"
+              onClick={loadProductsList}
+              disabled={loadingProducts}
+              icon={
+                <RefreshCw
+                  className={`w-4 h-4 ${loadingProducts ? "animate-spin" : ""}`}
+                />
+              }
+            >
+              Refresh
+            </Btn>
+          </div>
         </div>
 
-        {/* Stock Filter Tabs (In Stock Only vs All Catalog) */}
-        <div className="flex items-center justify-between gap-2 flex-wrap">
+        {/* Category Filter Pills (Horizontal Scrollable) */}
+        {availableCategories.length > 1 && (
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-thin">
+            {availableCategories.map((cat) => (
+              <button
+                key={cat}
+                type="button"
+                onClick={() => setSelectedCategory(cat)}
+                className={`px-2.5 py-1 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer ${
+                  selectedCategory === cat
+                    ? posMode === "Wholesale"
+                      ? "bg-purple-600 text-white shadow-xs"
+                      : "bg-blue-600 text-white shadow-xs"
+                    : "bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300"
+                }`}
+              >
+                {cat}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Stock Filter Tabs & Active Mode Banner */}
+        <div className="flex items-center justify-between gap-2 flex-wrap text-xs">
           <div className="flex items-center gap-1.5 p-1 bg-slate-100 dark:bg-slate-800/80 rounded-xl border border-slate-200 dark:border-slate-700">
             <button
               type="button"
               onClick={() => setStockFilter("in_stock")}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+              className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
                 stockFilter === "in_stock"
                   ? "bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-2xs font-bold"
                   : "text-slate-600 dark:text-slate-400 hover:text-slate-900"
@@ -1207,33 +1343,29 @@ export default function POSScreen() {
             <button
               type="button"
               onClick={() => setStockFilter("all")}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+              className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
                 stockFilter === "all"
                   ? "bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-2xs font-bold"
                   : "text-slate-600 dark:text-slate-400 hover:text-slate-900"
               }`}
             >
-              All Catalog Items ({productList.length})
+              All Items ({productList.length})
             </button>
           </div>
-          {outOfStockCount > 0 && stockFilter === "in_stock" && (
-            <span className="text-[11px] text-slate-400">
-              ({outOfStockCount} unpurchased/out-of-stock items hidden)
-            </span>
+
+          {posMode === "Wholesale" ? (
+            <div className="bg-purple-50 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-800/60 rounded-lg px-2.5 py-1 text-[11px] text-purple-700 dark:text-purple-300 font-semibold flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-purple-500 animate-pulse" />
+              <span>Wholesale Bulk Pricing Active (Auto-applying Wholesale Rates)</span>
+            </div>
+          ) : (
+            outOfStockCount > 0 && stockFilter === "in_stock" && (
+              <span className="text-[11px] text-slate-400">
+                ({outOfStockCount} out-of-stock items hidden)
+              </span>
+            )
           )}
         </div>
-
-        {/* Pricing tier notification badge if wholesale / min price configured */}
-        {txSettings?.salePrice && txSettings.salePrice !== "Retail Price" && (
-          <div className="bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800/60 rounded-lg px-3 py-1.5 text-xs text-blue-700 dark:text-blue-300 flex items-center justify-between">
-            <span className="font-semibold">
-              Pricing Tier: {txSettings.salePrice}
-            </span>
-            <span className="text-[11px] text-blue-500">
-              Active in Transaction Settings
-            </span>
-          </div>
-        )}
 
         {loadingProducts ? (
           <div className="flex-1 flex items-center justify-center text-slate-500 text-sm">
@@ -1254,41 +1386,88 @@ export default function POSScreen() {
             </div>
           </div>
         ) : (
-          <div className="flex flex-col gap-3 overflow-y-auto pr-2">
+          <div className="flex flex-col gap-2.5 overflow-y-auto pr-2 flex-1">
             {filteredProducts.map((p, idx) => {
               const pId = getProductId(p) || idx;
               const stockCount = Number(p.stock) || 0;
               const isOut = !allowNegativeStock && stockCount <= 0;
               const defaultPrice = getProductDefaultPrice(p);
+              const hasWholesalePrice = p.wholesalePrice && Number(p.wholesalePrice) > 0;
 
               return (
                 <button
                   key={pId}
                   onClick={() => addToCart(p)}
                   disabled={isOut}
-                  className={`bg-white border rounded-md p-3 text-left transition-colors group flex items-center gap-4 ${
+                  className={`bg-white dark:bg-slate-900 border rounded-xl p-3 text-left transition-all group flex items-center gap-3.5 shadow-2xs hover:shadow-sm ${
                     isOut
-                      ? "opacity-60 border-gray-200 cursor-not-allowed bg-gray-50"
-                      : "border-gray-200 hover:border-blue-400"
+                      ? "opacity-60 border-gray-200 dark:border-slate-800 cursor-not-allowed bg-gray-50 dark:bg-slate-900/60"
+                      : posMode === "Wholesale"
+                      ? "border-purple-200/80 dark:border-slate-700 hover:border-purple-400 hover:bg-purple-50/20"
+                      : "border-slate-200/80 dark:border-slate-700 hover:border-blue-400 hover:bg-blue-50/20"
                   }`}
                 >
-                  <div className="w-12 h-12 bg-gray-100 rounded flex-shrink-0 flex items-center justify-center">
-                    <Package className="w-6 h-6 text-gray-400" />
+                  <div className={`w-11 h-11 rounded-lg flex-shrink-0 flex items-center justify-center ${
+                    posMode === "Wholesale" ? "bg-purple-100/70 text-purple-600 dark:bg-purple-950/60 dark:text-purple-400" : "bg-blue-100/70 text-blue-600 dark:bg-blue-950/60 dark:text-blue-400"
+                  }`}>
+                    <Package className="w-5 h-5" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-slate-900 truncate">
-                      {p.name}
-                    </p>
-                    <p className="text-xs text-slate-400 font-mono mt-0.5">
-                      {p.sku || "NO-SKU"}
-                    </p>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <p className="text-sm font-bold text-slate-900 dark:text-white truncate">
+                        {p.name}
+                      </p>
+                      {p.category && (
+                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                          {p.category}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-2 mt-1 flex-wrap text-xs">
+                      <span className="text-slate-400 font-mono text-[11px]">
+                        {p.sku || "NO-SKU"}
+                      </span>
+                      {p.barcode && (
+                        <span className="text-slate-400 font-mono text-[10px]">
+                          • {p.barcode}
+                        </span>
+                      )}
+
+                      {/* Pharmacy Details */}
+                      {(p.batchNo || p.expiryDate) && (
+                        <span className="text-[10px] font-bold px-1.5 py-0.2 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300 rounded border border-emerald-200 dark:border-emerald-800">
+                          {p.batchNo ? `Lot: ${p.batchNo}` : ""} {p.expiryDate ? `Exp: ${p.expiryDate}` : ""}
+                        </span>
+                      )}
+
+                      {/* Apparel Details */}
+                      {(p.size || p.color) && (
+                        <span className="text-[10px] font-bold px-1.5 py-0.2 bg-pink-50 text-pink-700 dark:bg-pink-950/50 dark:text-pink-300 rounded border border-pink-200 dark:border-pink-800">
+                          {p.size ? `Size: ${p.size}` : ""} {p.color ? `• ${p.color}` : ""}
+                        </span>
+                      )}
+
+                      {/* Wholesale MOQ details */}
+                      {posMode === "Wholesale" && (
+                        <span className="text-[10px] font-bold px-1.5 py-0.2 bg-purple-50 text-purple-700 dark:bg-purple-950/50 dark:text-purple-300 rounded border border-purple-200 dark:border-purple-800">
+                          MOQ: {p.minOrderQty || 1} {p.packSize ? `(Pack: ${p.packSize})` : ""}
+                        </span>
+                      )}
+                    </div>
                   </div>
+
                   <div className="flex flex-col items-end gap-1 flex-shrink-0">
-                    <span className="text-sm font-bold text-blue-600">
+                    <span className={`text-sm font-extrabold font-mono ${posMode === "Wholesale" ? "text-purple-600 dark:text-purple-400" : "text-blue-600 dark:text-blue-400"}`}>
                       {fmt(defaultPrice)}
                     </span>
+                    {posMode !== "Wholesale" && hasWholesalePrice && (
+                      <span className="text-[10px] text-slate-400 font-mono">
+                        Bulk: {fmt(p.wholesalePrice)}
+                      </span>
+                    )}
                     <span
-                      className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${
+                      className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
                         stockCount <= 0
                           ? allowNegativeStock
                             ? "bg-purple-50 text-purple-600"
@@ -1302,7 +1481,7 @@ export default function POSScreen() {
                         ? allowNegativeStock
                           ? `Backorder (${stockCount})`
                           : "Out of Stock"
-                        : `Stock: ${stockCount}`}
+                        : `Stock: ${stockCount} ${p.unit || "pcs"}`}
                     </span>
                   </div>
                 </button>
@@ -1347,12 +1526,14 @@ export default function POSScreen() {
         <div className="p-3 bg-gray-50/90 dark:bg-gray-900/90 border-b border-gray-200 dark:border-gray-800 space-y-2 flex-shrink-0">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-lg bg-blue-600 text-white flex items-center justify-center">
+              <div className={`w-7 h-7 rounded-lg text-white flex items-center justify-center ${
+                posMode === "Wholesale" ? "bg-purple-600" : "bg-blue-600"
+              }`}>
                 <Receipt className="w-4 h-4" />
               </div>
               <div>
                 <h3 className="font-extrabold text-slate-900 dark:text-white text-xs leading-snug tracking-tight">
-                  Products to Bill
+                  {posMode === "Wholesale" ? "Wholesale B2B Bill" : "Products to Bill"}
                 </h3>
                 <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-400">
                   {cart.length} {cart.length === 1 ? "product" : "products"} •{" "}
@@ -1423,7 +1604,7 @@ export default function POSScreen() {
                   list="pos-customers-list"
                   value={customer}
                   onChange={(e) => handleCustomerChange(e.target.value)}
-                  placeholder="Walk-in Customer (or search/type customer name...)"
+                  placeholder={posMode === "Wholesale" ? "Select Wholesale Party / Buyer (or type name...)" : "Walk-in Customer (or search/type customer name...)"}
                   className="w-full bg-slate-50 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-700 rounded-lg pl-2.5 pr-7 py-1.5 text-xs font-semibold text-slate-900 dark:text-white placeholder:text-slate-400 outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition"
                 />
                 {customer && customer !== "Walk-in Customer" && (
@@ -1998,6 +2179,31 @@ export default function POSScreen() {
                 </div>
               </div>
 
+              {/* 1-Click Fast Cash Tender Shortcuts for Cashier */}
+              {isCash && cashSuggestions.length > 0 && (
+                <div className="space-y-1 pt-0.5 pb-1">
+                  <span className="text-[9px] font-bold text-slate-400 dark:text-slate-400 uppercase tracking-wider block">
+                    ⚡ 1-Click Fast Cash Tender
+                  </span>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {cashSuggestions.map((sug) => (
+                      <button
+                        key={sug}
+                        type="button"
+                        onClick={() => setAmountPaid(String(sug))}
+                        className={`px-2 py-0.5 rounded-lg text-[10px] font-mono font-bold transition-all cursor-pointer ${
+                          Number(amountPaid) === sug
+                            ? "bg-emerald-600 text-white shadow-2xs"
+                            : "bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-300 border border-slate-200 dark:border-slate-700"
+                        }`}
+                      >
+                        {sug === roundedTotal ? `Exact: ₹${sug}` : `₹${sug}`}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {paidValue > roundedTotal ? (
                 <div className="flex justify-between items-center text-[11px] font-bold bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900/60 rounded-lg px-2.5 py-1 text-emerald-700 dark:text-emerald-400 shadow-2xs">
                   <span>Change Return:</span>
@@ -2360,6 +2566,14 @@ export default function POSScreen() {
           </div>
         </Modal>
       )}
+
+      {/* CAMERA BARCODE SCANNER MODAL */}
+      <CameraBarcodeScanner
+        isOpen={cameraScannerOpen}
+        onClose={() => setCameraScannerOpen(false)}
+        onScan={handleScanBarcode}
+        title="Scan Barcode to Add to Bill"
+      />
 
     </div>
   );

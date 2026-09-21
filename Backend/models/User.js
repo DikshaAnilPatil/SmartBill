@@ -41,6 +41,11 @@ const userSchema = new mongoose.Schema(
       default: "Retail",
     },
 
+    businessCategory: {
+      type: String,
+      default: "",
+    },
+
     password: {
       type: String,
       required: true,

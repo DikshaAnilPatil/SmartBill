@@ -14,6 +14,12 @@ const productSchema = new mongoose.Schema(
       trim: true,
     },
 
+    barcode: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
     category: {
       type: String,
       required: true,
@@ -94,6 +100,41 @@ const productSchema = new mongoose.Schema(
       default: null,
     },
 
+    size: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
+    color: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
+    packSize: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
+    minOrderQty: {
+      type: Number,
+      default: 1,
+      min: 1,
+    },
+
+    warrantyMonths: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+
+    isPrescriptionOnly: {
+      type: Boolean,
+      default: false,
+    },
+
     status: {
       type: String,
       enum: ["Active", "Inactive", "Discontinued"],
@@ -131,6 +172,7 @@ const productSchema = new mongoose.Schema(
 
 // Compound indexes for optimal tenant queries and search
 productSchema.index({ ownerId: 1, sku: 1 });
+productSchema.index({ ownerId: 1, barcode: 1 });
 productSchema.index({ ownerId: 1, createdAt: -1 });
 productSchema.index({ ownerId: 1, category: 1 });
 productSchema.index({ ownerId: 1, status: 1 });

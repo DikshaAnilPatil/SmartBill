@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import jwt from "jsonwebtoken";
 import { razorpayInstance } from "../config/razorpay.js";
 import { PLAN_LIMITS } from "../config/plans.js";
 import { getOrUpdateSubscriptionState, getPlanConfig } from "../middleware/checkPlanLimits.js";
@@ -310,9 +311,10 @@ export const verifySubscriptionPayment = async (req, res) => {
         }
 
         user.subscription = {
-          ...(user.subscription.toObject?.() || user.subscription),
+          ...(user.subscription?.toObject?.() || user.subscription || {}),
           plan: planKey,
           status: "active",
+          trialEndsAt: newPeriodEnd,
           currentPeriodStart: now,
           currentPeriodEnd: newPeriodEnd,
           razorpayOrderId: razorpay_order_id,
@@ -348,17 +350,17 @@ export const verifySubscriptionPayment = async (req, res) => {
                 businessName: user.businessName || `${user.firstName || ""} ${user.lastName || ""}`.trim() || user.email,
                 email: user.email,
                 plan: planKey,
-                originalAmount: planConfig.price,
-                discountAmount,
-                finalAmount,
                 orderId: razorpay_order_id,
                 paymentId: razorpay_payment_id,
-                redeemedAt: now,
+                originalPrice: planConfig.price,
+                discountAmount,
+                finalPrice: finalAmount,
+                redeemedAt: new Date(),
               });
               await coupon.save();
             }
           } catch (couponErr) {
-            console.error("Error recording coupon redemption:", couponErr);
+            console.error("Coupon redemption recording error:", couponErr.message);
           }
         }
 
@@ -410,9 +412,34 @@ export const verifySubscriptionPayment = async (req, res) => {
           console.error("Subscription email dispatch error:", subEmailErr.message);
         }
 
+        const freshToken = jwt.sign(
+          {
+            id: user._id,
+            ownerId: user.ownerId || user._id,
+            role: user.role,
+            businessType: user.businessType,
+            permissions: user.permissions || {},
+          },
+          process.env.JWT_SECRET || "smartbill_secret_key_123",
+          { expiresIn: "7d" }
+        );
+
         res.json({
           success: true,
           message: `Payment successful! Your account has been ${isUpgrade ? "upgraded" : "activated"} to the ${planConfig.name} plan.`,
+          token: freshToken,
+          user: {
+            _id: user._id,
+            firstName: user.firstName,
+            lastName: user.lastName,
+            businessName: user.businessName,
+            businessType: user.businessType,
+            email: user.email,
+            phone: user.phone,
+            role: user.role,
+            ownerId: user.ownerId || user._id,
+            subscription: user.subscription,
+          },
           subscription: user.subscription,
           isUpgrade: !!isUpgrade,
         });
@@ -465,7 +492,7 @@ export const getSubscriptionStatus = async (req, res) => {
     if (
       user.subscription?.pendingDowngradePlan &&
       user.subscription?.currentPeriodEnd &&
-      new Date() > new Date(user.subscription.currentPeriodEnd)
+      new Date() > new Date(user.subscription?.currentPeriodEnd)
     ) {
       const downgradePlan = user.subscription.pendingDowngradePlan;
       const now = new Date();
@@ -476,6 +503,20 @@ export const getSubscriptionStatus = async (req, res) => {
       user.subscription.pendingDowngradePlan = "";
       user.subscription.upgradedAt = now;
       await user.save();
+    }
+
+    // Auto-heal: if user has payment in paymentHistory in the last 30 days and status was wrongly marked expired/trialing
+    const lastPayment = user.subscription?.paymentHistory?.slice(-1)[0];
+    if (lastPayment && lastPayment.paidAt) {
+      const paymentDate = new Date(lastPayment.paidAt);
+      const thirtyDays = 30 * 24 * 60 * 60 * 1000;
+      if (Date.now() - paymentDate.getTime() < thirtyDays && user.subscription.status !== "active") {
+        user.subscription.status = "active";
+        user.subscription.plan = lastPayment.plan || user.subscription.plan || "pro";
+        user.subscription.currentPeriodEnd = new Date(paymentDate.getTime() + thirtyDays);
+        user.subscription.trialEndsAt = user.subscription.currentPeriodEnd;
+        await user.save();
+      }
     }
 
     const subState = await getOrUpdateSubscriptionState(user);

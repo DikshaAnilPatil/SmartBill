@@ -8,6 +8,7 @@ export const addProduct = async (req, res) => {
     const {
       name: rawName,
       sku: inputSku,
+      barcode = "",
       category = "General",
       supplier = "",
       cost = 0,
@@ -60,6 +61,7 @@ export const addProduct = async (req, res) => {
     const product = new Product({
       name,
       sku: finalSku,
+      barcode: String(barcode || "").trim(),
       category: String(category || "General").trim(),
       supplier: String(supplier || "").trim(),
       cost: Number(cost) || 0,
@@ -73,6 +75,12 @@ export const addProduct = async (req, res) => {
       hsnCode: String(hsnCode || "").trim(),
       batchNo: String(batchNo || "").trim(),
       expiryDate: expiryDate ? new Date(expiryDate) : null,
+      size: String(size || "").trim(),
+      color: String(color || "").trim(),
+      packSize: String(packSize || "").trim(),
+      minOrderQty: Number(minOrderQty) || 1,
+      warrantyMonths: Number(warrantyMonths) || 0,
+      isPrescriptionOnly: Boolean(isPrescriptionOnly),
       status: status || "Active",
       userId: actualUserId,
       ownerId: effectiveOwnerId,
@@ -422,6 +430,7 @@ export const getProducts = async (req, res) => {
           $or: [
             { name: new RegExp(escaped, "i") },
             { sku: new RegExp(escaped, "i") },
+            { barcode: new RegExp(escaped, "i") },
             { category: new RegExp(escaped, "i") },
             { hsnCode: new RegExp(escaped, "i") },
           ],
@@ -579,6 +588,7 @@ export const updateProduct = async (req, res) => {
     const {
       name,
       sku,
+      barcode,
       category,
       supplier,
       cost,
@@ -592,11 +602,18 @@ export const updateProduct = async (req, res) => {
       hsnCode,
       batchNo,
       expiryDate,
+      size,
+      color,
+      packSize,
+      minOrderQty,
+      warrantyMonths,
+      isPrescriptionOnly,
       status,
     } = req.body;
 
     if (name !== undefined) product.name = name || product.name;
     if (sku !== undefined) product.sku = sku || product.sku;
+    if (barcode !== undefined) product.barcode = String(barcode || "").trim();
     if (category !== undefined) product.category = category || product.category;
     if (supplier !== undefined) product.supplier = supplier || product.supplier;
     if (cost !== undefined) product.cost = Number(cost) || 0;
@@ -610,6 +627,12 @@ export const updateProduct = async (req, res) => {
     if (hsnCode !== undefined) product.hsnCode = String(hsnCode).trim();
     if (batchNo !== undefined) product.batchNo = String(batchNo).trim();
     if (expiryDate !== undefined) product.expiryDate = expiryDate ? new Date(expiryDate) : null;
+    if (size !== undefined) product.size = String(size).trim();
+    if (color !== undefined) product.color = String(color).trim();
+    if (packSize !== undefined) product.packSize = String(packSize).trim();
+    if (minOrderQty !== undefined) product.minOrderQty = Number(minOrderQty) || 1;
+    if (warrantyMonths !== undefined) product.warrantyMonths = Number(warrantyMonths) || 0;
+    if (isPrescriptionOnly !== undefined) product.isPrescriptionOnly = Boolean(isPrescriptionOnly);
     if (status !== undefined) product.status = status || product.status;
 
     await product.save();

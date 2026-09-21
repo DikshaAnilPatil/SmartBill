@@ -15,34 +15,42 @@ When a user deleted a notification (single notification or "Clear all"), the ent
 
 ---
 
-## 2. Registration Page OTP Problem Fix
+## SmartBill Walkthrough: Live Camera Barcode Scanning & Industry Product Category Isolation
 
-### Problem
-Users were not receiving the OTP during registration when clicking **Send OTP**, preventing them from verifying their mobile number and creating an account.
+## What Was Completed
 
-### Root Causes
-1. **No Direct Delivery to Email / Screen**:
-   - `sendOtp` previously generated the OTP in the backend and logged it to the server console, but without an active SMS service it wasn't delivered to the user's email or shown on the interface.
-2. **Missing Email Dispatch in `sendOtp`**:
-   - `sendOtp` controller only took `phone` in `req.body`, ignoring the user's email entered during registration.
-3. **UI Feedback Gap**:
-   - The UI previously said *"Use the code shown below"* without displaying the generated code or providing auto-fill options.
+### 1. Live Camera Barcode Scanner Component ([CameraBarcodeScanner.jsx](file:///c:/Users/ASUS1/Downloads/SmartBill/shared/src/components/common/CameraBarcodeScanner.jsx))
+- **Live Camera Viewfinder**:
+  - Full-screen / modal interactive camera overlay with reticle corner markers and animated scanning laser line.
+  - Native Web `BarcodeDetector` support covering `EAN-13`, `EAN-8`, `UPC-A`, `UPC-E`, `Code 128`, `Code 39`, `Code 93`, `ITF`, and `QR Code`.
+  - Web Audio API synthesizer that plays an instant cash-register scan beep on barcode detection.
+  - Camera flip toggle (Rear/Environment vs Front/User) and torch/flashlight toggle.
+  - Manual numeric / USB gun barcode input fallback with auto-focus.
+- **Full Integration**:
+  - **Products Screen Search**: "📷 Scan Barcode" button in the search toolbar to quickly lookup products.
+  - **Add Product Modal**: "📷 Camera Scan" button next to Barcode input to populate the code instantly.
+  - **Edit Product Modal**: "📷 Camera Scan" button next to Barcode input.
+  - **POS Billing Screen**: "📷 Scan Barcode" button in the POS top bar. When scanned, it automatically detects the product and adds it to the billing cart with instant audio beep feedback.
 
-### Changes Implemented
-- [authcontroller.js](file:///d:/Business%20Management%20Dashboard%20(2)/Business%20Management%20Dashboard/Backend/controller/authcontroller.js):
-  - Updated `sendOtp` to accept both `phone` and `email`.
-  - Dispatches an automated verification email with the 6-digit OTP code using `sendVerificationOtpEmail`.
-  - Returns `{ success: true, message: "OTP sent successfully.", otp }` in the API response.
-  - Extended OTP expiry window from 5 minutes to 10 minutes.
-- [emailService.js](file:///d:/Business%20Management%20Dashboard%20(2)/Business%20Management%20Dashboard/Backend/utils/emailService.js):
-  - Added `sendVerificationOtpEmail` function with a branded HTML template and security disclaimer.
-- [AuthScreen.jsx](file:///d:/Business%20Management%20Dashboard%20(2)/Business%20Management%20Dashboard/shared/src/components/AuthScreen.jsx):
-  - Updated `handleSendOtp` to forward both phone and email.
-  - Implemented an interactive verification box that displays the 6-digit OTP code with a one-click **Verify Now →** action and auto-fill.
-  - Added a 60-second cooldown timer for **Resend OTP**.
-  - Displays a clean green badge upon successful verification: *"Phone number verified successfully."*
+---
 
-### Verification
-- Tested `/api/auth/send-otp` with duplicate phone numbers (properly rejected with 409).
-- Tested `/api/auth/send-otp` with fresh numbers (generated OTP returned and emailed).
-- Tested `/api/auth/verify-otp` with valid and invalid OTPs (verified successfully).
+### 2. Business Vertical & Category Isolation ([businessCategories.js](file:///c:/Users/ASUS1/Downloads/SmartBill/shared/src/utils/businessCategories.js))
+- **Dynamic Category Mapping**:
+  - Comprehensive preset category mappings for 15 Retail sectors (Kirana & Grocery, Pharmacy, Apparel, Footwear, Electronics, Hardware, Cosmetics, Restaurant, etc.) and 12 Wholesale sectors (FMCG Wholesale, Pharma Wholesale, Textiles Distribution, Electronics Wholesale, Building Materials, Agriculture, etc.).
+  - `getProductCategoriesForIndustry(businessCategory, businessType)` guarantees that when a merchant registers or selects a business vertical, **only** the product categories belonging to that specific vertical are displayed in:
+    - **Add Product Category Dropdown**
+    - **Edit Product Category Dropdown**
+    - **Products Screen Category Filter Pills**
+    - **POS Billing Screen Category Filter Pills**
+- **Seamless Registration Synchronization ([AuthScreen.jsx](file:///c:/Users/ASUS1/Downloads/SmartBill/shared/src/components/AuthScreen.jsx))**:
+  - Synchronized registration dropdowns directly from `businessCategories.js`.
+  - When a merchant creates an account and chooses their business type (Retail / Wholesale) and category, their catalog filters and POS billing automatically configure to their specific industry.
+- **Reactive Profile Updates ([ProfileScreen.jsx](file:///c:/Users/ASUS1/Downloads/SmartBill/apps/crm/src/pages/settings/ProfileScreen.jsx))**:
+  - Dispatches `userUpdated` and `businessInfoUpdated` events so changing the business vertical in Settings instantly re-configures the category pills and product catalog.
+
+---
+
+## Verification & Test Results
+- **Backend Tests**: All 33 tests in test suite pass (`33 pass, 0 fail`).
+- **Dev Servers**: Background task running concurrently for Backend API (`:5000`), CRM (`:5174`), Landing Page (`:5173`), and Admin Panel (`:5175`).
+- **HMR / Build**: Vite hot-module reload verified across [ProductsScreen.jsx](file:///c:/Users/ASUS1/Downloads/SmartBill/apps/crm/src/pages/commerce/ProductsScreen.jsx) and [POSScreen.jsx](file:///c:/Users/ASUS1/Downloads/SmartBill/apps/crm/src/pages/transactions/POSScreen.jsx).

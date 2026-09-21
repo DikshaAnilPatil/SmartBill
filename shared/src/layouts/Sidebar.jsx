@@ -1,11 +1,42 @@
+import { useState, useEffect } from "react";
 import { BarChart2, ChevronRight, Menu, UserCircle } from "lucide-react";
 import { NAV_GROUPS, SUPER_ADMIN_ITEMS } from "./navConfig";
 import { getUserDisplayName } from "@shared/utils/userUtils";
 import { useCustomization } from "@shared/hooks/useCustomization";
 import { hasPermission } from "@shared/utils/permissions";
 
-export default function Sidebar({ page, onNav, role, collapsed, onToggle, user, isPlatformAdmin: propsIsPlatformAdmin }) {
+export default function Sidebar({ page, onNav, role, collapsed, onToggle, user: propUser, isPlatformAdmin: propsIsPlatformAdmin }) {
   const { t } = useCustomization();
+  
+  const [currentUser, setCurrentUser] = useState(() => {
+    try {
+      const raw = localStorage.getItem("smartbill_user");
+      return raw ? { ...JSON.parse(raw), ...(propUser || {}) } : propUser || {};
+    } catch {
+      return propUser || {};
+    }
+  });
+
+  useEffect(() => {
+    if (propUser) setCurrentUser((prev) => ({ ...prev, ...propUser }));
+  }, [propUser]);
+
+  useEffect(() => {
+    const handleSync = () => {
+      try {
+        const raw = localStorage.getItem("smartbill_user");
+        if (raw) setCurrentUser(JSON.parse(raw));
+      } catch (_) {}
+    };
+    window.addEventListener("userUpdated", handleSync);
+    window.addEventListener("businessInfoUpdated", handleSync);
+    return () => {
+      window.removeEventListener("userUpdated", handleSync);
+      window.removeEventListener("businessInfoUpdated", handleSync);
+    };
+  }, []);
+
+  const user = currentUser;
   const normRole = String(role || user?.role || "").toLowerCase().replace(/[-_\s]/g, "");
   const isPlatformAdmin =
     propsIsPlatformAdmin !== undefined
@@ -54,14 +85,25 @@ export default function Sidebar({ page, onNav, role, collapsed, onToggle, user, 
             <p className="text-sm font-bold text-white truncate">
               {displayName}
             </p>
-            <p className="text-[10px] text-slate-500 capitalize">
-              {String(role || user?.role || "admin").replace(/[-_]/g, " ")}
-            </p>
+            <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+              <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded tracking-wide ${
+                String(user?.businessType).toLowerCase() === "wholesale"
+                  ? "bg-purple-500/20 text-purple-300 border border-purple-500/30"
+                  : "bg-blue-500/20 text-blue-300 border border-blue-500/30"
+              }`}>
+                {String(user?.businessType).toLowerCase() === "wholesale" ? "🏢 Wholesale" : "🛒 Retail"}
+              </span>
+              {user?.businessCategory && (
+                <span className="text-[10px] text-slate-400 truncate max-w-[100px]" title={user.businessCategory}>
+                  • {user.businessCategory}
+                </span>
+              )}
+            </div>
           </div>
         )}
         <button
           onClick={onToggle}
-          className="text-slate-500 hover:text-slate-300 transition-colors flex-shrink-0"
+          className="text-slate-500 hover:text-slate-300 transition-colors flex-shrink-0 cursor-pointer"
           title={collapsed ? "Expand Sidebar" : "Collapse Sidebar"}
         >
           {collapsed ? (
@@ -89,9 +131,9 @@ export default function Sidebar({ page, onNav, role, collapsed, onToggle, user, 
                       ? { backgroundColor: "var(--primary, #2563eb)", color: "#ffffff" }
                       : {}
                   }
-                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all group relative ${
+                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all group relative cursor-pointer ${
                     active
-                      ? "text-white shadow-md"
+                      ? "text-white shadow-md font-bold"
                       : "text-slate-400 hover:bg-slate-800 hover:text-white"
                   }`}
                 >
@@ -120,8 +162,12 @@ export default function Sidebar({ page, onNav, role, collapsed, onToggle, user, 
                 <div className="space-y-0.5 px-3">
                   {group.items.map(({ key, label, icon: Icon }) => {
                     const active = page === key;
+                    const isWholesale = String(user?.businessType || "").toLowerCase() === "wholesale";
                     const translation = t(`nav.${key}`);
-                    const translatedLabel = translation !== `nav.${key}` ? translation : label;
+                    let translatedLabel = translation !== `nav.${key}` ? translation : label;
+                    if (isWholesale && key === "customers") {
+                      translatedLabel = "Parties & Clients";
+                    }
                     return (
                       <button
                         type="button"

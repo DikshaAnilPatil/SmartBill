@@ -43,6 +43,8 @@ import {
   getInventorySettings,
   updateInventorySettings,
 } from "@shared/api/inventorySettingsAPI";
+import { updateInvoiceSettings } from "@shared/api/invoiceSettingsAPI";
+import { RETAIL_CATEGORIES, WHOLESALE_CATEGORIES } from "@shared/utils/businessCategories";
 
 const INDIAN_STATES = [
   "Andhra Pradesh",
@@ -147,6 +149,7 @@ export default function SettingsScreen({ user, initialTab, onNav } = {}) {
         phone: user.phone || localObj.phone || "+91 9876543210",
         email: user.email || localObj.email || "contact@business.in",
         businessType: user.businessType || localObj.businessType || "Retail",
+        businessCategory: user.businessCategory || localObj.businessCategory || "Kirana & Grocery Store",
         financialYear: localObj.financialYear || "April (Standard India)",
         address: user.address || localObj.address || "Shop No. 14, Sadar Bazaar",
         city: user.city || localObj.city || "Nagpur",
@@ -286,6 +289,7 @@ export default function SettingsScreen({ user, initialTab, onNav } = {}) {
         localStorage.setItem("businessInfo", JSON.stringify(businessInfo));
 
         window.dispatchEvent(new Event("userUpdated"));
+        window.dispatchEvent(new Event("businessInfoUpdated"));
         setBusinessSuccess("✓ Business Profile updated and saved permanently across database & invoices!");
       } else {
         setBusinessError("Failed to save profile. Server did not return user details.");
@@ -437,15 +441,27 @@ export default function SettingsScreen({ user, initialTab, onNav } = {}) {
 
 
   // Handle invoice settings save
-  const handleSaveInvoiceSettings = () => {
+  const handleSaveInvoiceSettings = async () => {
     localStorage.setItem(
       "invoiceSettings",
       JSON.stringify({
+        ...invoiceSettings,
         showHsn,
         showDesc,
         showBank,
       }),
     );
+    try {
+      await updateInvoiceSettings({
+        ...invoiceSettings,
+        ifsc: invoiceSettings.ifscCode || invoiceSettings.ifsc,
+        showHSN: showHsn,
+        showDescription: showDesc,
+        showBankDetails: showBank,
+      });
+    } catch (e) {
+      console.warn("Could not sync to backend invoice settings:", e);
+    }
     alert("✓ Invoice settings saved successfully!");
   };
 
@@ -964,22 +980,33 @@ export default function SettingsScreen({ user, initialTab, onNav } = {}) {
                     }
                   />
                   <Select
-                    label="Business Category / Type"
-                    value={businessInfo.businessType}
-                    onChange={(value) =>
-                      handleBusinessChange("businessType", value)
+                    label="Business Model / Type"
+                    value={businessInfo.businessType || "Retail"}
+                    onChange={(value) => {
+                      handleBusinessChange("businessType", value);
+                      handleBusinessChange(
+                        "businessCategory",
+                        value === "Wholesale" ? WHOLESALE_CATEGORIES[0] : RETAIL_CATEGORIES[0]
+                      );
+                    }}
+                    options={["Retail", "Wholesale"]}
+                  />
+                  <Select
+                    label="Industry / Sector Category"
+                    value={
+                      businessInfo.businessCategory ||
+                      (businessInfo.businessType === "Wholesale"
+                        ? WHOLESALE_CATEGORIES[0]
+                        : RETAIL_CATEGORIES[0])
                     }
-                    options={[
-                      "Retail",
-                      "Wholesale",
-                      "Manufacturing",
-                      "Services",
-                      "Pharmacy / Medical",
-                      "Supermarket / Grocery",
-                      "Restaurant / Cafe",
-                      "Hardware & Electrical",
-                      "General Store",
-                    ]}
+                    onChange={(value) =>
+                      handleBusinessChange("businessCategory", value)
+                    }
+                    options={
+                      businessInfo.businessType === "Wholesale"
+                        ? WHOLESALE_CATEGORIES
+                        : RETAIL_CATEGORIES
+                    }
                   />
                   <Select
                     label="Financial Year Cycle"
@@ -1354,19 +1381,27 @@ export default function SettingsScreen({ user, initialTab, onNav } = {}) {
               <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">
                 Invoice Template
               </p>
-              <div className="grid grid-cols-3 gap-3">
-                {["Classic", "Modern", "Minimal"].map((t) => (
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                {[
+                  { id: "Classic", label: "Classic GST", icon: "🏛️" },
+                  { id: "Modern", label: "Modern Banner", icon: "✨" },
+                  { id: "Minimal", label: "Minimal Clean", icon: "📄" },
+                  { id: "Thermal", label: "Thermal POS", icon: "🧾" },
+                  { id: "Bold", label: "Bold Dark", icon: "⚡" },
+                  { id: "GST_Detailed", label: "GST Matrix", icon: "📊" }
+                ].map((t) => (
                   <button
-                    key={t}
-                    onClick={() => handleInvoiceChange("template", t)}
+                    key={t.id}
+                    onClick={() => handleInvoiceChange("template", t.id)}
                     className={`border-2 rounded-xl p-3 text-center transition-all ${
-                      invoiceSettings.template === t
+                      invoiceSettings.template === t.id
                         ? "border-blue-500 bg-blue-50"
                         : "border-slate-200 hover:border-slate-300"
                     }`}
                   >
-                    <div className="h-16 bg-slate-100 rounded-lg mb-2" />
-                    <p className="text-xs font-medium text-slate-700">{t}</p>
+                    <div className="text-xl mb-1">{t.icon}</div>
+                    <p className="text-xs font-semibold text-slate-800">{t.label}</p>
+                    <p className="text-[10px] text-slate-400 font-mono">{t.id}</p>
                   </button>
                 ))}
               </div>

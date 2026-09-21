@@ -27,6 +27,12 @@ import { registerUser, loginUser, sendOtp, verifyOtp, verifyLoginOtp, forgotPass
 import { setUserToStorage } from "@shared/utils/userUtils";
 import { getAdminUrl } from "@shared/utils/urlUtils";
 
+import {
+  RETAIL_CATEGORIES,
+  WHOLESALE_CATEGORIES,
+  BUSINESS_TYPES,
+} from "@shared/utils/businessCategories";
+
 const PHONE_PREFIX = "+91 ";
 
 export default function AuthScreen({ view, onNav, onLogin, fixedRole }) {
@@ -43,6 +49,7 @@ export default function AuthScreen({ view, onNav, onLogin, fixedRole }) {
   const [phone, setPhone] = useState(PHONE_PREFIX);
   const [confirmPassword, setConfirmPassword] = useState("");
   const [bizType, setBizType] = useState("Retail");
+  const [bizCategory, setBizCategory] = useState(RETAIL_CATEGORIES[0]);
 
   const [loading, setLoading] = useState(false);
   const [sent, setSent] = useState(false);
@@ -341,6 +348,7 @@ export default function AuthScreen({ view, onNav, onLogin, fixedRole }) {
         lastName: lastName.trim(),
         businessName: biz.trim(),
         businessType: normalizedBizType,
+        businessCategory: bizCategory,
         email: email.trim(),
         phone: phone.replace(PHONE_PREFIX, "").replace(/\D/g, ""),
         password,
@@ -929,12 +937,27 @@ export default function AuthScreen({ view, onNav, onLogin, fixedRole }) {
                   icon={<Lock className="w-4 h-4" />}
                   error={registerConfirmPasswordError}
                 />
-                <Select
-                  label="Business Type"
-                  value={bizType}
-                  onChange={setBizType}
-                  options={["Retail", "Wholesale"]}
-                />
+                <div className="space-y-3.5">
+                  <Select
+                    label="Business Type"
+                    value={bizType}
+                    onChange={(newType) => {
+                      setBizType(newType);
+                      if (newType === "Wholesale") {
+                        setBizCategory(WHOLESALE_CATEGORIES[0]);
+                      } else {
+                        setBizCategory(RETAIL_CATEGORIES[0]);
+                      }
+                    }}
+                    options={["Retail", "Wholesale"]}
+                  />
+                  <Select
+                    label="Business Category"
+                    value={bizCategory}
+                    onChange={setBizCategory}
+                    options={bizType === "Wholesale" ? WHOLESALE_CATEGORIES : RETAIL_CATEGORIES}
+                  />
+                </div>
                 <Btn
                   variant="primary"
                   size="lg"

@@ -13,6 +13,7 @@ import {
   Info,
 } from "lucide-react";
 import subscriptionAPI from "@shared/api/subscriptionAPI";
+import { setUserToStorage } from "@shared/utils/userUtils";
 
 const PLAN_COLORS = {
   starter: { bg: "from-slate-600 to-slate-700", badge: "bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300" },
@@ -126,12 +127,22 @@ export default function UpgradeModal({ preview, onClose, onSuccess, userEmail })
               razorpay_signature: response.razorpay_signature || "",
               planName: newPlan.key,
               isUpgrade: true,
+              email: userEmail || "",
             });
+
+            if (verifyRes?.token) {
+              localStorage.setItem("smartbill_token", verifyRes.token);
+            }
+            if (verifyRes?.user) {
+              setUserToStorage(verifyRes.user);
+            }
+            window.dispatchEvent(new Event("userUpdated"));
+
             setStep("success");
             if (onSuccess) onSuccess(verifyRes);
           } catch (err) {
             setErrorMsg(
-              err?.response?.data?.message || "Payment verification failed."
+              err?.response?.data?.message || err?.message || "Payment verification failed."
             );
             setStep("error");
           }

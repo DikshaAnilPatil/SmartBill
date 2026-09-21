@@ -94,8 +94,9 @@ export const authMiddleware = async (req, res, next) => {
 
     next();
   } catch (error) {
+    console.warn("AUTH MIDDLEWARE ERROR:", error.message);
     return res.status(401).json({
-      message: "Invalid or expired authentication token.",
+      message: "Invalid or expired authentication token. Please log in again.",
     });
   }
 };

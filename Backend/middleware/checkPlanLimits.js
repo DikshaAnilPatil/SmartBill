@@ -24,25 +24,12 @@ export const getPlanConfig = async (planKey) => {
  * Helper to evaluate and update trial/subscription status for a user.
  */
 export const getOrUpdateSubscriptionState = async (user) => {
-  if (!user || user.role === "superadmin") {
+  if (!user || user.role === "superadmin" || user.role === "admin") {
     return { isExpired: false, status: "active", daysLeft: Infinity };
   }
 
-  // Auto-initialize missing subscription for legacy users
-  if (!user.subscription || !user.subscription.trialEndsAt) {
-    const createdAt = user.createdAt ? new Date(user.createdAt) : new Date();
-    const trialEndsAt = new Date(createdAt.getTime() + 14 * 24 * 60 * 60 * 1000);
-    user.subscription = {
-      plan: "starter",
-      status: Date.now() > trialEndsAt ? "expired" : "trialing",
-      trialEndsAt,
-      currentPeriodStart: createdAt,
-    };
-    await user.save();
-  }
-
-  // Active subscription check
-  if (user.subscription.status === "active") {
+  // 1. Active subscription check — never wipe out active paid plans
+  if (user.subscription && user.subscription.status === "active") {
     if (user.subscription.currentPeriodEnd && new Date() > new Date(user.subscription.currentPeriodEnd)) {
       user.subscription.status = "expired";
       await user.save();
@@ -51,7 +38,21 @@ export const getOrUpdateSubscriptionState = async (user) => {
     return { isExpired: false, status: "active", daysLeft: Infinity };
   }
 
-  // Trialing check
+  // 2. Auto-initialize missing trial for legacy/new users without active subscription
+  if (!user.subscription || !user.subscription.trialEndsAt) {
+    const createdAt = user.createdAt ? new Date(user.createdAt) : new Date();
+    const trialEndsAt = new Date(createdAt.getTime() + 14 * 24 * 60 * 60 * 1000);
+    user.subscription = {
+      ...(user.subscription?.toObject?.() || user.subscription || {}),
+      plan: user.subscription?.plan || "starter",
+      status: Date.now() > trialEndsAt ? "expired" : "trialing",
+      trialEndsAt,
+      currentPeriodStart: user.subscription?.currentPeriodStart || createdAt,
+    };
+    await user.save();
+  }
+
+  // 3. Trialing check
   const trialEndsAt = new Date(user.subscription.trialEndsAt);
   const now = new Date();
 
@@ -143,7 +144,7 @@ export const requireFeature = (featureKey) => {
       const ownerId = req.user.ownerId || req.user._id;
       const user = await User.findById(ownerId);
 
-      if (!user) return next();
+      if (!user || user.role === "superadmin" || user.role === "admin") return next();
 
       const subState = await getOrUpdateSubscriptionState(user);
 

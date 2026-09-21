@@ -218,6 +218,10 @@ export default function TrialBanner({ user, onNav }) {
           const verifyRes =
             await subscriptionAPI.verifyPayment(payload);
 
+          if (verifyRes?.token) {
+            localStorage.setItem("smartbill_token", verifyRes.token);
+          }
+
           /*
           |--------------------------------------------------------------------------
           | Refresh user profile after successful payment
@@ -233,6 +237,12 @@ export default function TrialBanner({ user, onNav }) {
 
             if (profileRes?.user) {
               setUserToStorage(profileRes.user);
+
+              window.dispatchEvent(
+                new Event("userUpdated")
+              );
+            } else if (verifyRes?.user) {
+              setUserToStorage(verifyRes.user);
 
               window.dispatchEvent(
                 new Event("userUpdated")
@@ -315,6 +325,7 @@ export default function TrialBanner({ user, onNav }) {
               response.razorpay_signature,
 
             planName: plan.name,
+            email: user?.email || "",
           });
         },
 

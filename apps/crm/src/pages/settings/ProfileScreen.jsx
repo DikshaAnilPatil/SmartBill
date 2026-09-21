@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
-import { Check, Edit2, Mail, Phone, Users, Package, FileText, TrendingUp } from "lucide-react";
-import { Badge, Btn, Card, Input } from "@shared/components/common/ui";
+import { Check, Edit2, Mail, Phone, Users, Package, FileText, TrendingUp, Building2 } from "lucide-react";
+import { Badge, Btn, Card, Input, Select } from "@shared/components/common/ui";
 import { getUserDisplayName, getUserInitials, setUserToStorage } from "@shared/utils/userUtils";
 import { getProfile, updateProfile } from "@shared/api/authAPI";
 import { fetchCustomers } from "@shared/api/customerAPI";
 import { getProducts } from "@shared/api/productAPI";
 import { fetchOrders } from "@shared/api/orderAPI";
+import { RETAIL_CATEGORIES, WHOLESALE_CATEGORIES } from "@shared/utils/businessCategories";
 
 export default function ProfileScreen() {
   const [profileUser, setProfileUser] = useState(null);
@@ -15,6 +16,7 @@ export default function ProfileScreen() {
     lastName: "",
     businessName: "",
     businessType: "Retail",
+    businessCategory: "General Retail / Other",
     email: "",
     phone: "",
   });
@@ -50,11 +52,15 @@ export default function ProfileScreen() {
         // Backend user is the ONLY source of profile data.
         setProfileUser(currentUser);
 
+        const bType = currentUser.businessType || "Retail";
+        const defaultCat = bType === "Wholesale" ? WHOLESALE_CATEGORIES[0] : RETAIL_CATEGORIES[0];
+
         setFormData({
           firstName: currentUser.firstName || "",
           lastName: currentUser.lastName || "",
           businessName: currentUser.businessName || "",
-          businessType: currentUser.businessType || "Retail",
+          businessType: bType,
+          businessCategory: currentUser.businessCategory || defaultCat,
           email: currentUser.email || "",
           phone: currentUser.phone || "",
         });
@@ -162,6 +168,7 @@ export default function ProfileScreen() {
         lastName: updatedUser.lastName || "",
         businessName: updatedUser.businessName || "",
         businessType: updatedUser.businessType || "Retail",
+        businessCategory: updatedUser.businessCategory || (updatedUser.businessType === "Wholesale" ? WHOLESALE_CATEGORIES[0] : RETAIL_CATEGORIES[0]),
         email: updatedUser.email || "",
         phone: updatedUser.phone || "",
       });
@@ -170,6 +177,7 @@ export default function ProfileScreen() {
       setUserToStorage(updatedUser);
 
       window.dispatchEvent(new Event("userUpdated"));
+      window.dispatchEvent(new Event("businessInfoUpdated"));
 
       // Backend returns a fresh JWT.
       if (response.token) {
@@ -295,7 +303,7 @@ export default function ProfileScreen() {
 
         {/* ================= FORM ================= */}
 
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 
           <Input
             label="First Name"
@@ -321,13 +329,27 @@ export default function ProfileScreen() {
             }
           />
 
-          <Input
-            label="Business Type"
+          <Select
+            label="Business Model / Type"
             value={formData.businessType}
-            onChange={(e) =>
-              handleChange("businessType", e.target.value)
-            }
+            onChange={(newType) => {
+              handleChange("businessType", newType);
+              handleChange(
+                "businessCategory",
+                newType === "Wholesale" ? WHOLESALE_CATEGORIES[0] : RETAIL_CATEGORIES[0]
+              );
+            }}
+            options={["Retail", "Wholesale"]}
           />
+
+          <div className="md:col-span-2">
+            <Select
+              label="Business Industry / Sector Category"
+              value={formData.businessCategory}
+              onChange={(newCat) => handleChange("businessCategory", newCat)}
+              options={formData.businessType === "Wholesale" ? WHOLESALE_CATEGORIES : RETAIL_CATEGORIES}
+            />
+          </div>
 
           <Input
             label="Email"
