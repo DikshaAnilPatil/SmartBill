@@ -55,6 +55,32 @@ export default function SuperAdminSettingsScreen() {
   const [ticketSystem, setTicketSystem] = useState(true);
   const [liveChat, setLiveChat] = useState(true);
   const [knowledgeBase, setKnowledgeBase] = useState(true);
+  const [emailTemplates, setEmailTemplates] = useState([]);
+
+  // Admin Users & Logs states
+  const [adminUsers, setAdminUsers] = useState([
+    {
+      id: 1,
+      name: "Super Admin",
+      email: "admin@smartbill.com",
+      role: "super-admin",
+      status: "Active",
+      lastLogin: "Just now",
+    },
+  ]);
+  const [auditLogs, setAuditLogs] = useState([
+    {
+      id: 1,
+      action: "System Settings Loaded",
+      user: "Super Admin",
+      timestamp: "Today",
+      status: "success",
+    },
+  ]);
+
+  const handleRemoveAdmin = (id) => {
+    setAdminUsers((prev) => prev.filter((u) => u.id !== id));
+  };
 
   const [toast, setToast] = useState(null);
 

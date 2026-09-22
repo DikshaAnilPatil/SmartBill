@@ -26,6 +26,7 @@ import {
   QrCode,
   FileCheck,
   Loader2,
+  Tag,
 } from "lucide-react";
 import { Input, Btn, Select } from "@shared/components/common/ui";
 import { setUserToStorage } from "@shared/utils/userUtils";
@@ -117,14 +118,29 @@ const ToggleRow = ({ title, description, checked, onChange }) => {
   );
 };
 
+const VALID_SETTINGS_TABS = [
+  "business",
+  "subscription",
+  "invoice",
+  "item",
+  "customization",
+  "stockalert",
+  "permissions",
+  "payment",
+  "users",
+  "accounting",
+];
+
 export default function SettingsScreen({ user, initialTab, onNav } = {}) {
   const [activeTab, setActiveTab] = useState(() => {
-    if (initialTab) return initialTab;
+    if (initialTab && VALID_SETTINGS_TABS.includes(initialTab)) return initialTab;
     try {
       const urlParams = new URLSearchParams(window.location.search);
       const tabParam = urlParams.get("tab");
-      if (tabParam) return tabParam;
-      return localStorage.getItem("smartbill_settings_active_tab") || "business";
+      if (tabParam && VALID_SETTINGS_TABS.includes(tabParam)) return tabParam;
+      const stored = localStorage.getItem("smartbill_settings_active_tab");
+      if (stored && VALID_SETTINGS_TABS.includes(stored)) return stored;
+      return "business";
     } catch (_) {
       return "business";
     }

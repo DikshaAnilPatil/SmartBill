@@ -121,6 +121,17 @@ export function getUserPermissions(user) {
     return { ...ROLE_DEFAULT_PERMISSIONS.Owner };
   }
 
+  if (isOwnerOrSuperAdmin(user)) {
+    return {
+      ...ROLE_DEFAULT_PERMISSIONS.Owner,
+      ...(user.permissions && typeof user.permissions === "object" ? user.permissions : {}),
+      settings: true,
+      subscription: true,
+      dashboard: true,
+      profile: true,
+    };
+  }
+
   // If user has specific module permissions stored in MongoDB
   if (
     user.permissions &&
@@ -128,13 +139,9 @@ export function getUserPermissions(user) {
     Object.keys(user.permissions).length > 0
   ) {
     return {
-      ...ROLE_DEFAULT_PERMISSIONS.Owner,
+      ...ROLE_DEFAULT_PERMISSIONS.Cashier,
       ...user.permissions,
     };
-  }
-
-  if (isOwnerOrSuperAdmin(user)) {
-    return { ...ROLE_DEFAULT_PERMISSIONS.Owner };
   }
 
   const roleName = user.role
@@ -156,15 +163,24 @@ export function hasPermission(user, pageKey) {
 
   if (roleStr === "superadmin") return true;
 
+  // Always accessible core pages across all roles
   if (
     !pageKey ||
     pageKey === "super-dashboard" ||
     pageKey === "dashboard" ||
     pageKey === "profile" ||
     pageKey === "notifications" ||
+    pageKey === "subscription" ||
     ["features", "pricing", "changelog", "roadmap", "about", "blog", "careers", "press", "help-center", "api-docs", "status", "contact"].includes(pageKey)
   ) {
     return true;
+  }
+
+  // Business owners and platform admins always have unrestricted access to Settings
+  if (isOwnerOrSuperAdmin(user)) {
+    if (pageKey === "settings" || pageKey === "subscription" || pageKey === "users" || pageKey === "profile" || pageKey === "dashboard") {
+      return true;
+    }
   }
 
   // Extract user permissions object
