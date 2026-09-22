@@ -40,7 +40,7 @@ export default function InvoiceRenderer({
   const tableStyle = settings.tableStyle || tplConfig.tableStyle || "bordered";
   const borderStyle = settings.borderStyle || tplConfig.borderStyle || "solid";
   const paperSize = settings.paperSize || tplConfig.recommendedPaper || "A4";
-  const isThermal = paperSize.toLowerCase().includes("thermal");
+  const isThermal = (tplId || "").toLowerCase().includes("thermal") || paperSize.toLowerCase().includes("thermal") || paperSize.includes("58") || paperSize.includes("80");
   const thermalWidth = paperSize.includes("58") ? "300px" : "380px";
 
   // Visibility Toggles

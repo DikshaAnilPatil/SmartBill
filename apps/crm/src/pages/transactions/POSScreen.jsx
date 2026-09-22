@@ -62,6 +62,7 @@ import {
   getCachedProducts,
 } from "@shared/utils/offlineDb";
 import POSInvoiceModal from "./pos/POSInvoiceModal";
+import { getTemplateConfig } from "@shared/components/invoice/templateConfigs";
 
 export default function POSScreen() {
   const { settings: txSettings } = useTransactionSettings();
@@ -188,7 +189,14 @@ export default function POSScreen() {
   const [error, setError] = useState("");
   const [successToast, setSuccessToast] = useState("");
   const [lastOrder, setLastOrder] = useState(null);
-  const [invSettings, setInvSettings] = useState({});
+  const [invSettings, setInvSettings] = useState(() => {
+    try {
+      const stored = localStorage.getItem("smartbill_invoice_settings");
+      return stored ? JSON.parse(stored) : {};
+    } catch {
+      return {};
+    }
+  });
   const [partySettings, setPartySettings] = useState({
     enableGrouping: true,
     trackBalance: false,
@@ -383,8 +391,20 @@ export default function POSScreen() {
   useEffect(() => {
     // Load invoice settings
     getInvoiceSettings().then(res => {
-      if(res?.settings) setInvSettings(res.settings);
+      if(res?.settings) {
+        setInvSettings(res.settings);
+        try {
+          localStorage.setItem("smartbill_invoice_settings", JSON.stringify(res.settings));
+        } catch (_) {}
+      }
     }).catch(console.warn);
+
+    const handleInvoiceSettingsUpdated = (e) => {
+      if (e.detail) {
+        setInvSettings(e.detail);
+      }
+    };
+    window.addEventListener("invoiceSettingsUpdated", handleInvoiceSettingsUpdated);
 
     // Load party settings
     fetchPartySettings().then(res => {
@@ -418,6 +438,7 @@ export default function POSScreen() {
 
     return () => {
       window.removeEventListener("partySettingsUpdated", handleSettingsUpdated);
+      window.removeEventListener("invoiceSettingsUpdated", handleInvoiceSettingsUpdated);
       window.removeEventListener("stockUpdated", handleProductsOrStockUpdated);
       window.removeEventListener("productUpdated", handleProductsOrStockUpdated);
       window.removeEventListener("orderCreated", handleProductsOrStockUpdated);
@@ -824,18 +845,11 @@ export default function POSScreen() {
     const fmtVal = (v) => "₹" + (Number(v) || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
     const s = invSettings || {};
-    const tpl = s.template === "Modern" 
-      ? { headerBg: s.primaryColor || '#2563eb', headerColor: '#ffffff', border: `1px solid ${s.primaryColor || '#2563eb'}` }
-      : s.template === "Bold"
-      ? { headerBg: '#0f172a', headerColor: '#f8fafc', border: '2px solid #0f172a' }
-      : s.template === "GST_Detailed"
-      ? { headerBg: '#f1f5f9', headerColor: '#0f172a', border: '1px solid #94a3b8' }
-      : s.template === "Minimal"
-      ? { headerBg: 'transparent', headerColor: '#333333', border: '1px solid #eeeeee' }
-      : { headerBg: '#f8fafc', headerColor: '#0f172a', border: '1px solid #e2e8f0' };
-      
-    const pSize = s.paperSize || "A4";
-    const isThermal = s.template === "Thermal" || pSize.includes("Thermal") || pSize.includes("58") || pSize.includes("80");
+    const tplConfig = getTemplateConfig(s.template || "classic_gst");
+    const tplPrimaryColor = s.primaryColor || tplConfig.primaryColor || "#2563eb";
+    const tplFontFamily = s.fontFamily || tplConfig.fontFamily || "Inter";
+    const pSize = s.paperSize || tplConfig.recommendedPaper || "A4";
+    const isThermal = (s.template || "").toLowerCase().includes("thermal") || pSize.toLowerCase().includes("thermal") || pSize.includes("58") || pSize.includes("80");
     const isThermal58 = pSize.includes("58");
 
     // Dynamic UPI QR generation
@@ -1344,6 +1358,7 @@ export default function POSScreen() {
         paymentMode={paymentMode}
         activeBiz={activeBiz}
         paymentSettings={paymentSettings}
+        invSettings={invSettings}
         handlePrintInvoice={handlePrintInvoice}
         getProductDefaultPrice={getProductDefaultPrice}
         onClose={() => {

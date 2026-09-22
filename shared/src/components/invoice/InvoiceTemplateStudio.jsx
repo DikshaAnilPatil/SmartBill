@@ -178,10 +178,27 @@ export default function InvoiceTemplateStudio({ onSettingsSaved }) {
   // Set Default Template
   const handleSetDefaultTemplate = async (templateId, e) => {
     if (e) e.stopPropagation();
-    const updated = { ...settings, defaultTemplate: templateId, template: templateId };
+    const tpl = getTemplateConfig(templateId);
+    const updated = {
+      ...settings,
+      defaultTemplate: tpl.id,
+      template: tpl.id,
+      primaryColor: tpl.primaryColor || settings.primaryColor,
+      secondaryColor: tpl.secondaryColor || settings.secondaryColor,
+      accentColor: tpl.accentColor || settings.accentColor,
+      fontFamily: tpl.fontFamily || settings.fontFamily,
+      headerLayout: tpl.headerLayout || settings.headerLayout,
+      tableStyle: tpl.tableStyle || settings.tableStyle,
+      borderStyle: tpl.borderStyle || settings.borderStyle,
+      paperSize: tpl.recommendedPaper || settings.paperSize,
+    };
     setSettings(updated);
     try {
       await updateInvoiceSettings(updated);
+      try {
+        localStorage.setItem("smartbill_invoice_settings", JSON.stringify(updated));
+        window.dispatchEvent(new CustomEvent("invoiceSettingsUpdated", { detail: updated }));
+      } catch (_) {}
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 3000);
       if (onSettingsSaved) onSettingsSaved(updated);
@@ -195,6 +212,10 @@ export default function InvoiceTemplateStudio({ onSettingsSaved }) {
     setSaving(true);
     try {
       await updateInvoiceSettings(settings);
+      try {
+        localStorage.setItem("smartbill_invoice_settings", JSON.stringify(settings));
+        window.dispatchEvent(new CustomEvent("invoiceSettingsUpdated", { detail: settings }));
+      } catch (_) {}
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 3500);
       if (onSettingsSaved) onSettingsSaved(settings);
