@@ -1990,20 +1990,26 @@ export default function SettingsScreen({ user, initialTab, onNav } = {}) {
                     <div>
                       <div className="flex justify-between text-xs text-slate-500 dark:text-slate-400 mb-1">
                         <span>Invoices</span>
-                        <span className="font-medium text-slate-700 dark:text-slate-200">{subData.usage.invoicesThisMonth} / {subData.usage.maxInvoicesPerMonth === null || subData.usage.maxInvoicesPerMonth > 10000 ? "∞" : subData.usage.maxInvoicesPerMonth}</span>
+                        <span className="font-medium text-slate-700 dark:text-slate-200">
+                          {subData?.usage?.invoicesThisMonth ?? 0} / {subData?.usage?.maxInvoicesPerMonth === null || subData?.usage?.maxInvoicesPerMonth == null || subData?.usage?.maxInvoicesPerMonth > 10000 ? "∞" : subData.usage.maxInvoicesPerMonth}
+                        </span>
                       </div>
                       <div className="h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
                         <div
                           className="h-full bg-blue-600 rounded-full transition-all"
-                          style={{ width: subData.usage.maxInvoicesPerMonth > 10000 ? "10%" : `${Math.min(100, (subData.usage.invoicesThisMonth / subData.usage.maxInvoicesPerMonth) * 100)}%` }}
+                          style={{
+                            width: (subData?.usage?.maxInvoicesPerMonth == null || subData?.usage?.maxInvoicesPerMonth > 10000)
+                              ? "10%"
+                              : `${Math.min(100, ((subData?.usage?.invoicesThisMonth || 0) / (subData?.usage?.maxInvoicesPerMonth || 1)) * 100)}%`
+                          }}
                         />
                       </div>
                     </div>
                     <div>
                       <div className="flex justify-between text-xs text-slate-500 dark:text-slate-400 mb-1">
                         <span>Plan Status</span>
-                        <span className={`font-bold ${PLAN_INFO[subData.subscription?.plan || "starter"].badge}`}>
-                          {PLAN_INFO[subData.subscription?.plan || "starter"].name}
+                        <span className={`font-bold ${PLAN_INFO[subData?.subscription?.plan || "starter"]?.badge || ""}`}>
+                          {PLAN_INFO[subData?.subscription?.plan || "starter"]?.name || "Starter"}
                         </span>
                       </div>
                       <div className="h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
