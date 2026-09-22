@@ -4,8 +4,8 @@ export const adminAPI = {
   /**
    * Fetch all registered business owner records for SuperAdmin
    */
-  getAllBusinesses: async () => {
-    const res = await axiosClient.get("/admin/businesses");
+  getAllBusinesses: async (config = {}) => {
+    const res = await axiosClient.get("/admin/businesses", config);
     return res.data;
   },
 

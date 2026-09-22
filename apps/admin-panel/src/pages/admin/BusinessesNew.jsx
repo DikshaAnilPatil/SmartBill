@@ -271,7 +271,7 @@ export default function BusinessesNew() {
         console.warn("Notice: vendor settings fetch fallback:", sysErr.message);
       }
 
-      const res = await adminAPI.getAllBusinesses();
+      const res = await adminAPI.getAllBusinesses({ signal });
       if (signal?.aborted) return;
 
       const rawData = res?.data || (Array.isArray(res) ? res : []);
@@ -281,14 +281,24 @@ export default function BusinessesNew() {
         suspensionReason: b.suspensionReason || "",
       }));
       setRows(data);
+      setError(null);
 
       try {
         sessionStorage.setItem(CACHE_KEY, JSON.stringify({ data, ts: Date.now() }));
       } catch {}
     } catch (err) {
-      if (err.name === "AbortError") return;
+      if (
+        err?.name === "AbortError" ||
+        err?.name === "CanceledError" ||
+        err?.code === "ERR_CANCELED" ||
+        err?.message === "canceled" ||
+        signal?.aborted
+      ) {
+        return;
+      }
       console.error("Error loading businesses:", err);
-      setError(`Network error: ${err.message}. Check that backend is running on port 5000.`);
+      const errMsg = err.response?.data?.message || err.message || "Failed to load businesses";
+      setError(errMsg);
     } finally {
       if (!signal?.aborted) {
         setLoading(false);
