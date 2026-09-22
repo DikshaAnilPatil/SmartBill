@@ -1,0 +1,7 @@
+{
+  "framework": "vite",
+  "installCommand": "npm install",
+  "buildCommand": "npm run build -w apps/crm",
+  "outputDirectory": "apps/crm/dist",
+  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
+}
