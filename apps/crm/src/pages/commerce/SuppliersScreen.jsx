@@ -14,7 +14,6 @@ import {
   Receipt,
   Printer,
   Check,
-  CreditCard,
   Building2,
   DollarSign,
   Calendar,
@@ -70,8 +69,6 @@ const ACCOUNT_HEADS = [
   "Office Expense",
   "Miscellaneous Expense",
 ];
-
-const PAYMENT_MODES = ["Cash", "UPI", "Bank Transfer", "Cheque", "Other"];
 
 export default function SuppliersScreen() {
   // Navigation Tabs: "suppliers" | "vouchers"
@@ -135,8 +132,8 @@ export default function SuppliersScreen() {
     vendorPhone: "",
     vendorAddress: "",
     vendorGst: "",
-    amount: "",
-    paymentMode: "Cash",
+    amountDue: "",
+    amountPaid: "",
     accountHead: "Vendor Payment",
     referenceNo: "",
     paidBy: "",
@@ -196,8 +193,8 @@ export default function SuppliersScreen() {
       vendorPhone: supplier.phone || "",
       vendorAddress: supplier.address || "",
       vendorGst: supplier.gst || "",
-      amount: "",
-      paymentMode: "Cash",
+      amountDue: supplier.balance > 0 ? String(supplier.balance) : "",
+      amountPaid: "",
       accountHead: "Vendor Payment",
       referenceNo: "",
       paidBy: businessInfo.name || "Cashier / Manager",
@@ -218,8 +215,8 @@ export default function SuppliersScreen() {
       vendorPhone: "",
       vendorAddress: "",
       vendorGst: "",
-      amount: "",
-      paymentMode: "Cash",
+      amountDue: "",
+      amountPaid: "",
       accountHead: "Vendor Payment",
       referenceNo: "",
       paidBy: businessInfo.name || "Cashier / Manager",
@@ -265,19 +262,34 @@ export default function SuppliersScreen() {
       showToast("Please enter or select a Vendor / Payee Name.", "error");
       return;
     }
-    const numAmt = Number(voucherForm.amount);
-    if (isNaN(numAmt) || numAmt <= 0) {
-      showToast("Please enter a valid amount greater than 0.", "error");
+    const numAmountDue = Number(voucherForm.amountDue);
+    const numAmountPaid = Number(voucherForm.amountPaid);
+    if (!Number.isFinite(numAmountDue) || numAmountDue <= 0) {
+      showToast("Please enter a valid Amount Due greater than 0.", "error");
+      return;
+    }
+    if (!Number.isFinite(numAmountPaid) || numAmountPaid < 0) {
+      showToast("Amount Paid must be 0 or greater.", "error");
+      return;
+    }
+    if (numAmountPaid > numAmountDue) {
+      showToast("Amount Paid cannot be greater than Amount Due.", "error");
       return;
     }
 
     setSubmittingVoucher(true);
     try {
+      const payload = {
+        ...voucherForm,
+        amount: numAmountPaid,
+        amountDue: numAmountDue,
+        amountPaid: numAmountPaid,
+      };
       if (editingVoucherId) {
-        await updateCashVoucher(editingVoucherId, voucherForm);
+        await updateCashVoucher(editingVoucherId, payload);
         showToast("Cash Voucher updated successfully!");
       } else {
-        const res = await createCashVoucher(voucherForm);
+        const res = await createCashVoucher(payload);
         showToast(res.message || "Cash Voucher created successfully!");
         if (res.voucher) {
           setViewVoucherSlip(res.voucher);
@@ -356,13 +368,10 @@ export default function SuppliersScreen() {
       (v.referenceNo && v.referenceNo.toLowerCase().includes(voucherSearch.toLowerCase())) ||
       (v.narration && v.narration.toLowerCase().includes(voucherSearch.toLowerCase()));
 
-    const matchesMode =
-      voucherModeFilter === "all" || v.paymentMode.toLowerCase() === voucherModeFilter.toLowerCase();
-
     const matchesHead =
       voucherHeadFilter === "all" || v.accountHead.toLowerCase() === voucherHeadFilter.toLowerCase();
 
-    return matchesSearch && matchesMode && matchesHead;
+    return matchesSearch && matchesHead;
   });
 
   return (
@@ -702,17 +711,6 @@ export default function SuppliersScreen() {
             {/* Filter Pills */}
             <div className="flex flex-wrap items-center gap-2">
               <select
-                value={voucherModeFilter}
-                onChange={(e) => setVoucherModeFilter(e.target.value)}
-                className="px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-200 outline-none"
-              >
-                <option value="all">All Payment Modes</option>
-                {PAYMENT_MODES.map((m) => (
-                  <option key={m} value={m}>{m}</option>
-                ))}
-              </select>
-
-              <select
                 value={voucherHeadFilter}
                 onChange={(e) => setVoucherHeadFilter(e.target.value)}
                 className="px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-200 outline-none"
@@ -750,7 +748,7 @@ export default function SuppliersScreen() {
                       Debit Account Head
                     </th>
                     <th className="text-left px-5 py-3.5 text-xs font-bold text-slate-500 uppercase tracking-wide">
-                      Mode & Ref
+                      Reference
                     </th>
                     <th className="text-right px-5 py-3.5 text-xs font-bold text-slate-500 uppercase tracking-wide">
                       Amount Paid
@@ -766,7 +764,7 @@ export default function SuppliersScreen() {
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                   {filteredVouchers.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="py-16 text-center text-slate-400">
+                      <td colSpan={6} className="py-16 text-center text-slate-400">
                         <Receipt className="w-8 h-8 text-slate-300 mx-auto mb-2" />
                         <p className="font-semibold text-slate-600">No Cash Vouchers Found</p>
                         <p className="text-xs text-slate-400 mt-0.5">
@@ -817,12 +815,8 @@ export default function SuppliersScreen() {
                           </span>
                         </td>
 
-                        {/* Payment Mode */}
+                        {/* Reference */}
                         <td className="px-5 py-4">
-                          <span className="inline-flex items-center gap-1 font-semibold text-xs text-slate-800 dark:text-slate-200">
-                            <CreditCard className="w-3 h-3 text-emerald-600" />
-                            {v.paymentMode}
-                          </span>
                           {v.referenceNo && (
                             <p className="text-[10px] text-slate-400 font-mono mt-0.5">
                               Ref: #{v.referenceNo}
@@ -833,7 +827,7 @@ export default function SuppliersScreen() {
                         {/* Amount */}
                         <td className="px-5 py-4 text-right">
                           <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400 text-sm">
-                            {fmt(v.amount)}
+                            {fmt(v.amountPaid ?? v.amount)}
                           </span>
                         </td>
 
@@ -939,17 +933,35 @@ export default function SuppliersScreen() {
               </div>
             </div>
 
-            {/* Amount & Date */}
-            <div className="grid grid-cols-2 gap-3">
+            {/* Amounts & Date */}
+            <div className="grid grid-cols-3 gap-3">
               <div>
                 <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Disbursed Amount (₹) *
+                  Amount Due / Bill Amount (₹) *
                 </label>
                 <input
                   type="number"
-                  value={voucherForm.amount}
+                  min="0"
+                  value={voucherForm.amountDue}
                   onChange={(e) =>
-                    setVoucherForm((f) => ({ ...f, amount: e.target.value }))
+                    setVoucherForm((f) => ({ ...f, amountDue: e.target.value }))
+                  }
+                  placeholder="0.00"
+                  className="w-full p-2.5 border rounded-xl bg-white dark:bg-slate-900 text-xs font-mono font-bold text-slate-900"
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Amount Paid (₹) *
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  max={voucherForm.amountDue || undefined}
+                  value={voucherForm.amountPaid}
+                  onChange={(e) =>
+                    setVoucherForm((f) => ({ ...f, amountPaid: e.target.value }))
                   }
                   placeholder="0.00"
                   className="w-full p-2.5 border rounded-xl bg-white dark:bg-slate-900 text-xs font-mono font-bold text-emerald-600"
@@ -971,20 +983,18 @@ export default function SuppliersScreen() {
               </div>
             </div>
 
-            {/* Amount in words preview */}
-            {voucherForm.amount && Number(voucherForm.amount) > 0 && (
+            {/* Payment summary */}
+            {voucherForm.amountDue && Number(voucherForm.amountDue) > 0 && (
               <div className="p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300">
-                <span className="font-bold text-[10px] uppercase tracking-wider block">
-                  Amount in Words:
-                </span>
-                <span className="italic font-semibold text-xs">
-                  {numberToWordsIndian(Number(voucherForm.amount))}
-                </span>
+                <div className="flex justify-between gap-3 font-semibold">
+                  <span>Remaining Balance</span>
+                  <span className="font-mono">{fmt(Math.max(0, Number(voucherForm.amountDue) - Number(voucherForm.amountPaid || 0)))}</span>
+                </div>
               </div>
             )}
 
-            {/* Account Head & Payment Mode */}
-            <div className="grid grid-cols-2 gap-3">
+            {/* Account Head */}
+            <div>
               <div>
                 <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
                   Debit Account Head
@@ -1002,22 +1012,6 @@ export default function SuppliersScreen() {
                 </select>
               </div>
 
-              <div>
-                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Payment Mode
-                </label>
-                <select
-                  value={voucherForm.paymentMode}
-                  onChange={(e) =>
-                    setVoucherForm((f) => ({ ...f, paymentMode: e.target.value }))
-                  }
-                  className="w-full p-2.5 border rounded-xl bg-white dark:bg-slate-900 text-xs"
-                >
-                  {PAYMENT_MODES.map((m) => (
-                    <option key={m} value={m}>{m}</option>
-                  ))}
-                </select>
-              </div>
             </div>
 
             {/* Reference No & Received By */}
@@ -1210,10 +1204,11 @@ export default function SuppliersScreen() {
                     <p className="font-bold text-xs text-slate-900">
                       {viewVoucherSlip.accountHead}
                     </p>
-                    <p className="text-[11px] text-slate-600">
-                      Payment Mode: <strong>{viewVoucherSlip.paymentMode}</strong>
-                      {viewVoucherSlip.referenceNo && ` (Ref: #${viewVoucherSlip.referenceNo})`}
-                    </p>
+                    {viewVoucherSlip.referenceNo && (
+                      <p className="text-[11px] text-slate-600">
+                        Ref: <strong>#{viewVoucherSlip.referenceNo}</strong>
+                      </p>
+                    )}
                   </div>
                 </div>
 
@@ -1223,7 +1218,7 @@ export default function SuppliersScreen() {
                     <thead>
                       <tr className="bg-slate-100 text-slate-900 font-bold border-b border-slate-800">
                         <th className="p-2.5 border-r border-slate-800">Particulars / Narration</th>
-                        <th className="p-2.5 text-right w-36">Amount (INR)</th>
+                        <th className="p-2.5 text-right w-36">Amount Paid (INR)</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1244,15 +1239,31 @@ export default function SuppliersScreen() {
                           )}
                         </td>
                         <td className="p-3 text-right font-mono font-black text-sm text-slate-900 align-top">
-                          {fmt(viewVoucherSlip.amount)}
+                          {fmt(viewVoucherSlip.amountPaid ?? viewVoucherSlip.amount)}
                         </td>
                       </tr>
                       <tr className="border-t-2 border-slate-800 bg-slate-50 font-bold">
                         <td className="p-2.5 border-r border-slate-800 text-right uppercase tracking-wider text-slate-700">
-                          Total Amount Paid:
+                          Amount Due:
                         </td>
                         <td className="p-2.5 text-right font-mono text-base font-black text-slate-900">
-                          {fmt(viewVoucherSlip.amount)}
+                          {fmt(viewVoucherSlip.amountDue ?? viewVoucherSlip.amount)}
+                        </td>
+                      </tr>
+                      <tr className="border-t border-slate-300 bg-slate-50 font-bold">
+                        <td className="p-2.5 border-r border-slate-800 text-right uppercase tracking-wider text-slate-700">
+                          Amount Paid:
+                        </td>
+                        <td className="p-2.5 text-right font-mono text-base font-black text-slate-900">
+                          {fmt(viewVoucherSlip.amountPaid ?? viewVoucherSlip.amount)}
+                        </td>
+                      </tr>
+                      <tr className="border-t border-slate-300 bg-amber-50 font-bold">
+                        <td className="p-2.5 border-r border-slate-800 text-right uppercase tracking-wider text-slate-700">
+                          Remaining Balance:
+                        </td>
+                        <td className="p-2.5 text-right font-mono text-base font-black text-slate-900">
+                          {fmt(viewVoucherSlip.remainingBalance ?? Math.max(0, Number(viewVoucherSlip.amountDue ?? viewVoucherSlip.amount) - Number(viewVoucherSlip.amountPaid ?? viewVoucherSlip.amount)))}
                         </td>
                       </tr>
                     </tbody>
@@ -1265,7 +1276,7 @@ export default function SuppliersScreen() {
                     Amount in Words:
                   </span>
                   <span className="font-bold text-xs italic text-slate-900">
-                    {numberToWordsIndian(viewVoucherSlip.amount)}
+                    {numberToWordsIndian(viewVoucherSlip.amountPaid ?? viewVoucherSlip.amount)}
                   </span>
                 </div>
 

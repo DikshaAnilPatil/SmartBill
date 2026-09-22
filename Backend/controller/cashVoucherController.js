@@ -100,6 +100,7 @@ export const getCashVouchers = async (req, res) => {
 export const createCashVoucher = async (req, res) => {
   try {
     const userId = req.user._id;
+    const ownerId = req.user.ownerId || req.user._id;
     const {
       supplierId,
       supplierName,
@@ -107,7 +108,8 @@ export const createCashVoucher = async (req, res) => {
       vendorAddress,
       vendorGst,
       amount,
-      paymentMode,
+      amountDue,
+      amountPaid,
       accountHead,
       referenceNo,
       paidBy,
@@ -121,9 +123,16 @@ export const createCashVoucher = async (req, res) => {
       return res.status(400).json({ message: "Vendor / Payee Name is required." });
     }
 
-    const numAmount = Number(amount);
-    if (isNaN(numAmount) || numAmount <= 0) {
-      return res.status(400).json({ message: "Please enter a valid amount greater than 0." });
+    const numAmountDue = Number(amountDue ?? amount);
+    const numAmountPaid = Number(amountPaid ?? amount);
+    if (!Number.isFinite(numAmountDue) || numAmountDue <= 0) {
+      return res.status(400).json({ message: "Please enter a valid Amount Due greater than 0." });
+    }
+    if (!Number.isFinite(numAmountPaid) || numAmountPaid < 0) {
+      return res.status(400).json({ message: "Amount Paid must be 0 or greater." });
+    }
+    if (numAmountPaid > numAmountDue) {
+      return res.status(400).json({ message: "Amount Paid cannot be greater than Amount Due." });
     }
 
     const voucherNo = await generateNextVoucherNo(userId);
@@ -137,8 +146,11 @@ export const createCashVoucher = async (req, res) => {
       vendorPhone: vendorPhone || "",
       vendorAddress: vendorAddress || "",
       vendorGst: vendorGst || "",
-      amount: numAmount,
-      paymentMode: paymentMode || "Cash",
+      amount: numAmountPaid,
+      amountDue: numAmountDue,
+      amountPaid: numAmountPaid,
+      remainingBalance: Math.round((numAmountDue - numAmountPaid) * 100) / 100,
+      paymentMode: "Cash",
       accountHead: accountHead || "Vendor Payment",
       referenceNo: referenceNo || "",
       paidBy: paidBy || req.user.name || "Cashier / Manager",
@@ -150,10 +162,10 @@ export const createCashVoucher = async (req, res) => {
 
     // If linked to a registered Supplier and adjustSupplierBalance is true, reduce supplier balance
     if (supplierId && voucher.adjustSupplierBalance) {
-      const supplier = await Supplier.findOne({ _id: supplierId, userId });
+      const supplier = await Supplier.findOne({ _id: supplierId, ownerId });
       if (supplier) {
         const currentBal = Number(supplier.balance) || 0;
-        supplier.balance = Math.max(0, currentBal - numAmount);
+        supplier.balance = Math.max(0, currentBal - numAmountPaid);
         await supplier.save();
       }
     }
@@ -182,17 +194,47 @@ export const updateCashVoucher = async (req, res) => {
       return res.status(404).json({ message: "Cash Voucher not found." });
     }
 
-    const oldAmount = Number(existing.amount) || 0;
+    const oldAmountPaid = Number(existing.amountPaid ?? existing.amount) || 0;
     const oldAdjust = existing.adjustSupplierBalance;
     const oldSupplierId = existing.supplierId;
 
+    const requestedDue = req.body.amountDue ?? req.body.amount;
+    const requestedPaid = req.body.amountPaid ?? req.body.amount;
+    const newAmountDue = Number(requestedDue ?? existing.amountDue ?? existing.amount);
+    const newAmountPaid = Number(requestedPaid ?? existing.amountPaid ?? existing.amount);
+    if (!Number.isFinite(newAmountDue) || newAmountDue <= 0) {
+      return res.status(400).json({ message: "Please enter a valid Amount Due greater than 0." });
+    }
+    if (!Number.isFinite(newAmountPaid) || newAmountPaid < 0) {
+      return res.status(400).json({ message: "Amount Paid must be 0 or greater." });
+    }
+    if (newAmountPaid > newAmountDue) {
+      return res.status(400).json({ message: "Amount Paid cannot be greater than Amount Due." });
+    }
+
+    const allowedFields = [
+      "voucherDate", "supplierId", "supplierName", "vendorPhone", "vendorAddress",
+      "vendorGst", "accountHead", "referenceNo", "paidBy", "receivedBy", "narration",
+      "adjustSupplierBalance",
+    ];
+    const updateFields = Object.fromEntries(
+      allowedFields.filter((field) => Object.prototype.hasOwnProperty.call(req.body, field))
+        .map((field) => [field, req.body[field]])
+    );
+    Object.assign(updateFields, {
+      amount: newAmountPaid,
+      amountDue: newAmountDue,
+      amountPaid: newAmountPaid,
+      remainingBalance: Math.round((newAmountDue - newAmountPaid) * 100) / 100,
+      paymentMode: "Cash",
+    });
+
     const updated = await CashVoucher.findOneAndUpdate(
       { _id: id, userId },
-      { $set: req.body },
+      { $set: updateFields },
       { new: true, runValidators: true }
     );
 
-    const newAmount = Number(updated.amount) || 0;
     const newAdjust = updated.adjustSupplierBalance;
     const newSupplierId = updated.supplierId;
 
@@ -200,16 +242,16 @@ export const updateCashVoucher = async (req, res) => {
     if (oldSupplierId && oldAdjust) {
       // Revert old adjustment
       await Supplier.findOneAndUpdate(
-        { _id: oldSupplierId, userId },
-        { $inc: { balance: oldAmount } }
+        { _id: oldSupplierId, ownerId: req.user.ownerId || req.user._id },
+        { $inc: { balance: oldAmountPaid } }
       );
     }
 
     if (newSupplierId && newAdjust) {
       // Apply new adjustment
       await Supplier.findOneAndUpdate(
-        { _id: newSupplierId, userId },
-        { $inc: { balance: -newAmount } }
+        { _id: newSupplierId, ownerId: req.user.ownerId || req.user._id },
+        { $inc: { balance: -newAmountPaid } }
       );
     }
 
@@ -239,9 +281,9 @@ export const deleteCashVoucher = async (req, res) => {
 
     // Revert balance on supplier if it was adjusted
     if (voucher.supplierId && voucher.adjustSupplierBalance) {
-      const amount = Number(voucher.amount) || 0;
+      const amount = Number(voucher.amountPaid ?? voucher.amount) || 0;
       await Supplier.findOneAndUpdate(
-        { _id: voucher.supplierId, userId },
+        { _id: voucher.supplierId, ownerId: req.user.ownerId || req.user._id },
         { $inc: { balance: amount } }
       );
     }

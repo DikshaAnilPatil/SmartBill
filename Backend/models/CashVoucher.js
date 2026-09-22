@@ -43,6 +43,18 @@ const cashVoucherSchema = new mongoose.Schema(
       required: true,
       min: 0,
     },
+    amountDue: {
+      type: Number,
+      min: 0,
+    },
+    amountPaid: {
+      type: Number,
+      min: 0,
+    },
+    remainingBalance: {
+      type: Number,
+      min: 0,
+    },
     paymentMode: {
       type: String,
       enum: ["Cash", "UPI", "Bank Transfer", "Cheque", "Other"],
