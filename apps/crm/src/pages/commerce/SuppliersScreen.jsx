@@ -391,7 +391,7 @@ export default function SuppliersScreen() {
           </div>
           <div>
             <h2 className="text-xl font-bold text-slate-900 dark:text-white">
-              {activeTab === "suppliers" ? "Vendors & Suppliers" : "Vendor Cash Vouchers (रोकड व्हाउचर)"}
+              {activeTab === "suppliers" ? "Suppliers" : "Vendor Cash Vouchers"}
             </h2>
             <p className="text-xs text-slate-500 dark:text-slate-400">
               {activeTab === "suppliers"
@@ -413,7 +413,7 @@ export default function SuppliersScreen() {
             }`}
           >
             <Building2 className="w-4 h-4" />
-            <span>Vendors Directory ({supplierList.length})</span>
+            <span>Suppliers Directory ({supplierList.length})</span>
           </button>
           <button
             type="button"
@@ -441,7 +441,7 @@ export default function SuppliersScreen() {
               <Input
                 value={search}
                 onChange={setSearch}
-                placeholder="Search vendors by name, contact, phone, city..."
+                placeholder="Search suppliers by name, contact, phone, city..."
                 icon={<Search className="w-4 h-4" />}
               />
             </div>
@@ -680,10 +680,10 @@ export default function SuppliersScreen() {
               </div>
               <div className="min-w-0 flex-1">
                 <p className="text-xs font-medium text-slate-500 dark:text-slate-400">
-                  Registered Vendors
+                  Registered Payees
                 </p>
                 <p className="text-xl font-extrabold text-slate-900 dark:text-white font-mono mt-0.5">
-                  {supplierList.length} Vendors
+                  {supplierList.length} Suppliers
                 </p>
               </div>
             </div>
@@ -879,14 +879,14 @@ export default function SuppliersScreen() {
             {/* Registered Vendor Picker */}
             <div>
               <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Select Registered Vendor / Supplier
+                Select Registered Supplier
               </label>
               <select
                 value={voucherForm.supplierId}
                 onChange={(e) => handleVoucherVendorSelect(e.target.value)}
                 className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold outline-none focus:border-blue-500"
               >
-                <option value="">-- Choose Vendor or Type Custom Below --</option>
+                <option value="">-- Choose Supplier or Type Custom Below --</option>
                 {supplierList.map((s) => (
                   <option key={s._id} value={s._id}>
                     {s.name} (Bal: {fmt(s.balance || 0)})
@@ -899,7 +899,7 @@ export default function SuppliersScreen() {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Vendor / Payee Name *
+                  Payee Name *
                 </label>
                 <input
                   type="text"
@@ -932,7 +932,7 @@ export default function SuppliersScreen() {
             <div className="grid grid-cols-3 gap-3">
               <div>
                 <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Amount Due / Bill Amount (₹) *
+                   Bill Amount / Amount Due (₹) *
                 </label>
                 <input
                   type="number"
@@ -1179,7 +1179,7 @@ export default function SuppliersScreen() {
                 <div className="grid grid-cols-2 gap-4 pb-4 mb-4 border-b border-slate-200">
                   <div className="space-y-1">
                     <p className="text-[10px] font-bold uppercase text-slate-400">
-                      Paid To (Vendor / Payee):
+                      Paid To (Payee):
                     </p>
                     <p className="font-extrabold text-sm text-slate-900">
                       {viewVoucherSlip.supplierName}
@@ -1347,7 +1347,7 @@ export default function SuppliersScreen() {
           <div className="space-y-4 text-xs">
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                Firm / Vendor Name
+                Firm Name
               </p>
               <p className="mt-1 text-lg font-bold text-slate-900">
                 {viewSupplier.name}
