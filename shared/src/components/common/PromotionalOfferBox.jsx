@@ -36,10 +36,25 @@ export default function PromotionalOfferBox({ onCtaClick, className = "" }) {
   };
 
   const handleCta = () => {
+    if (offer?.code) {
+      try {
+        sessionStorage.setItem("smartbill_claimed_coupon", offer.code);
+        localStorage.setItem("smartbill_settings_active_tab", "subscription");
+      } catch {}
+    }
     if (onCtaClick) {
       onCtaClick(offer);
     } else {
-      window.location.href = getCrmUrl("/register");
+      window.dispatchEvent(
+        new CustomEvent("openClaimOfferModal", {
+          detail: {
+            couponCode: offer?.code || "",
+            offer: offer,
+            plan: "pro",
+          },
+        })
+      );
+      window.location.href = getCrmUrl("/app/subscription");
     }
   };
 

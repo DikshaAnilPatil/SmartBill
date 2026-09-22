@@ -1,15 +1,12 @@
 import { useState, useEffect } from "react";
-import { BarChart2, ChevronRight, Menu, UserCircle, Tag, Copy, Check, ArrowRight, Sparkles } from "lucide-react";
+import { BarChart2, ChevronRight, Menu, UserCircle } from "lucide-react";
 import { NAV_GROUPS, SUPER_ADMIN_ITEMS } from "./navConfig";
 import { getUserDisplayName } from "@shared/utils/userUtils";
 import { useCustomization } from "@shared/hooks/useCustomization";
 import { hasPermission } from "@shared/utils/permissions";
-import { getFeaturedBanner } from "@shared/api/couponAPI";
 
 export default function Sidebar({ page, onNav, role, collapsed, onToggle, user: propUser, isPlatformAdmin: propsIsPlatformAdmin }) {
   const { t } = useCustomization();
-  const [offerBanner, setOfferBanner] = useState(null);
-  const [copiedCode, setCopiedCode] = useState(false);
   
   const [currentUser, setCurrentUser] = useState(() => {
     try {
@@ -19,28 +16,6 @@ export default function Sidebar({ page, onNav, role, collapsed, onToggle, user: 
       return propUser || {};
     }
   });
-
-  useEffect(() => {
-    let isMounted = true;
-    getFeaturedBanner()
-      .then((res) => {
-        if (isMounted && res?.success && res?.banner) {
-          setOfferBanner(res.banner);
-        }
-      })
-      .catch(() => {});
-    return () => {
-      isMounted = false;
-    };
-  }, []);
-
-  const handleCopyOffer = (e, code) => {
-    e.stopPropagation();
-    if (!code) return;
-    navigator.clipboard.writeText(code);
-    setCopiedCode(true);
-    setTimeout(() => setCopiedCode(false), 2000);
-  };
 
   useEffect(() => {
     if (propUser) setCurrentUser((prev) => ({ ...prev, ...propUser }));
@@ -224,41 +199,6 @@ export default function Sidebar({ page, onNav, role, collapsed, onToggle, user: 
             ))}
           </div>
         )}
-      {/* Sleek Offer Box below Settings */}
-      {!collapsed && offerBanner && !isPlatformAdmin && (
-        <div className="mx-3 mb-2 p-2.5 bg-gradient-to-b from-slate-800/90 to-slate-800/40 rounded-xl border border-slate-700/70 text-slate-300 relative shadow-sm">
-          <div className="flex items-center justify-between gap-1 mb-1.5">
-            <span className="inline-flex items-center gap-1 text-[10px] font-bold text-blue-400 bg-blue-500/10 px-1.5 py-0.5 rounded border border-blue-500/20">
-              <Tag className="w-3 h-3 text-blue-400" />
-              Special Offer
-            </span>
-            {offerBanner.code && (
-              <button
-                onClick={(e) => handleCopyOffer(e, offerBanner.code)}
-                title="Click to copy coupon code"
-                className="inline-flex items-center gap-1 bg-slate-900/90 hover:bg-slate-900 text-slate-200 border border-slate-700 text-[10px] font-mono px-1.5 py-0.5 rounded transition cursor-pointer"
-              >
-                <span>{offerBanner.code}</span>
-                {copiedCode ? (
-                  <Check className="w-2.5 h-2.5 text-emerald-400" />
-                ) : (
-                  <Copy className="w-2.5 h-2.5 text-slate-400" />
-                )}
-              </button>
-            )}
-          </div>
-          <p className="text-[11px] text-slate-200 font-medium leading-snug line-clamp-2 mb-2">
-            {offerBanner.bannerText || `${offerBanner.title || "Limited Deal"}: Use code ${offerBanner.code} for discount.`}
-          </p>
-          <button
-            onClick={() => onNav("profile")}
-            className="w-full flex items-center justify-center gap-1 bg-blue-600 hover:bg-blue-500 text-white font-medium text-[11px] py-1 px-2 rounded-lg transition shadow-xs cursor-pointer"
-          >
-            <span>{offerBanner.bannerCta || "Claim Offer"}</span>
-            <ArrowRight className="w-3 h-3" />
-          </button>
-        </div>
-      )}
       </nav>
 
       {/* User */}

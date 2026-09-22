@@ -144,6 +144,7 @@ export default function AppShell({ role, user, onLogout, page, onNav }) {
       case "super-dashboard":
         return <SuperAdminDashboard />;
       case "businesses":
+      case "vendors":
         return <BusinessesNew />;
       case "revenue":
         return <Revenue />;

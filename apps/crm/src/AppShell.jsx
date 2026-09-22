@@ -181,7 +181,9 @@ export default function AppShell({ role, user, onLogout, page, onNav }) {
       case "users":
         return <UsersScreen user={user} />;
       case "settings":
-        return <SettingsScreen user={user} />;
+        return <SettingsScreen user={user} onNav={onNav} />;
+      case "subscription":
+        return <SettingsScreen user={user} initialTab="subscription" onNav={onNav} />;
       case "notifications":
         return <NotificationsScreen onNav={onNav} user={user} role={role} />;
       case "profile":

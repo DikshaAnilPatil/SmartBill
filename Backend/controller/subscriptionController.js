@@ -32,7 +32,7 @@ export const getUpgradePreview = async (req, res) => {
 
     if (!user) return res.status(404).json({ message: "User not found" });
 
-    const { newPlan } = req.query;
+    const { newPlan, couponCode } = req.query;
     const newPlanKey = (newPlan || "").toLowerCase().trim();
     const newPlanConfig = await getPlanConfig(newPlanKey);
 
@@ -70,6 +70,39 @@ export const getUpgradePreview = async (req, res) => {
       ? Math.max(0, originalPrice - proratedCredit)
       : 0; // Downgrade is end-of-period, no immediate charge
 
+    let couponDiscount = 0;
+    let appliedCoupon = null;
+    let finalPayablePrice = discountedPrice;
+
+    if (isUpgrade && couponCode && typeof couponCode === "string" && couponCode.trim()) {
+      const normalizedCode = couponCode.trim().toUpperCase();
+      const coupon = await Coupon.findOne({ code: normalizedCode, status: "active" });
+
+      if (coupon) {
+        const now = new Date();
+        const isValidDate = (!coupon.startDate || new Date(coupon.startDate) <= now) &&
+                            (!coupon.expiryDate || new Date(coupon.expiryDate) >= now);
+        const hasUsageLeft = coupon.maxUsageCount == null || coupon.usedCount < coupon.maxUsageCount;
+        const matchesPlan = coupon.applicablePlans.includes("all") || coupon.applicablePlans.includes(newPlanKey);
+
+        if (isValidDate && hasUsageLeft && matchesPlan) {
+          const discountRes = calculateDiscount(coupon, discountedPrice);
+          couponDiscount = discountRes.discountAmount;
+          finalPayablePrice = Math.max(0, discountRes.finalAmount);
+          appliedCoupon = {
+            _id: coupon._id,
+            code: coupon.code,
+            title: coupon.title,
+            description: coupon.description,
+            discountType: coupon.discountType,
+            discountValue: coupon.discountValue,
+            maxDiscountAmount: coupon.maxDiscountAmount,
+            discountAmount: couponDiscount,
+          };
+        }
+      }
+    }
+
     res.json({
       success: true,
       currentPlan: {
@@ -88,6 +121,9 @@ export const getUpgradePreview = async (req, res) => {
       proratedCredit,
       originalPrice,
       discountedPrice,
+      couponDiscount,
+      appliedCoupon,
+      finalPayablePrice,
       // For downgrade: effective date is end of current period
       effectiveDate: isUpgrade
         ? new Date().toISOString()
@@ -116,12 +152,12 @@ export const createSubscriptionOrder = async (req, res) => {
 
     // Base price
     let baseAmount = (isUpgrade && proratedAmount != null)
-      ? Math.max(100, Math.round(proratedAmount))
+      ? Math.max(0, Math.round(proratedAmount))
       : planConfig.price;
 
     let appliedCoupon = null;
     let discountAmount = 0;
-    let finalAmount = baseAmount;
+    let finalAmount = Math.max(1, baseAmount);
 
     if (couponCode && typeof couponCode === "string" && couponCode.trim()) {
       const normalizedCode = couponCode.trim().toUpperCase();

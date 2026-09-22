@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   X,
   Zap,
@@ -11,8 +11,12 @@ import {
   TrendingUp,
   TrendingDown,
   Info,
+  Sparkles,
+  Check,
+  Percent,
 } from "lucide-react";
 import subscriptionAPI from "@shared/api/subscriptionAPI";
+import { validateCouponCode } from "@shared/api/couponAPI";
 import { setUserToStorage } from "@shared/utils/userUtils";
 
 const PLAN_COLORS = {
@@ -41,17 +45,46 @@ function loadRazorpay() {
 }
 
 /**
- * UpgradeModal — shows prorated discount breakdown and triggers Razorpay payment.
+ * UpgradeModal — shows prorated discount and coupon breakdown, allows entering coupon codes, and triggers Razorpay payment.
  *
  * Props:
- *   preview       — data from getUpgradePreview API
- *   onClose       — called when modal dismissed
- *   onSuccess     — called with server response after payment verified
- *   userEmail     — used as fallback for Razorpay prefill
+ *   preview           — data from getUpgradePreview API
+ *   onClose           — called when modal dismissed
+ *   onSuccess         — called with server response after payment verified
+ *   userEmail         — used as fallback for Razorpay prefill
+ *   initialCouponCode — optional coupon code to pre-apply
  */
-export default function UpgradeModal({ preview, onClose, onSuccess, userEmail }) {
+export default function UpgradeModal({
+  preview,
+  onClose,
+  onSuccess,
+  userEmail,
+  initialCouponCode = "",
+}) {
   const [step, setStep] = useState("preview"); // "preview" | "processing" | "success" | "error"
   const [errorMsg, setErrorMsg] = useState("");
+
+  // Coupon state
+  const [couponInput, setCouponInput] = useState(() => {
+    return (
+      initialCouponCode ||
+      preview?.appliedCoupon?.code ||
+      (() => {
+        try {
+          return sessionStorage.getItem("smartbill_claimed_coupon") || "";
+        } catch {
+          return "";
+        }
+      })()
+    );
+  });
+  const [appliedCoupon, setAppliedCoupon] = useState(preview?.appliedCoupon || null);
+  const [couponDiscount, setCouponDiscount] = useState(preview?.couponDiscount || 0);
+  const [couponLoading, setCouponLoading] = useState(false);
+  const [couponError, setCouponError] = useState("");
+  const [couponSuccessMsg, setCouponSuccessMsg] = useState(
+    preview?.appliedCoupon ? `✓ Coupon "${preview.appliedCoupon.code}" applied!` : ""
+  );
 
   if (!preview) return null;
 
@@ -61,22 +94,91 @@ export default function UpgradeModal({ preview, onClose, onSuccess, userEmail })
     isUpgrade,
     isActivePaid,
     daysRemaining,
-    proratedCredit,
-    originalPrice,
-    discountedPrice,
+    proratedCredit = 0,
+    originalPrice = 0,
+    discountedPrice = 0,
     effectiveDate,
   } = preview;
 
   const isDowngrade = !isUpgrade;
-  const savingsPercent =
-    originalPrice > 0 ? Math.round((proratedCredit / originalPrice) * 100) : 0;
+
+  // Calculate pricing
+  const afterProrated = Math.max(0, originalPrice - proratedCredit);
+  const activeCouponDiscount = appliedCoupon ? couponDiscount : 0;
+  const finalPayableToday = Math.max(0, afterProrated - activeCouponDiscount);
+  const totalSavings = proratedCredit + activeCouponDiscount;
+  const totalSavingsPercent =
+    originalPrice > 0 ? Math.round((totalSavings / originalPrice) * 100) : 0;
 
   const newPlanColors = PLAN_COLORS[newPlan?.key] || PLAN_COLORS.pro;
   const currentColors = PLAN_COLORS[currentPlan?.key] || PLAN_COLORS.starter;
 
+  // Auto-apply initial coupon if provided and not yet applied
+  useEffect(() => {
+    const rawCode =
+      initialCouponCode ||
+      (() => {
+        try {
+          return sessionStorage.getItem("smartbill_claimed_coupon") || "";
+        } catch {
+          return "";
+        }
+      })();
+
+    if (rawCode && isUpgrade && !appliedCoupon) {
+      applyCoupon(rawCode);
+    }
+  }, [initialCouponCode, isUpgrade]);
+
+  async function applyCoupon(codeToApply) {
+    const cleanCode = (codeToApply || couponInput || "").trim().toUpperCase();
+    if (!cleanCode) {
+      setCouponError("Please enter a coupon code");
+      return;
+    }
+
+    setCouponLoading(true);
+    setCouponError("");
+    setCouponSuccessMsg("");
+
+    try {
+      // Validate with backend for the new plan and current prorated price
+      const res = await validateCouponCode(cleanCode, newPlan.key, afterProrated);
+      if (res && res.valid) {
+        setAppliedCoupon(res.coupon);
+        setCouponDiscount(Number(res.discountAmount) || 0);
+        setCouponSuccessMsg(`✓ Coupon "${res.coupon.code}" applied! You save ${formatINR(res.discountAmount)}`);
+        try {
+          sessionStorage.setItem("smartbill_claimed_coupon", res.coupon.code);
+        } catch {}
+      } else {
+        setAppliedCoupon(null);
+        setCouponDiscount(0);
+        setCouponError(res?.message || "Invalid coupon code");
+      }
+    } catch (err) {
+      setAppliedCoupon(null);
+      setCouponDiscount(0);
+      setCouponError(err?.response?.data?.message || err?.message || "Invalid or expired coupon code");
+    } finally {
+      setCouponLoading(false);
+    }
+  }
+
+  function handleRemoveCoupon() {
+    setAppliedCoupon(null);
+    setCouponDiscount(0);
+    setCouponInput("");
+    setCouponError("");
+    setCouponSuccessMsg("");
+    try {
+      sessionStorage.removeItem("smartbill_claimed_coupon");
+    } catch {}
+  }
+
   async function handleProceed() {
     if (isDowngrade) {
-      // Downgrade doesn't require payment — just schedule it
+      // Downgrade doesn't require payment — schedule it
       setStep("processing");
       try {
         const res = await subscriptionAPI.verifyPayment({
@@ -106,7 +208,8 @@ export default function UpgradeModal({ preview, onClose, onSuccess, userEmail })
     try {
       const orderData = await subscriptionAPI.createOrder(newPlan.key, {
         isUpgrade: true,
-        proratedAmount: discountedPrice,
+        proratedAmount: finalPayableToday,
+        couponCode: appliedCoupon?.code || "",
       });
 
       const options = {
@@ -114,7 +217,9 @@ export default function UpgradeModal({ preview, onClose, onSuccess, userEmail })
         amount: orderData.amount,
         currency: orderData.currency || "INR",
         name: "SmartBill",
-        description: `${newPlan.name} Plan${proratedCredit > 0 ? ` (₹${proratedCredit} prorated discount applied)` : ""}`,
+        description: `${newPlan.name} Plan${
+          totalSavings > 0 ? ` (${formatINR(totalSavings)} total discount applied)` : ""
+        }`,
         order_id: orderData.orderId,
         prefill: { email: userEmail || "" },
         theme: { color: "#2563EB" },
@@ -128,6 +233,7 @@ export default function UpgradeModal({ preview, onClose, onSuccess, userEmail })
               planName: newPlan.key,
               isUpgrade: true,
               email: userEmail || "",
+              couponCode: appliedCoupon?.code || "",
             });
 
             if (verifyRes?.token) {
@@ -136,6 +242,9 @@ export default function UpgradeModal({ preview, onClose, onSuccess, userEmail })
             if (verifyRes?.user) {
               setUserToStorage(verifyRes.user);
             }
+            try {
+              sessionStorage.removeItem("smartbill_claimed_coupon");
+            } catch {}
             window.dispatchEvent(new Event("userUpdated"));
 
             setStep("success");
@@ -154,7 +263,6 @@ export default function UpgradeModal({ preview, onClose, onSuccess, userEmail })
         },
       };
 
-
       const rzp = new window.Razorpay(options);
       rzp.open();
       setStep("preview"); // re-show modal in background while Razorpay modal is open
@@ -168,21 +276,21 @@ export default function UpgradeModal({ preview, onClose, onSuccess, userEmail })
   if (step === "success") {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 dark:bg-black/80 backdrop-blur-sm p-4">
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl w-full max-w-md p-8 text-center">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl w-full max-w-md p-8 text-center animate-in zoom-in-95">
           <div className="w-16 h-16 bg-emerald-100 dark:bg-emerald-950/60 rounded-full flex items-center justify-center mx-auto mb-4">
             <CheckCircle2 className="w-8 h-8 text-emerald-600 dark:text-emerald-400" />
           </div>
           <h2 className="text-xl font-bold text-slate-900 dark:text-white mb-2">
-            {isDowngrade ? "Downgrade Scheduled!" : "Plan Upgraded!"}
+            {isDowngrade ? "Downgrade Scheduled!" : "Plan Upgraded Successfully!"}
           </h2>
           <p className="text-slate-600 dark:text-slate-300 text-sm mb-6">
             {isDowngrade
               ? `Your ${currentPlan.name} plan continues until ${new Date(effectiveDate).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" })}. After that, your plan will switch to ${newPlan.name}.`
-              : `You're now on the ${newPlan.name} plan. Your new billing period starts today.`}
+              : `You are now active on the ${newPlan.name} plan. All features and elevated quotas are unlocked.`}
           </p>
           <button
             onClick={onClose}
-            className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-xl py-3 transition-colors cursor-pointer"
+            className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-xl py-3 transition-colors cursor-pointer shadow-md"
           >
             Continue to Dashboard
           </button>
@@ -195,7 +303,7 @@ export default function UpgradeModal({ preview, onClose, onSuccess, userEmail })
   if (step === "error") {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 dark:bg-black/80 backdrop-blur-sm p-4">
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl w-full max-w-md p-8 text-center">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl w-full max-w-md p-8 text-center animate-in zoom-in-95">
           <div className="w-16 h-16 bg-red-100 dark:bg-red-950/60 rounded-full flex items-center justify-center mx-auto mb-4">
             <X className="w-8 h-8 text-red-500 dark:text-red-400" />
           </div>
@@ -222,10 +330,10 @@ export default function UpgradeModal({ preview, onClose, onSuccess, userEmail })
 
   // ── Preview / Processing screen ─────────────────────────────
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 dark:bg-black/80 backdrop-blur-sm p-4">
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 dark:bg-black/80 backdrop-blur-sm p-4 overflow-y-auto">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden my-6">
         {/* Header */}
-        <div className={`bg-gradient-to-r ${isDowngrade ? "from-slate-600 to-slate-700" : newPlanColors.bg} px-6 py-5 relative`}>
+        <div className={`bg-gradient-to-r ${isDowngrade ? "from-slate-600 to-slate-700" : newPlanColors.bg} px-6 py-5 relative text-white`}>
           <button
             onClick={onClose}
             className="absolute top-4 right-4 text-white/70 hover:text-white transition-colors cursor-pointer"
@@ -239,7 +347,7 @@ export default function UpgradeModal({ preview, onClose, onSuccess, userEmail })
               <TrendingUp className="w-6 h-6 text-white" />
             )}
             <span className="text-white font-bold text-lg">
-              {isDowngrade ? "Plan Downgrade" : "Plan Upgrade"}
+              {isDowngrade ? "Plan Downgrade" : "Plan Checkout & Upgrade"}
             </span>
           </div>
           <p className="text-white/80 text-sm">
@@ -247,26 +355,26 @@ export default function UpgradeModal({ preview, onClose, onSuccess, userEmail })
           </p>
         </div>
 
-        <div className="p-6 space-y-5">
-          {/* Plan comparison */}
+        <div className="p-6 space-y-4">
+          {/* Plan comparison pill */}
           <div className="flex gap-3">
-            <div className="flex-1 border border-slate-200 dark:border-slate-800 rounded-xl p-4 bg-slate-50 dark:bg-slate-800/60">
-              <p className="text-xs text-slate-500 dark:text-slate-400 mb-1">Current Plan</p>
+            <div className="flex-1 border border-slate-200 dark:border-slate-800 rounded-xl p-3 bg-slate-50 dark:bg-slate-800/60">
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 mb-1">Current Plan</p>
               <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${currentColors.badge}`}>
                 {currentPlan.name}
               </span>
-              <p className="text-lg font-bold text-slate-900 dark:text-white mt-2">
-                {formatINR(currentPlan.price)}<span className="text-xs font-normal text-slate-500 dark:text-slate-400">/mo</span>
+              <p className="text-base font-bold text-slate-900 dark:text-white mt-1.5">
+                {formatINR(currentPlan.price)}<span className="text-xs font-normal text-slate-500">/mo</span>
               </p>
             </div>
-            <div className="flex items-center text-slate-400 font-bold text-lg">→</div>
-            <div className={`flex-1 border-2 ${isDowngrade ? "border-slate-400 dark:border-slate-600" : "border-blue-400 dark:border-blue-500"} rounded-xl p-4 bg-gradient-to-br ${isDowngrade ? "from-slate-50 to-slate-100 dark:from-slate-800/90 dark:to-slate-800/50" : "from-blue-50 to-indigo-50 dark:from-slate-800 dark:to-slate-800/70"}`}>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mb-1">New Plan</p>
+            <div className="flex items-center text-slate-400 font-bold text-base">→</div>
+            <div className={`flex-1 border-2 ${isDowngrade ? "border-slate-400 dark:border-slate-600" : "border-blue-400 dark:border-blue-500"} rounded-xl p-3 bg-gradient-to-br ${isDowngrade ? "from-slate-50 to-slate-100 dark:from-slate-800/90" : "from-blue-50 to-indigo-50 dark:from-slate-800 dark:to-slate-800/70"}`}>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 mb-1">Target Plan</p>
               <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${newPlanColors.badge}`}>
                 {newPlan.name}
               </span>
-              <p className="text-lg font-bold text-slate-900 dark:text-white mt-2">
-                {formatINR(newPlan.price)}<span className="text-xs font-normal text-slate-500 dark:text-slate-400">/mo</span>
+              <p className="text-base font-bold text-slate-900 dark:text-white mt-1.5">
+                {formatINR(newPlan.price)}<span className="text-xs font-normal text-slate-500">/mo</span>
               </p>
             </div>
           </div>
@@ -280,54 +388,159 @@ export default function UpgradeModal({ preview, onClose, onSuccess, userEmail })
                 <p className="text-xs text-amber-700 dark:text-amber-400">
                   Your <strong>{currentPlan.name}</strong> plan continues until{" "}
                   <strong>{new Date(effectiveDate).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" })}</strong>.
-                  No refund is issued — you keep all current features until then.
+                  No charge today — your plan switches automatically.
                 </p>
               </div>
             </div>
           )}
 
-          {/* Prorated breakdown (upgrade only) */}
+          {/* Coupon Code Section (Upgrade Only) */}
           {isUpgrade && (
-            <div className="bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-800 rounded-xl p-4 space-y-3">
-              <p className="text-sm font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-2">
-                <Tag className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-                Prorated Pricing Breakdown
+            <div className="border border-slate-200 dark:border-slate-800 rounded-xl p-3.5 bg-slate-50/70 dark:bg-slate-800/40">
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                  <Tag className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                  Have a Coupon or Promo Code?
+                </label>
+                {appliedCoupon && (
+                  <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/50 px-2 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-800">
+                    Discount Applied
+                  </span>
+                )}
+              </div>
+
+              {!appliedCoupon ? (
+                <div>
+                  <div className="flex gap-2">
+                    <div className="relative flex-1">
+                      <input
+                        type="text"
+                        value={couponInput}
+                        onChange={(e) => {
+                          setCouponInput(e.target.value.toUpperCase());
+                          setCouponError("");
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            applyCoupon(couponInput);
+                          }
+                        }}
+                        placeholder="Enter coupon code (e.g. GANPATI)"
+                        className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-xs uppercase font-mono tracking-wider text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => applyCoupon(couponInput)}
+                      disabled={couponLoading || !couponInput.trim()}
+                      className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-lg text-xs font-semibold transition cursor-pointer flex items-center gap-1 shadow-xs"
+                    >
+                      {couponLoading ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        "Apply"
+                      )}
+                    </button>
+                  </div>
+                  {couponError && (
+                    <p className="text-[11px] text-rose-500 dark:text-rose-400 mt-1.5 font-medium flex items-center gap-1">
+                      <X className="w-3 h-3 flex-shrink-0" /> {couponError}
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <div className="flex items-center justify-between bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 rounded-lg p-2.5">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center flex-shrink-0">
+                      <Check className="w-3.5 h-3.5" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="font-mono font-bold text-xs text-emerald-800 dark:text-emerald-200">
+                          {appliedCoupon.code}
+                        </span>
+                        <span className="text-[10px] text-emerald-700 dark:text-emerald-300 bg-emerald-200/60 dark:bg-emerald-900/60 px-1.5 py-0.2 rounded font-medium">
+                          −{formatINR(activeCouponDiscount)}
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-emerald-600 dark:text-emerald-400 truncate">
+                        {appliedCoupon.title || "Special promotion discount applied"}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleRemoveCoupon}
+                    className="text-xs text-slate-400 hover:text-rose-600 font-semibold px-2 py-1 transition cursor-pointer ml-2"
+                  >
+                    Remove
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Prorated & Discount breakdown (upgrade only) */}
+          {isUpgrade && (
+            <div className="bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-800 rounded-xl p-4 space-y-2.5">
+              <p className="text-xs font-bold text-slate-700 dark:text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
+                <Tag className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                Price Breakdown
               </p>
 
-              <div className="space-y-2 text-sm">
+              <div className="space-y-1.5 text-xs">
                 <div className="flex justify-between text-slate-600 dark:text-slate-300">
-                  <span>{newPlan.name} plan price</span>
-                  <span className="font-mono">{formatINR(originalPrice)}</span>
+                  <span>{newPlan.name} Plan Original Price</span>
+                  <span className="font-mono font-medium">{formatINR(originalPrice)}</span>
                 </div>
 
                 {isActivePaid && proratedCredit > 0 && (
                   <>
                     <div className="flex justify-between text-slate-600 dark:text-slate-300">
                       <span className="flex items-center gap-1">
-                        <Calendar className="w-3.5 h-3.5" />
-                        Days remaining on {currentPlan.name}
+                        <Calendar className="w-3 h-3 text-slate-400" />
+                        Days remaining on {currentPlan.name} ({daysRemaining}d)
                       </span>
-                      <span className="font-mono">{daysRemaining} days</span>
-                    </div>
-                    <div className="flex justify-between text-emerald-600 dark:text-emerald-400 font-medium">
-                      <span>Prorated credit (unused days)</span>
-                      <span className="font-mono">− {formatINR(proratedCredit)}</span>
+                      <span className="font-mono text-emerald-600 dark:text-emerald-400 font-medium">
+                        − {formatINR(proratedCredit)}
+                      </span>
                     </div>
                   </>
                 )}
 
-                <div className="border-t border-slate-200 dark:border-slate-700 pt-2 flex justify-between font-bold text-slate-900 dark:text-white text-base">
-                  <span>Amount to pay today</span>
-                  <span className="font-mono text-blue-600 dark:text-blue-400">
-                    {formatINR(discountedPrice)}
-                  </span>
+                {appliedCoupon && activeCouponDiscount > 0 && (
+                  <div className="flex justify-between text-emerald-600 dark:text-emerald-400 font-semibold">
+                    <span className="flex items-center gap-1">
+                      <Tag className="w-3 h-3 text-emerald-500" />
+                      Coupon Discount ({appliedCoupon.code})
+                    </span>
+                    <span className="font-mono">− {formatINR(activeCouponDiscount)}</span>
+                  </div>
+                )}
+
+                <div className="border-t border-slate-200 dark:border-slate-700 pt-2.5 flex justify-between items-center text-slate-900 dark:text-white">
+                  <div>
+                    <p className="font-bold text-sm">Amount to pay today</p>
+                    <p className="text-[10px] text-slate-500 dark:text-slate-400">Includes all applicable discounts</p>
+                  </div>
+                  <div className="text-right">
+                    {totalSavings > 0 && (
+                      <span className="line-through text-xs text-slate-400 font-mono block">
+                        {formatINR(originalPrice)}
+                      </span>
+                    )}
+                    <span className="font-mono text-lg font-extrabold text-blue-600 dark:text-blue-400">
+                      {formatINR(finalPayableToday)}
+                    </span>
+                  </div>
                 </div>
 
-                {proratedCredit > 0 && (
-                  <div className="flex items-center gap-2 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 rounded-lg px-3 py-2 mt-1">
-                    <Zap className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-                    <span className="text-xs font-semibold text-emerald-700 dark:text-emerald-300">
-                      You save {formatINR(proratedCredit)} ({savingsPercent}% off) for switching mid-cycle!
+                {totalSavings > 0 && (
+                  <div className="flex items-center gap-2 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 rounded-lg px-3 py-1.5 mt-2">
+                    <Sparkles className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
+                    <span className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">
+                      Total savings: {formatINR(totalSavings)} ({totalSavingsPercent}% OFF)!
                     </span>
                   </div>
                 )}
@@ -336,20 +549,20 @@ export default function UpgradeModal({ preview, onClose, onSuccess, userEmail })
           )}
 
           {/* Action buttons */}
-          <div className="flex gap-3 pt-1">
+          <div className="flex gap-3 pt-2">
             <button
               onClick={onClose}
               disabled={step === "processing"}
-              className="flex-1 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold rounded-xl py-3 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors cursor-pointer disabled:opacity-50"
+              className="flex-1 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold rounded-xl py-3 text-sm hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors cursor-pointer disabled:opacity-50"
             >
               Cancel
             </button>
             <button
               onClick={handleProceed}
               disabled={step === "processing"}
-              className={`flex-1 font-semibold rounded-xl py-3 transition-all cursor-pointer disabled:opacity-70 flex items-center justify-center gap-2 text-white ${
+              className={`flex-1 font-semibold rounded-xl py-3 text-sm transition-all cursor-pointer disabled:opacity-70 flex items-center justify-center gap-2 text-white ${
                 isDowngrade
-                  ? "bg-slate-700 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600"
+                  ? "bg-slate-700 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 shadow-md"
                   : "bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 shadow-lg shadow-blue-500/20"
               }`}
             >
@@ -366,7 +579,7 @@ export default function UpgradeModal({ preview, onClose, onSuccess, userEmail })
               ) : (
                 <>
                   <CreditCard className="w-4 h-4" />
-                  Pay {formatINR(discountedPrice)} Now
+                  Pay {formatINR(finalPayableToday)} Now
                 </>
               )}
             </button>

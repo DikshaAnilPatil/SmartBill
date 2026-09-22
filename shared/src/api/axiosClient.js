@@ -10,7 +10,7 @@ const axiosClient = axios.create({
   headers: {
     "Content-Type": "application/json",
   },
-  timeout: 15000,
+  timeout: 60000,
 });
 
 // Request interceptor: attach JWT token if present in localStorage.
@@ -30,6 +30,23 @@ axiosClient.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config;
+
+    // If request was canceled by AbortController or axios cancel, do not retry or treat as network error
+    if (
+      axios.isCancel(error) ||
+      error?.name === "CanceledError" ||
+      error?.code === "ERR_CANCELED" ||
+      error?.message === "canceled" ||
+      originalRequest?.signal?.aborted
+    ) {
+      return Promise.reject({
+        name: "CanceledError",
+        code: "ERR_CANCELED",
+        isCanceled: true,
+        message: "canceled",
+        raw: error,
+      });
+    }
 
     // If network error occurred and we haven't tried the alternate fallback URL yet
     if (!error.response && originalRequest && !originalRequest._retryFallback) {
@@ -122,9 +139,13 @@ axiosClient.interceptors.response.use(
         } catch {}
       }
     } else if (error.request) {
-      const hostName = typeof window !== "undefined" && window.location && window.location.hostname ? window.location.hostname : "localhost";
-      message =
-        `Cannot reach the backend server at ${hostName}:5000. Please ensure the backend server is running and accessible.`;
+      if (error.code === "ECONNABORTED" || error.message?.includes("timeout")) {
+        message = "Server request timed out. Please try again.";
+      } else {
+        const hostName = typeof window !== "undefined" && window.location && window.location.hostname ? window.location.hostname : "localhost";
+        message =
+          `Cannot reach the backend server at ${hostName}:5000. Please ensure the backend server is running and accessible.`;
+      }
     }
 
     return Promise.reject({

@@ -224,10 +224,6 @@ export function hasPermission(user, pageKey) {
       modResult = checkPerm("offers_coupons") ?? checkPerm("marketing");
       break;
 
-    case "regions":
-      modResult = checkPerm("regions");
-      break;
-
     default:
       modResult = checkPerm(pageKey);
       break;

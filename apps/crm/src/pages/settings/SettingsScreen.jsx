@@ -3,6 +3,7 @@ import { useCustomization } from "@shared/hooks/useCustomization";
 import { updateProfile, getProfile } from "@shared/api/authAPI";
 import subscriptionAPI from "@shared/api/subscriptionAPI";
 import UpgradeModal from "@shared/components/subscription/UpgradeModal";
+import { getFeaturedBanner } from "@shared/api/couponAPI";
 import {
   Building2,
   Percent,
@@ -730,6 +731,24 @@ export default function SettingsScreen({ user, initialTab, onNav } = {}) {
   const [upgradePreview, setUpgradePreview] = useState(null);  // prorated preview
   const [previewLoading, setPreviewLoading] = useState(null);  // planKey being previewed
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [claimedCoupon, setClaimedCoupon] = useState(() => {
+    try {
+      return sessionStorage.getItem("smartbill_claimed_coupon") || "";
+    } catch {
+      return "";
+    }
+  });
+  const [featuredBanner, setFeaturedBanner] = useState(null);
+
+  useEffect(() => {
+    getFeaturedBanner()
+      .then((res) => {
+        if (res?.success && res?.banner) {
+          setFeaturedBanner(res.banner);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   // Fetch subscription status when tab is opened
   const fetchSubStatus = useCallback(async () => {
@@ -748,11 +767,12 @@ export default function SettingsScreen({ user, initialTab, onNav } = {}) {
     fetchSubStatus();
   }, [fetchSubStatus]);
 
-  // Open upgrade/downgrade modal with prorated preview
-  const handlePlanAction = async (planKey) => {
+  // Open upgrade/downgrade modal with prorated preview and coupon
+  const handlePlanAction = async (planKey, customCoupon = "") => {
     setPreviewLoading(planKey);
+    const codeToUse = (customCoupon || claimedCoupon || "").trim();
     try {
-      const preview = await subscriptionAPI.getUpgradePreview(planKey);
+      const preview = await subscriptionAPI.getUpgradePreview(planKey, codeToUse);
       setUpgradePreview(preview);
       setShowUpgradeModal(true);
     } catch (err) {
@@ -761,6 +781,27 @@ export default function SettingsScreen({ user, initialTab, onNav } = {}) {
       setPreviewLoading(null);
     }
   };
+
+  // Listen for openClaimOfferModal event
+  useEffect(() => {
+    const handleClaimEvent = (e) => {
+      const code = e.detail?.couponCode || "";
+      const targetPlan = e.detail?.plan || "pro";
+      if (code) {
+        setClaimedCoupon(code);
+        try {
+          sessionStorage.setItem("smartbill_claimed_coupon", code);
+        } catch {}
+      }
+      setActiveTab("subscription");
+      handlePlanAction(targetPlan, code);
+    };
+
+    window.addEventListener("openClaimOfferModal", handleClaimEvent);
+    return () => {
+      window.removeEventListener("openClaimOfferModal", handleClaimEvent);
+    };
+  }, []);
 
   const handleUpgradeSuccess = () => {
     setShowUpgradeModal(false);
@@ -2015,6 +2056,47 @@ export default function SettingsScreen({ user, initialTab, onNav } = {}) {
                   </div>
                 </div>
 
+                {/* ── Active Promotional Offer Banner ──────────────── */}
+                {featuredBanner && (
+                  <div className="bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 border border-blue-500/30 rounded-2xl p-5 text-white shadow-md flex flex-col md:flex-row items-center justify-between gap-4">
+                    <div className="flex items-center gap-3.5">
+                      <div className="w-10 h-10 rounded-xl bg-blue-500/20 border border-blue-500/40 flex items-center justify-center flex-shrink-0 text-blue-400">
+                        <Tag className="w-5 h-5 text-blue-400" />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-[10px] font-bold text-blue-300 uppercase tracking-wider bg-blue-500/20 px-2 py-0.5 rounded border border-blue-500/30">
+                            Active Promo Offer
+                          </span>
+                          {featuredBanner.code && (
+                            <span className="font-mono text-xs font-bold text-white bg-slate-800 px-2 py-0.5 rounded border border-slate-700">
+                              {featuredBanner.code}
+                            </span>
+                          )}
+                        </div>
+                        <h4 className="text-sm font-bold text-white">{featuredBanner.title || "Limited Time Deal"}</h4>
+                        <p className="text-xs text-slate-300">
+                          {featuredBanner.bannerText || `Use code ${featuredBanner.code} during checkout to deduct instant discount.`}
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (featuredBanner.code) {
+                          setClaimedCoupon(featuredBanner.code);
+                          try { sessionStorage.setItem("smartbill_claimed_coupon", featuredBanner.code); } catch {}
+                        }
+                        handlePlanAction("pro", featuredBanner.code);
+                      }}
+                      className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-xl shadow transition cursor-pointer flex-shrink-0 flex items-center gap-1.5"
+                    >
+                      <span>Claim & Apply Code</span>
+                      <span>→</span>
+                    </button>
+                  </div>
+                )}
+
                 {/* ── Plan Cards: Upgrade / Downgrade ─────────── */}
                 <div>
                   <h3 className="font-semibold text-slate-800 dark:text-white mb-3">Change Plan</h3>
@@ -2143,6 +2225,7 @@ export default function SettingsScreen({ user, initialTab, onNav } = {}) {
     {showUpgradeModal && upgradePreview && (
       <UpgradeModal
         preview={upgradePreview}
+        initialCouponCode={claimedCoupon}
         userEmail={businessInfo.email}
         onClose={() => { setShowUpgradeModal(false); setUpgradePreview(null); }}
         onSuccess={handleUpgradeSuccess}

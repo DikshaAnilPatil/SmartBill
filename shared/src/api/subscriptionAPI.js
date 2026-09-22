@@ -123,23 +123,39 @@ export const subscriptionAPI = {
     }
   },
 
-  /** Get prorated upgrade/downgrade pricing preview */
-  getUpgradePreview: (newPlan) =>
-    axiosClient
-      .get(`/subscriptions/upgrade-preview?newPlan=${newPlan}`)
-      .then((res) => res.data),
+  /** Get prorated upgrade/downgrade pricing preview with optional coupon discount */
+  getUpgradePreview: (newPlan, couponCode = "") => {
+    const params = new URLSearchParams();
+    if (newPlan) params.set("newPlan", newPlan);
+    if (couponCode && String(couponCode).trim()) params.set("couponCode", String(couponCode).trim());
+    return axiosClient
+      .get(`/subscriptions/upgrade-preview?${params.toString()}`)
+      .then((res) => res.data);
+  },
 
-  /** Create a Razorpay order. Pass isUpgrade + proratedAmount for mid-cycle changes. */
-  createOrder: (planName, options = {}) =>
-    publicAxios
-      .post("/subscriptions/create-order", { planName, ...options })
-      .then((res) => res.data),
+  /** Create a Razorpay order. Pass isUpgrade + proratedAmount + couponCode for discounts. */
+  createOrder: (planName, options = {}) => {
+    const token = typeof localStorage !== "undefined" ? localStorage.getItem("smartbill_token") : null;
+    return publicAxios
+      .post(
+        "/subscriptions/create-order",
+        { planName, ...options },
+        {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        }
+      )
+      .then((res) => res.data);
+  },
 
   /** Verify Razorpay payment and activate/schedule plan */
-  verifyPayment: (payload) =>
-    publicAxios
-      .post("/subscriptions/verify-payment", payload)
-      .then((res) => res.data),
+  verifyPayment: (payload) => {
+    const token = typeof localStorage !== "undefined" ? localStorage.getItem("smartbill_token") : null;
+    return publicAxios
+      .post("/subscriptions/verify-payment", payload, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+      .then((res) => res.data);
+  },
 
   /** Get current subscription status, usage and plan details */
   getSubscriptionStatus: () =>

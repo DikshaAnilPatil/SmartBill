@@ -22,6 +22,7 @@ import {
   ArrowLeft,
   Tag,
   Folder,
+  Eye,
 } from "lucide-react";
 
 import {
@@ -35,6 +36,7 @@ import {
 import { Avatar, AvatarFallback } from "@shared/components/ui/avatar";
 import { Tabs, TabsList, TabsTrigger } from "@shared/components/ui/tabs";
 import adminAPI from "@shared/api/adminAPI";
+import { PERMISSION_CATEGORIES } from "../settings/components/UserPermissionsSettings";
 const fmt = (n) => `₹${Number(n).toLocaleString("en-IN")}`;
 
 function Badge({ label, variant }) {
@@ -261,33 +263,51 @@ export default function BusinessesNew() {
       }
       setError(null);
 
-      // Fetch vendor settings to check vendorGrouping status
-      try {
-        const vendorRes = await adminAPI.getVendorSettings();
-        if (vendorRes?.vendorSettings) {
-          setVendorGrouping(Boolean(vendorRes.vendorSettings.vendorGrouping));
-        }
-      } catch (sysErr) {
-        console.warn("Notice: vendor settings fetch fallback:", sysErr.message);
-      }
+      // Fetch vendor settings and businesses in parallel
+      const [vendorRes, bizRes] = await Promise.allSettled([
+        adminAPI.getVendorSettings({ signal }),
+        adminAPI.getAllBusinesses({ signal }),
+      ]);
 
-      const res = await adminAPI.getAllBusinesses({ signal });
       if (signal?.aborted) return;
 
-      const rawData = res?.data || (Array.isArray(res) ? res : []);
-      const data = rawData.map((b) => ({
-        ...b,
-        status: b.status || "Active",
-        suspensionReason: b.suspensionReason || "",
-      }));
-      setRows(data);
-      setError(null);
+      if (vendorRes.status === "fulfilled" && vendorRes.value?.vendorSettings) {
+        setVendorGrouping(Boolean(vendorRes.value.vendorSettings.vendorGrouping));
+      }
 
-      try {
-        sessionStorage.setItem(CACHE_KEY, JSON.stringify({ data, ts: Date.now() }));
-      } catch {}
+      if (bizRes.status === "fulfilled") {
+        const res = bizRes.value;
+        const rawData = res?.data || (Array.isArray(res) ? res : []);
+        const data = rawData.map((b) => ({
+          ...b,
+          status: b.status || "Active",
+          suspensionReason: b.suspensionReason || "",
+        }));
+        setRows(data);
+        setError(null);
+
+        try {
+          sessionStorage.setItem(CACHE_KEY, JSON.stringify({ data, ts: Date.now() }));
+        } catch {}
+      } else {
+        const err = bizRes.reason;
+        if (
+          err?.isCanceled ||
+          err?.name === "AbortError" ||
+          err?.name === "CanceledError" ||
+          err?.code === "ERR_CANCELED" ||
+          err?.message === "canceled" ||
+          signal?.aborted
+        ) {
+          return;
+        }
+        console.error("Error loading businesses:", err);
+        const errMsg = err?.response?.data?.message || err?.message || "Failed to load businesses";
+        setError(errMsg);
+      }
     } catch (err) {
       if (
+        err?.isCanceled ||
         err?.name === "AbortError" ||
         err?.name === "CanceledError" ||
         err?.code === "ERR_CANCELED" ||
@@ -297,7 +317,7 @@ export default function BusinessesNew() {
         return;
       }
       console.error("Error loading businesses:", err);
-      const errMsg = err.response?.data?.message || err.message || "Failed to load businesses";
+      const errMsg = err?.response?.data?.message || err?.message || "Failed to load businesses";
       setError(errMsg);
     } finally {
       if (!signal?.aborted) {
@@ -321,8 +341,16 @@ export default function BusinessesNew() {
   }, []);
 
   const processedRows = useMemo(() => {
-    // 1. Filter by Search
     let filtered = rows;
+
+    // 1. Filter by Active Tab
+    if (activeTab === "active") {
+      filtered = filtered.filter((b) => String(b.status || "Active").toLowerCase() === "active");
+    } else if (activeTab === "suspended") {
+      filtered = filtered.filter((b) => String(b.status || "").toLowerCase() === "suspended");
+    }
+
+    // 2. Filter by Search
     const q = search.trim().toLowerCase();
     if (q) {
       filtered = filtered.filter((b) => {
@@ -333,12 +361,13 @@ export default function BusinessesNew() {
           String(b.ownerPhone ?? "").toLowerCase().includes(q) ||
           String(b.plan ?? "").toLowerCase().includes(q) ||
           String(b.status ?? "").toLowerCase().includes(q) ||
+          String(b.category ?? b.businessType ?? "").toLowerCase().includes(q) ||
           String(b.ownerCity ?? "").toLowerCase().includes(q)
         );
       });
     }
 
-    // 2. Sort
+    // 3. Sort
     if (sortConfig.key) {
       filtered = [...filtered].sort((a, b) => {
         let valA = a[sortConfig.key];
@@ -362,7 +391,7 @@ export default function BusinessesNew() {
     }
 
     return filtered;
-  }, [rows, search, sortConfig]);
+  }, [rows, activeTab, search, sortConfig]);
 
   const groupedVendors = useMemo(() => {
     if (!vendorGrouping) return null;
@@ -748,9 +777,17 @@ export default function BusinessesNew() {
       </div>
 
       {/* Tabs */}
-      <Tabs value="all" className="w-full">
-        <TabsList className="w-fit">
-          <TabsTrigger value="all">All ({rows.length})</TabsTrigger>
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+        <TabsList className="w-fit bg-slate-100 p-1 rounded-lg">
+          <TabsTrigger value="all" className="data-[state=active]:bg-white data-[state=active]:shadow-xs">
+            All ({rows.length})
+          </TabsTrigger>
+          <TabsTrigger value="active" className="data-[state=active]:bg-white data-[state=active]:shadow-xs">
+            Active ({rows.filter((r) => String(r.status || "Active").toLowerCase() === "active").length})
+          </TabsTrigger>
+          <TabsTrigger value="suspended" className="data-[state=active]:bg-white data-[state=active]:shadow-xs">
+            Suspended ({rows.filter((r) => String(r.status || "").toLowerCase() === "suspended").length})
+          </TabsTrigger>
         </TabsList>
       </Tabs>
 
@@ -1010,12 +1047,15 @@ export default function BusinessesNew() {
                             </div>
                           </th>
                         ))}
+                        <th className="py-3 px-4 text-xs font-semibold text-slate-600 uppercase tracking-wider text-right whitespace-nowrap">
+                          Actions
+                        </th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {loading ? (
                         <tr>
-                          <td colSpan={7} className="py-12 text-center text-slate-500">
+                          <td colSpan={8} className="py-12 text-center text-slate-500">
                             <div className="flex flex-col items-center justify-center gap-2">
                               <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
                               <span className="text-sm font-medium">Fetching registered business owners...</span>
@@ -1024,7 +1064,7 @@ export default function BusinessesNew() {
                         </tr>
                       ) : categoryRows.length === 0 ? (
                         <tr>
-                          <td colSpan={7} className="py-12 text-center">
+                          <td colSpan={8} className="py-12 text-center">
                             <div className="flex flex-col items-center justify-center">
                               <div className="w-10 h-10 bg-slate-50 rounded-full flex items-center justify-center mb-2">
                                 <Building2 className="w-5 h-5 text-slate-400" />
@@ -1093,6 +1133,48 @@ export default function BusinessesNew() {
                                 )}
                               </div>
                             </td>
+                            <td className="px-4 py-3 text-right">
+                              <DropdownMenu>
+                                <DropdownMenuTrigger className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-800 transition-colors cursor-pointer outline-none">
+                                  <MoreVertical className="w-4 h-4" />
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end" className="w-52 bg-white shadow-lg border border-slate-200">
+                                  <DropdownMenuLabel className="text-xs text-slate-500">Business Actions</DropdownMenuLabel>
+                                  <DropdownMenuItem
+                                    onClick={() => openBusinessDetailsModal(b)}
+                                    className="cursor-pointer flex items-center gap-2 text-xs"
+                                  >
+                                    <Eye className="w-3.5 h-3.5 text-blue-600" />
+                                    <span>View Details & Customers</span>
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    onClick={() => openAccessModal(b)}
+                                    className="cursor-pointer flex items-center gap-2 text-xs"
+                                  >
+                                    <KeyRound className="w-3.5 h-3.5 text-amber-600" />
+                                    <span>Manage Module Access</span>
+                                  </DropdownMenuItem>
+                                  <DropdownMenuSeparator />
+                                  {b.status === "Suspended" ? (
+                                    <DropdownMenuItem
+                                      onClick={() => resumeBusiness(b.id || b._id)}
+                                      className="cursor-pointer flex items-center gap-2 text-xs text-emerald-600 focus:text-emerald-700"
+                                    >
+                                      <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />
+                                      <span>Reactivate Account</span>
+                                    </DropdownMenuItem>
+                                  ) : (
+                                    <DropdownMenuItem
+                                      onClick={() => openSuspendModal(b.id || b._id)}
+                                      className="cursor-pointer flex items-center gap-2 text-xs text-rose-600 focus:text-rose-700"
+                                    >
+                                      <XCircle className="w-3.5 h-3.5 text-rose-600" />
+                                      <span>Suspend Account</span>
+                                    </DropdownMenuItem>
+                                  )}
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            </td>
                           </tr>
                         ))
                       )}
@@ -1139,12 +1221,15 @@ export default function BusinessesNew() {
                       </div>
                     </th>
                   ))}
+                  <th className="py-3 px-4 text-xs font-semibold text-slate-600 uppercase tracking-wider text-right whitespace-nowrap">
+                    Actions
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {loading ? (
                   <tr>
-                    <td colSpan={7} className="py-12 text-center text-slate-500">
+                    <td colSpan={8} className="py-12 text-center text-slate-500">
                       <div className="flex flex-col items-center justify-center gap-2">
                         <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
                         <span className="text-sm font-medium">Fetching registered business owners...</span>
@@ -1153,7 +1238,7 @@ export default function BusinessesNew() {
                   </tr>
                 ) : processedRows.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="py-16 text-center">
+                    <td colSpan={8} className="py-16 text-center">
                       <div className="flex flex-col items-center justify-center">
                         <div className="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center mb-3">
                           <Building2 className="w-6 h-6 text-slate-400" />
@@ -1221,6 +1306,48 @@ export default function BusinessesNew() {
                             </span>
                           )}
                         </div>
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <DropdownMenu>
+                          <DropdownMenuTrigger className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-800 transition-colors cursor-pointer outline-none">
+                            <MoreVertical className="w-4 h-4" />
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-52 bg-white shadow-lg border border-slate-200">
+                            <DropdownMenuLabel className="text-xs text-slate-500">Business Actions</DropdownMenuLabel>
+                            <DropdownMenuItem
+                              onClick={() => openBusinessDetailsModal(b)}
+                              className="cursor-pointer flex items-center gap-2 text-xs"
+                            >
+                              <Eye className="w-3.5 h-3.5 text-blue-600" />
+                              <span>View Details & Customers</span>
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={() => openAccessModal(b)}
+                              className="cursor-pointer flex items-center gap-2 text-xs"
+                            >
+                              <KeyRound className="w-3.5 h-3.5 text-amber-600" />
+                              <span>Manage Module Access</span>
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            {b.status === "Suspended" ? (
+                              <DropdownMenuItem
+                                onClick={() => resumeBusiness(b.id || b._id)}
+                                className="cursor-pointer flex items-center gap-2 text-xs text-emerald-600 focus:text-emerald-700"
+                              >
+                                <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />
+                                <span>Reactivate Account</span>
+                              </DropdownMenuItem>
+                            ) : (
+                              <DropdownMenuItem
+                                onClick={() => openSuspendModal(b.id || b._id)}
+                                className="cursor-pointer flex items-center gap-2 text-xs text-rose-600 focus:text-rose-700"
+                              >
+                                <XCircle className="w-3.5 h-3.5 text-rose-600" />
+                                <span>Suspend Account</span>
+                              </DropdownMenuItem>
+                            )}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       </td>
                     </tr>
                   ))

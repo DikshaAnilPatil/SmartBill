@@ -60,8 +60,8 @@ export const adminAPI = {
   /**
    * Fetch SuperAdmin Vendor Settings from MongoDB
    */
-  getVendorSettings: async () => {
-    const res = await axiosClient.get("/admin/businesses/settings/vendor");
+  getVendorSettings: async (config = {}) => {
+    const res = await axiosClient.get("/admin/businesses/settings/vendor", config);
     return res.data;
   },
 

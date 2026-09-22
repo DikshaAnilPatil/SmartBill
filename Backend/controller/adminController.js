@@ -14,6 +14,15 @@ const isInternalAdmin = (user) => {
   return ["superadmin", "admin", "support", "billing", "super_admin"].includes(roleStr);
 };
 
+let businessesCache = null;
+let businessesCacheTime = 0;
+const BIZ_CACHE_TTL = 30 * 1000; // 30 seconds
+
+export const invalidateBusinessesCache = () => {
+  businessesCache = null;
+  businessesCacheTime = 0;
+};
+
 /**
  * GET /api/admin/businesses
  * Fetch all registered business owner accounts from MongoDB for SuperAdmin view.
@@ -28,24 +37,35 @@ export const getAllBusinesses = async (req, res) => {
       });
     }
 
+    const forceFresh = req.query?.fresh === "true";
+    if (!forceFresh && businessesCache && Date.now() - businessesCacheTime < BIZ_CACHE_TTL) {
+      return res.status(200).json({
+        success: true,
+        count: businessesCache.length,
+        data: businessesCache,
+        cached: true,
+      });
+    }
+
     // Run all 3 DB queries in parallel for maximum speed
+    const internalAdminRoles = ["superadmin", "admin", "support", "billing", "super_admin", "support_admin", "billing_admin"];
     const ownerQuery = {
       $or: [
         { role: "owner" },
-        { ownerId: null, role: { $ne: "superadmin" } },
+        { ownerId: null, role: { $nin: internalAdminRoles } },
       ],
     };
 
     const [owners, revenueByOwner, employeeCounts] = await Promise.all([
       User.find(ownerQuery)
-        .select("-password -passwordResetToken -passwordResetExpires -twoFactorSecret")
+        .select("_id firstName lastName businessName businessType businessCategory email phone city status suspensionReason subscription permissions createdAt")
         .sort({ createdAt: -1 })
         .lean(),
       Order.aggregate([
         { $group: { _id: "$ownerId", totalRevenue: { $sum: "$totalOrderValue" } } },
       ]),
       User.aggregate([
-        { $match: { ownerId: { $ne: null } } },
+        { $match: { ownerId: { $exists: true, $ne: null } } },
         { $group: { _id: "$ownerId", count: { $sum: 1 } } },
       ]),
     ]);
@@ -79,14 +99,18 @@ export const getAllBusinesses = async (req, res) => {
         plan: formattedPlan,
         users: employeeCount + 1, // Owner + employees
         revenue: revenue,
-        category: owner.businessType || owner.category || owner.businessCategory || "",
-        status: "Active",
-        suspensionReason: "",
+        category: owner.businessType || owner.businessCategory || "",
+        status: owner.status || "Active",
+        suspensionReason: owner.suspensionReason || "",
+        permissions: owner.permissions || {},
         joined: owner.createdAt
           ? new Date(owner.createdAt).toISOString().split("T")[0]
           : "N/A",
       };
     });
+
+    businessesCache = businessList;
+    businessesCacheTime = Date.now();
 
     return res.status(200).json({
       success: true,
@@ -137,6 +161,7 @@ export const updateBusinessStatus = async (req, res) => {
       owner.tokenVersion = (owner.tokenVersion || 0) + 1;
     }
     await owner.save();
+    invalidateBusinessesCache();
 
     // Sync suspensionReason to sub-users/employees under this owner and revoke their tokens if suspended
     try {
@@ -935,6 +960,7 @@ export const grantBusinessAccess = async (req, res) => {
     user.lockoutUntil = null;
 
     await user.save();
+    invalidateBusinessesCache();
 
     // 4. Build Granted Modules List for Email
     const MODULE_LABELS = {
@@ -1271,7 +1297,8 @@ export const getBusinessCustomers = async (req, res) => {
         ownerCity: owner.city || "N/A",
         address: owner.address || "N/A",
         plan: formattedPlan,
-        status: "Active",
+        status: owner.status || "Active",
+        suspensionReason: owner.suspensionReason || "",
         joined: owner.createdAt
           ? new Date(owner.createdAt).toISOString().split("T")[0]
           : "N/A",

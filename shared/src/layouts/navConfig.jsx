@@ -110,7 +110,6 @@ export const SUPER_ADMIN_ITEMS = [
   { key: "revenue", label: "Revenue", icon: BarChart3 },
   { key: "admin-role", label: "Admin Role", icon: Shield },
   { key: "offers-coupons", label: "Offers & Coupons", icon: Tag },
-  { key: "regions", label: "Regions", icon: Globe },
   { key: "subscriptions", label: "Subscription Mgmt", icon: CreditCard },
   { key: "settings", label: "Settings", icon: Settings },
 ];

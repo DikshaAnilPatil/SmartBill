@@ -27,6 +27,7 @@ const APP_PAGES = [
   "expenses",
   "users",
   "settings",
+  "subscription",
   "notifications",
   "profile",
 ];
