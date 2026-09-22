@@ -1712,13 +1712,11 @@ export default function POSScreen() {
               <span className="w-2 h-2 rounded-full bg-purple-500 animate-pulse" />
               <span>Wholesale Bulk Pricing Active (Auto-applying Wholesale Rates)</span>
             </div>
-          ) : (
-            outOfStockCount > 0 && stockFilter === "in_stock" && (
-              <span className="text-[11px] text-slate-400">
-                ({outOfStockCount} out-of-stock items hidden)
-              </span>
-            )
-          )}
+          ) : (outOfStockCount > 0 && stockFilter === "in_stock") ? (
+            <span className="text-[11px] text-slate-400">
+              ({outOfStockCount} out-of-stock items hidden)
+            </span>
+          ) : null}
         </div>
 
         {loadingProducts ? (
@@ -1746,7 +1744,7 @@ export default function POSScreen() {
               const stockCount = Number(p.stock) || 0;
               const isOut = !allowNegativeStock && stockCount <= 0;
               const defaultPrice = getProductDefaultPrice(p);
-              const hasWholesalePrice = p.wholesalePrice && Number(p.wholesalePrice) > 0;
+              const hasWholesalePrice = Boolean(p.wholesalePrice && Number(p.wholesalePrice) > 0);
 
               return (
                 <button
@@ -1771,43 +1769,43 @@ export default function POSScreen() {
                       <p className="text-sm font-bold text-slate-900 dark:text-white truncate">
                         {p.name}
                       </p>
-                      {p.category && (
+                      {p.category ? (
                         <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
                           {p.category}
                         </span>
-                      )}
+                      ) : null}
                     </div>
 
                     <div className="flex items-center gap-2 mt-1 flex-wrap text-xs">
                       <span className="text-slate-400 font-mono text-[11px]">
                         {p.sku || "NO-SKU"}
                       </span>
-                      {p.barcode && (
+                      {p.barcode ? (
                         <span className="text-slate-400 font-mono text-[10px]">
                           • {p.barcode}
                         </span>
-                      )}
+                      ) : null}
 
                       {/* Pharmacy Details */}
-                      {(p.batchNo || p.expiryDate) && (
+                      {(p.batchNo || p.expiryDate) ? (
                         <span className="text-[10px] font-bold px-1.5 py-0.2 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300 rounded border border-emerald-200 dark:border-emerald-800">
                           {p.batchNo ? `Lot: ${p.batchNo}` : ""} {p.expiryDate ? `Exp: ${p.expiryDate}` : ""}
                         </span>
-                      )}
+                      ) : null}
 
                       {/* Apparel Details */}
-                      {(p.size || p.color) && (
+                      {(p.size || p.color) ? (
                         <span className="text-[10px] font-bold px-1.5 py-0.2 bg-pink-50 text-pink-700 dark:bg-pink-950/50 dark:text-pink-300 rounded border border-pink-200 dark:border-pink-800">
                           {p.size ? `Size: ${p.size}` : ""} {p.color ? `• ${p.color}` : ""}
                         </span>
-                      )}
+                      ) : null}
 
                       {/* Wholesale MOQ details */}
-                      {posMode === "Wholesale" && (
+                      {posMode === "Wholesale" ? (
                         <span className="text-[10px] font-bold px-1.5 py-0.2 bg-purple-50 text-purple-700 dark:bg-purple-950/50 dark:text-purple-300 rounded border border-purple-200 dark:border-purple-800">
                           MOQ: {p.minOrderQty || 1}
                         </span>
-                      )}
+                      ) : null}
                     </div>
                   </div>
 
@@ -1815,11 +1813,11 @@ export default function POSScreen() {
                     <span className={`text-sm font-extrabold font-mono ${posMode === "Wholesale" ? "text-purple-600 dark:text-purple-400" : "text-blue-600 dark:text-blue-400"}`}>
                       {fmt(defaultPrice)}
                     </span>
-                    {posMode !== "Wholesale" && hasWholesalePrice && (
+                    {posMode !== "Wholesale" && hasWholesalePrice ? (
                       <span className="text-[10px] text-slate-400 font-mono">
                         Bulk: {fmt(p.wholesalePrice)}
                       </span>
-                    )}
+                    ) : null}
                     <span
                       className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
                         stockCount <= 0

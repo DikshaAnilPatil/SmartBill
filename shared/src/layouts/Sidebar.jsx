@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { BarChart2, ChevronRight, Menu, UserCircle } from "lucide-react";
+import { BarChart2, ChevronRight, Menu, UserCircle, Shield } from "lucide-react";
 import { NAV_GROUPS, SUPER_ADMIN_ITEMS } from "./navConfig";
 import { getUserDisplayName } from "@shared/utils/userUtils";
 import { useCustomization } from "@shared/hooks/useCustomization";
@@ -69,36 +69,58 @@ export default function Sidebar({ page, onNav, role, collapsed, onToggle, user: 
       className="flex flex-col bg-slate-900 transition-all duration-300 z-20 flex-shrink-0"
       style={{ width: collapsed ? 64 : 240 }}
     >
-      {/* Logo */}
+      {/* Logo / Header Branding */}
       <div
         className={`flex items-center border-b border-slate-800 h-16 px-4 gap-3 flex-shrink-0`}
       >
         <div
-          className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 text-white"
-          style={{ backgroundColor: "var(--primary, #2563eb)" }}
+          className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 text-white shadow-xs"
+          style={{ backgroundColor: isPlatformAdmin ? "#7c3aed" : "var(--primary, #2563eb)" }}
         >
-          <BarChart2 className="w-4 h-4 text-white" />
+          {isPlatformAdmin ? (
+            <Shield className="w-4 h-4 text-white" />
+          ) : (
+            <BarChart2 className="w-4 h-4 text-white" />
+          )}
         </div>
 
         {!collapsed && (
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-bold text-white truncate">
-              {displayName}
-            </p>
-            <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-              <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded tracking-wide ${
-                String(user?.businessType).toLowerCase() === "wholesale"
-                  ? "bg-purple-500/20 text-purple-300 border border-purple-500/30"
-                  : "bg-blue-500/20 text-blue-300 border border-blue-500/30"
-              }`}>
-                {String(user?.businessType).toLowerCase() === "wholesale" ? "🏢 Wholesale" : "🛒 Retail"}
-              </span>
-              {user?.businessCategory && (
-                <span className="text-[10px] text-slate-400 truncate max-w-[100px]" title={user.businessCategory}>
-                  • {user.businessCategory}
-                </span>
-              )}
-            </div>
+            {isPlatformAdmin ? (
+              <>
+                <p className="text-sm font-bold text-white truncate">
+                  SmartBill Admin
+                </p>
+                <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                  <span className="text-[9px] font-bold px-1.5 py-0.5 rounded tracking-wide bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                    🛡️ Super Admin
+                  </span>
+                  <span className="text-[10px] text-slate-400 truncate">
+                    Platform Control
+                  </span>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="text-sm font-bold text-white truncate">
+                  {displayName}
+                </p>
+                <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                  <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded tracking-wide ${
+                    String(user?.businessType).toLowerCase() === "wholesale"
+                      ? "bg-purple-500/20 text-purple-300 border border-purple-500/30"
+                      : "bg-blue-500/20 text-blue-300 border border-blue-500/30"
+                  }`}>
+                    {String(user?.businessType).toLowerCase() === "wholesale" ? "🏢 Wholesale" : "🛒 Retail"}
+                  </span>
+                  {user?.businessCategory && (
+                    <span className="text-[10px] text-slate-400 truncate max-w-[100px]" title={user.businessCategory}>
+                      • {user.businessCategory}
+                    </span>
+                  )}
+                </div>
+              </>
+            )}
           </div>
         )}
         <button
@@ -210,14 +232,21 @@ export default function Sidebar({ page, onNav, role, collapsed, onToggle, user: 
           {!collapsed && (
             <div className="flex-1 min-w-0">
               <p className="text-xs font-semibold text-white truncate">
-                {displayName}
+                {isPlatformAdmin ? (user?.name || "Super Admin") : displayName}
               </p>
               <p className="text-[10px] text-slate-500 truncate">
-                {displayEmail}
+                {isPlatformAdmin ? (user?.email || "admin@smartbill.com") : displayEmail}
               </p>
             </div>
           )}
         </div>
+        {!collapsed && isPlatformAdmin && (
+          <div className="mt-2 pt-2 border-t border-slate-800/60 flex items-center justify-between">
+            <span className="text-[10px] font-bold text-purple-400 uppercase tracking-wider bg-purple-400/10 px-2 py-0.5 rounded border border-purple-400/20">
+              PLATFORM ROOT ACCESS
+            </span>
+          </div>
+        )}
         {!collapsed && !isPlatformAdmin && (
           <div className="mt-2 pt-2 border-t border-slate-800/60 flex items-center justify-between">
             <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider bg-amber-400/10 px-2 py-0.5 rounded border border-amber-400/20">

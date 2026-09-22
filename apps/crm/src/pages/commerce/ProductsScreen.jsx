@@ -1809,54 +1809,6 @@ export default function ProductsScreen({ onNav }) {
         </Modal>
       )}
 
-      {/* BUSINESS TYPE & CATEGORY BANNER */}
-      <div className={`p-4 rounded-2xl border flex items-center justify-between gap-4 flex-wrap ${
-        isWholesale
-          ? "bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-transparent border-amber-200 dark:border-amber-800/40"
-          : "bg-gradient-to-r from-blue-500/10 via-indigo-500/5 to-transparent border-blue-200 dark:border-blue-800/40"
-      }`}>
-        <div className="flex items-center gap-3">
-          <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold text-lg ${
-            isWholesale ? "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300" : "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300"
-          }`}>
-            {isWholesale ? "🏢" : isPharmacy ? "💊" : isApparel ? "👗" : isElectronics ? "⚡" : "🛒"}
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h3 className="font-bold text-slate-900 dark:text-white text-sm">
-                {isWholesale ? "Wholesale B2B Product Catalog" : "Retail Product Catalog"}
-              </h3>
-              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                isWholesale ? "bg-amber-100 text-amber-800 border border-amber-200" : "bg-blue-100 text-blue-800 border border-blue-200"
-              }`}>
-                {userBizType} Mode
-              </span>
-            </div>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-              {userBizCat ? `Configured for ${userBizCat}` : "General Commercial Inventory"} • {productList.length} items loaded
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          {isWholesale && (
-            <span className="text-[11px] font-semibold text-amber-800 dark:text-amber-300 bg-amber-100 dark:bg-amber-900/30 px-2.5 py-1 rounded-lg border border-amber-300/40">
-              ✓ Wholesale Price & MOQ Enabled
-            </span>
-          )}
-          {isPharmacy && (
-            <span className="text-[11px] font-semibold text-emerald-800 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-900/30 px-2.5 py-1 rounded-lg border border-emerald-300/40">
-              ✓ Batch & Expiry Compliance
-            </span>
-          )}
-          {isApparel && (
-            <span className="text-[11px] font-semibold text-purple-800 dark:text-purple-300 bg-purple-100 dark:bg-purple-900/30 px-2.5 py-1 rounded-lg border border-purple-300/40">
-              ✓ Size & Color Variants
-            </span>
-          )}
-        </div>
-      </div>
-
       {/* FILTER AND HEADER CONTROLS */}
       <div className="flex flex-col gap-3">
         <div className="flex items-center gap-3 flex-wrap">
@@ -2030,31 +1982,31 @@ export default function ProductsScreen({ onNav }) {
                       
                       {/* Industry Variant Badges */}
                       <div className="flex items-center gap-1.5 flex-wrap mt-1">
-                        {p.batchNo && (
+                        {p.batchNo ? (
                           <span className="text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-200 px-1.5 py-0.2 rounded font-mono">
                             Batch: {p.batchNo}
                           </span>
-                        )}
-                        {p.expiryDate && (
+                        ) : null}
+                        {p.expiryDate ? (
                           <span className="text-[10px] bg-rose-50 text-rose-700 border border-rose-200 px-1.5 py-0.2 rounded font-mono">
                             Exp: {new Date(p.expiryDate).toLocaleDateString("en-IN", { month: "short", year: "2-digit" })}
                           </span>
-                        )}
-                        {p.isPrescriptionOnly && (
+                        ) : null}
+                        {p.isPrescriptionOnly ? (
                           <span className="text-[10px] bg-red-100 text-red-800 font-bold px-1.5 py-0.2 rounded">
                             Rx
                           </span>
-                        )}
-                        {p.size && (
+                        ) : null}
+                        {p.size ? (
                           <span className="text-[10px] bg-purple-50 text-purple-700 border border-purple-200 px-1.5 py-0.2 rounded font-semibold">
                             Size: {p.size}
                           </span>
-                        )}
-                        {p.color && (
+                        ) : null}
+                        {p.color ? (
                           <span className="text-[10px] bg-slate-100 text-slate-700 px-1.5 py-0.2 rounded">
                             {p.color}
                           </span>
-                        )}
+                        ) : null}
                       </div>
                     </td>
                     <td className="px-5 py-4">

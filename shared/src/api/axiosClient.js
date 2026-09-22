@@ -1,9 +1,13 @@
 import axios from "axios";
 
 // Base URL resolution order:
-// 1. VITE_API_URL (if set) e.g. /api or http://127.0.0.1:5000/api
+// 1. VITE_API_BASE_URL or VITE_API_URL (if configured in .env) e.g. http://localhost:5000/api
 // 2. Fall back to same-origin proxy /api
-const BASE_URL = (import.meta.env.VITE_API_URL || "/api").replace(/\/+$/, "");
+const rawBaseUrl =
+  (typeof import.meta !== "undefined" && import.meta.env
+    ? import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL
+    : "") || "/api";
+const BASE_URL = rawBaseUrl.replace(/\/+$/, "");
 
 const axiosClient = axios.create({
   baseURL: BASE_URL,

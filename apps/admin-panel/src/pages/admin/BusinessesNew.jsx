@@ -340,17 +340,42 @@ export default function BusinessesNew() {
     return () => controller.abort(); // Cleanup on unmount / StrictMode double-invoke
   }, []);
 
+  const categoryCounts = useMemo(() => {
+    const counts = { all: rows.length };
+    rows.forEach((b) => {
+      const cat = String(b.category || b.businessType || "Other").trim();
+      counts[cat] = (counts[cat] || 0) + 1;
+    });
+    return counts;
+  }, [rows]);
+
+  const categories = useMemo(() => {
+    const set = new Set();
+    rows.forEach((b) => {
+      const cat = String(b.category || b.businessType || "").trim();
+      if (cat) set.add(cat);
+    });
+    return ["all", ...Array.from(set).sort()];
+  }, [rows]);
+
   const processedRows = useMemo(() => {
     let filtered = rows;
 
-    // 1. Filter by Active Tab
-    if (activeTab === "active") {
-      filtered = filtered.filter((b) => String(b.status || "Active").toLowerCase() === "active");
-    } else if (activeTab === "suspended") {
-      filtered = filtered.filter((b) => String(b.status || "").toLowerCase() === "suspended");
+    // 1. Filter by Active Tab (category or status)
+    if (activeTab && activeTab !== "all") {
+      if (activeTab === "active") {
+        filtered = filtered.filter((b) => String(b.status || "Active").toLowerCase() === "active");
+      } else if (activeTab === "suspended") {
+        filtered = filtered.filter((b) => String(b.status || "").toLowerCase() === "suspended");
+      } else {
+        filtered = filtered.filter((b) => {
+          const cat = String(b.category || b.businessType || "Other").trim().toLowerCase();
+          return cat === activeTab.toLowerCase();
+        });
+      }
     }
 
-    // 2. Filter by Search
+    // 2. Filter by Search (name, owner, email, phone, category, plan, status, city, state, gstin)
     const q = search.trim().toLowerCase();
     if (q) {
       filtered = filtered.filter((b) => {
@@ -359,10 +384,14 @@ export default function BusinessesNew() {
           String(b.owner ?? "").toLowerCase().includes(q) ||
           String(b.ownerEmail ?? "").toLowerCase().includes(q) ||
           String(b.ownerPhone ?? "").toLowerCase().includes(q) ||
+          String(b.category ?? "").toLowerCase().includes(q) ||
+          String(b.businessType ?? "").toLowerCase().includes(q) ||
           String(b.plan ?? "").toLowerCase().includes(q) ||
           String(b.status ?? "").toLowerCase().includes(q) ||
-          String(b.category ?? b.businessType ?? "").toLowerCase().includes(q) ||
-          String(b.ownerCity ?? "").toLowerCase().includes(q)
+          String(b.ownerCity ?? "").toLowerCase().includes(q) ||
+          String(b.city ?? "").toLowerCase().includes(q) ||
+          String(b.state ?? "").toLowerCase().includes(q) ||
+          String(b.gstin ?? "").toLowerCase().includes(q)
         );
       });
     }
@@ -373,12 +402,12 @@ export default function BusinessesNew() {
         let valA = a[sortConfig.key];
         let valB = b[sortConfig.key];
 
-        if (sortConfig.key === "users") {
+        if (sortConfig.key === "users" || sortConfig.key === "revenue") {
           valA = Number(valA || 0);
           valB = Number(valB || 0);
-        } else if (sortConfig.key === "joined") {
-          valA = new Date(valA).getTime();
-          valB = new Date(valB).getTime();
+        } else if (sortConfig.key === "joined" || sortConfig.key === "createdAt") {
+          valA = new Date(valA || 0).getTime();
+          valB = new Date(valB || 0).getTime();
         } else {
           valA = String(valA ?? "").toLowerCase();
           valB = String(valB ?? "").toLowerCase();
@@ -776,18 +805,22 @@ export default function BusinessesNew() {
         </div>
       </div>
 
-      {/* Tabs */}
+      {/* Category Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="w-fit bg-slate-100 p-1 rounded-lg">
-          <TabsTrigger value="all" className="data-[state=active]:bg-white data-[state=active]:shadow-xs">
-            All ({rows.length})
-          </TabsTrigger>
-          <TabsTrigger value="active" className="data-[state=active]:bg-white data-[state=active]:shadow-xs">
-            Active ({rows.filter((r) => String(r.status || "Active").toLowerCase() === "active").length})
-          </TabsTrigger>
-          <TabsTrigger value="suspended" className="data-[state=active]:bg-white data-[state=active]:shadow-xs">
-            Suspended ({rows.filter((r) => String(r.status || "").toLowerCase() === "suspended").length})
-          </TabsTrigger>
+        <TabsList className="w-full sm:w-auto flex flex-wrap gap-1 p-1 bg-slate-100/90 rounded-xl border border-slate-200/80">
+          {categories.map((catKey) => {
+            const label = catKey === "all" ? "All" : catKey;
+            const count = categoryCounts[catKey] || 0;
+            return (
+              <TabsTrigger
+                key={catKey}
+                value={catKey}
+                className="text-xs font-semibold px-3.5 py-1.5 rounded-lg data-[state=active]:bg-white data-[state=active]:text-blue-700 data-[state=active]:shadow-xs transition-all cursor-pointer"
+              >
+                {label} ({count})
+              </TabsTrigger>
+            );
+          })}
         </TabsList>
       </Tabs>
 
@@ -975,8 +1008,6 @@ export default function BusinessesNew() {
         </Modal>
       )}
 
-
-
       {/* Grouping Status Notification Banner */}
       {vendorGrouping && (
         <div className="p-3.5 rounded-xl bg-blue-50/80 border border-blue-200 text-blue-800 text-xs font-medium flex items-center justify-between">
@@ -1031,6 +1062,7 @@ export default function BusinessesNew() {
                           { label: "Joined", key: "joined", sortable: true },
                           { label: "Users", key: "users", sortable: true },
                           { label: "Status", key: "status", sortable: true },
+                          { label: "Actions", key: "actions", sortable: false },
                         ].map((h) => (
                           <th
                             key={h.label}
@@ -1053,12 +1085,30 @@ export default function BusinessesNew() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {loading ? (
+                      {loading && rows.length === 0 ? (
                         <tr>
                           <td colSpan={8} className="py-12 text-center text-slate-500">
                             <div className="flex flex-col items-center justify-center gap-2">
                               <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
                               <span className="text-sm font-medium">Fetching registered business owners...</span>
+                            </div>
+                          </td>
+                        </tr>
+                      ) : error && rows.length === 0 ? (
+                        <tr>
+                          <td colSpan={8} className="py-12 text-center">
+                            <div className="flex flex-col items-center justify-center">
+                              <div className="w-10 h-10 bg-red-50 rounded-full flex items-center justify-center mb-2">
+                                <AlertCircle className="w-5 h-5 text-red-500" />
+                              </div>
+                              <h3 className="text-sm font-semibold text-red-900 mb-1">Failed to load businesses</h3>
+                              <p className="text-xs text-red-600 mb-3 max-w-sm">{error}</p>
+                              <button
+                                onClick={handleRefresh}
+                                className="px-3.5 py-1.5 bg-red-600 text-white text-xs font-semibold rounded-lg hover:bg-red-700 transition-colors cursor-pointer"
+                              >
+                                Retry Connection
+                              </button>
                             </div>
                           </td>
                         </tr>
@@ -1135,30 +1185,38 @@ export default function BusinessesNew() {
                             </td>
                             <td className="px-4 py-3 text-right">
                               <DropdownMenu>
-                                <DropdownMenuTrigger className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-800 transition-colors cursor-pointer outline-none">
-                                  <MoreVertical className="w-4 h-4" />
+                                <DropdownMenuTrigger asChild>
+                                  <button
+                                    type="button"
+                                    className="p-1.5 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-colors cursor-pointer outline-none"
+                                    title="Business Actions"
+                                  >
+                                    <MoreVertical className="w-4 h-4" />
+                                  </button>
                                 </DropdownMenuTrigger>
-                                <DropdownMenuContent align="end" className="w-52 bg-white shadow-lg border border-slate-200">
-                                  <DropdownMenuLabel className="text-xs text-slate-500">Business Actions</DropdownMenuLabel>
+                                <DropdownMenuContent align="end" className="w-52 bg-white shadow-lg border border-slate-200 rounded-xl p-1.5">
+                                  <DropdownMenuLabel className="text-[11px] font-bold text-slate-400 uppercase tracking-wider px-2 py-1">
+                                    Business Actions
+                                  </DropdownMenuLabel>
                                   <DropdownMenuItem
                                     onClick={() => openBusinessDetailsModal(b)}
-                                    className="cursor-pointer flex items-center gap-2 text-xs"
+                                    className="cursor-pointer flex items-center gap-2 px-2.5 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 rounded-lg"
                                   >
                                     <Eye className="w-3.5 h-3.5 text-blue-600" />
                                     <span>View Details & Customers</span>
                                   </DropdownMenuItem>
                                   <DropdownMenuItem
                                     onClick={() => openAccessModal(b)}
-                                    className="cursor-pointer flex items-center gap-2 text-xs"
+                                    className="cursor-pointer flex items-center gap-2 px-2.5 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 rounded-lg"
                                   >
-                                    <KeyRound className="w-3.5 h-3.5 text-amber-600" />
+                                    <KeyRound className="w-3.5 h-3.5 text-purple-600" />
                                     <span>Manage Module Access</span>
                                   </DropdownMenuItem>
-                                  <DropdownMenuSeparator />
+                                  <DropdownMenuSeparator className="my-1 bg-slate-100" />
                                   {b.status === "Suspended" ? (
                                     <DropdownMenuItem
                                       onClick={() => resumeBusiness(b.id || b._id)}
-                                      className="cursor-pointer flex items-center gap-2 text-xs text-emerald-600 focus:text-emerald-700"
+                                      className="cursor-pointer flex items-center gap-2 px-2.5 py-2 text-xs font-medium text-emerald-600 hover:bg-emerald-50 rounded-lg"
                                     >
                                       <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />
                                       <span>Reactivate Account</span>
@@ -1166,7 +1224,7 @@ export default function BusinessesNew() {
                                   ) : (
                                     <DropdownMenuItem
                                       onClick={() => openSuspendModal(b.id || b._id)}
-                                      className="cursor-pointer flex items-center gap-2 text-xs text-rose-600 focus:text-rose-700"
+                                      className="cursor-pointer flex items-center gap-2 px-2.5 py-2 text-xs font-medium text-rose-600 hover:bg-rose-50 rounded-lg"
                                     >
                                       <XCircle className="w-3.5 h-3.5 text-rose-600" />
                                       <span>Suspend Account</span>
@@ -1205,6 +1263,7 @@ export default function BusinessesNew() {
                     { label: "Joined", key: "joined", sortable: true },
                     { label: "Users", key: "users", sortable: true },
                     { label: "Status", key: "status", sortable: true },
+                    { label: "Actions", key: "actions", sortable: false },
                   ].map((h) => (
                     <th
                       key={h.label}
@@ -1227,12 +1286,30 @@ export default function BusinessesNew() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {loading ? (
+                {loading && rows.length === 0 ? (
                   <tr>
                     <td colSpan={8} className="py-12 text-center text-slate-500">
                       <div className="flex flex-col items-center justify-center gap-2">
                         <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
                         <span className="text-sm font-medium">Fetching registered business owners...</span>
+                      </div>
+                    </td>
+                  </tr>
+                ) : error && rows.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="py-12 text-center">
+                      <div className="flex flex-col items-center justify-center">
+                        <div className="w-12 h-12 bg-red-50 rounded-full flex items-center justify-center mb-3">
+                          <AlertCircle className="w-6 h-6 text-red-500" />
+                        </div>
+                        <h3 className="text-sm font-semibold text-red-900 mb-1">Failed to load businesses</h3>
+                        <p className="text-xs text-red-600 mb-3 max-w-sm">{error}</p>
+                        <button
+                          onClick={handleRefresh}
+                          className="px-3.5 py-1.5 bg-red-600 text-white text-xs font-semibold rounded-lg hover:bg-red-700 transition-colors cursor-pointer"
+                        >
+                          Retry Connection
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -1270,7 +1347,7 @@ export default function BusinessesNew() {
                               <span>{b.name}</span>
                             </p>
                             <p className="text-xs text-slate-500 font-medium mt-0.5">
-                              {b.owner || "-"}
+                              {b.owner || "-"} {(b.category || b.businessType) ? `• ${b.category || b.businessType}` : ""}
                             </p>
                           </div>
                         </div>
@@ -1309,30 +1386,38 @@ export default function BusinessesNew() {
                       </td>
                       <td className="px-4 py-3 text-right">
                         <DropdownMenu>
-                          <DropdownMenuTrigger className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-800 transition-colors cursor-pointer outline-none">
-                            <MoreVertical className="w-4 h-4" />
+                          <DropdownMenuTrigger asChild>
+                            <button
+                              type="button"
+                              className="p-1.5 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-colors cursor-pointer outline-none"
+                              title="Business Actions"
+                            >
+                              <MoreVertical className="w-4 h-4" />
+                            </button>
                           </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end" className="w-52 bg-white shadow-lg border border-slate-200">
-                            <DropdownMenuLabel className="text-xs text-slate-500">Business Actions</DropdownMenuLabel>
+                          <DropdownMenuContent align="end" className="w-52 bg-white shadow-lg border border-slate-200 rounded-xl p-1.5">
+                            <DropdownMenuLabel className="text-[11px] font-bold text-slate-400 uppercase tracking-wider px-2 py-1">
+                              Business Actions
+                            </DropdownMenuLabel>
                             <DropdownMenuItem
                               onClick={() => openBusinessDetailsModal(b)}
-                              className="cursor-pointer flex items-center gap-2 text-xs"
+                              className="cursor-pointer flex items-center gap-2 px-2.5 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 rounded-lg"
                             >
                               <Eye className="w-3.5 h-3.5 text-blue-600" />
                               <span>View Details & Customers</span>
                             </DropdownMenuItem>
                             <DropdownMenuItem
                               onClick={() => openAccessModal(b)}
-                              className="cursor-pointer flex items-center gap-2 text-xs"
+                              className="cursor-pointer flex items-center gap-2 px-2.5 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 rounded-lg"
                             >
-                              <KeyRound className="w-3.5 h-3.5 text-amber-600" />
+                              <KeyRound className="w-3.5 h-3.5 text-purple-600" />
                               <span>Manage Module Access</span>
                             </DropdownMenuItem>
-                            <DropdownMenuSeparator />
+                            <DropdownMenuSeparator className="my-1 bg-slate-100" />
                             {b.status === "Suspended" ? (
                               <DropdownMenuItem
                                 onClick={() => resumeBusiness(b.id || b._id)}
-                                className="cursor-pointer flex items-center gap-2 text-xs text-emerald-600 focus:text-emerald-700"
+                                className="cursor-pointer flex items-center gap-2 px-2.5 py-2 text-xs font-medium text-emerald-600 hover:bg-emerald-50 rounded-lg"
                               >
                                 <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />
                                 <span>Reactivate Account</span>
@@ -1340,7 +1425,7 @@ export default function BusinessesNew() {
                             ) : (
                               <DropdownMenuItem
                                 onClick={() => openSuspendModal(b.id || b._id)}
-                                className="cursor-pointer flex items-center gap-2 text-xs text-rose-600 focus:text-rose-700"
+                                className="cursor-pointer flex items-center gap-2 px-2.5 py-2 text-xs font-medium text-rose-600 hover:bg-rose-50 rounded-lg"
                               >
                                 <XCircle className="w-3.5 h-3.5 text-rose-600" />
                                 <span>Suspend Account</span>

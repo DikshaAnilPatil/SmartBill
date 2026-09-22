@@ -50,19 +50,31 @@ export const getAllBusinesses = async (req, res) => {
     // Run all 3 DB queries in parallel for maximum speed
     const internalAdminRoles = ["superadmin", "admin", "support", "billing", "super_admin", "support_admin", "billing_admin"];
     const ownerQuery = {
-      $or: [
-        { role: "owner" },
-        { ownerId: null, role: { $nin: internalAdminRoles } },
+      $and: [
+        { role: { $nin: internalAdminRoles } },
+        {
+          $or: [
+            { role: "owner" },
+            { ownerId: null },
+            { ownerId: { $exists: false } },
+          ],
+        },
       ],
     };
 
-    const [owners, revenueByOwner, employeeCounts] = await Promise.all([
+    const [owners, orderStatsByOwner, employeeCounts] = await Promise.all([
       User.find(ownerQuery)
         .select("_id firstName lastName businessName businessType businessCategory email phone city status suspensionReason subscription permissions createdAt")
         .sort({ createdAt: -1 })
         .lean(),
       Order.aggregate([
-        { $group: { _id: "$ownerId", totalRevenue: { $sum: "$totalOrderValue" } } },
+        {
+          $group: {
+            _id: "$ownerId",
+            totalRevenue: { $sum: "$totalOrderValue" },
+            ordersCount: { $sum: 1 },
+          },
+        },
       ]),
       User.aggregate([
         { $match: { ownerId: { $exists: true, $ne: null } } },
@@ -70,19 +82,25 @@ export const getAllBusinesses = async (req, res) => {
       ]),
     ]);
 
-    const revenueMap = new Map(
-      revenueByOwner.map((item) => [String(item._id), Number(item.totalRevenue) || 0])
+    const orderStatsMap = new Map(
+      orderStatsByOwner.map((item) => [
+        String(item._id),
+        {
+          totalRevenue: Number(item.totalRevenue) || 0,
+          ordersCount: Number(item.ordersCount) || 0,
+        },
+      ])
     );
 
     const employeeMap = new Map(
       employeeCounts.map((item) => [String(item._id), Number(item.count) || 0])
     );
 
-    // Map each owner to business card format with employee count and revenue
+    // Map each owner to business card format with employee count, revenue, and metadata
     const businessList = owners.map((owner) => {
       const ownerIdStr = owner._id.toString();
       const employeeCount = employeeMap.get(ownerIdStr) || 0;
-      const revenue = revenueMap.get(ownerIdStr) || 0;
+      const orderStats = orderStatsMap.get(ownerIdStr) || { totalRevenue: 0, ordersCount: 0 };
 
       const rawPlan = owner.subscription?.plan || "starter";
       const formattedPlan =
@@ -96,16 +114,36 @@ export const getAllBusinesses = async (req, res) => {
         ownerEmail: owner.email,
         ownerPhone: owner.phone || "N/A",
         ownerCity: owner.city || "N/A",
+        address: owner.address || "",
+        city: owner.city || "",
+        state: owner.state || "",
+        pincode: owner.pincode || "",
+        country: owner.country || "India",
+        gstin: owner.gstin || "",
+        panNumber: owner.panNumber || "",
+        msmeNumber: owner.msmeNumber || "",
         plan: formattedPlan,
-        users: employeeCount + 1, // Owner + employees
-        revenue: revenue,
-        category: owner.businessType || owner.businessCategory || "",
+        subscription: {
+          plan: rawPlan,
+          status: owner.subscription?.status || "trialing",
+          trialEndsAt: owner.subscription?.trialEndsAt || null,
+          currentPeriodStart: owner.subscription?.currentPeriodStart || null,
+          currentPeriodEnd: owner.subscription?.currentPeriodEnd || null,
+        },
+        revenue: typeof revenue !== "undefined" ? revenue : orderStats.totalRevenue,
+        ordersCount: orderStats?.ordersCount || 0,
+        category: owner.businessType || owner.category || owner.businessCategory || "Retail",
+        businessType: owner.businessType || "Retail",
+        businessCategory: owner.businessCategory || "",
         status: owner.status || "Active",
         suspensionReason: owner.suspensionReason || "",
         permissions: owner.permissions || {},
+        databaseStatus: "Live Database",
         joined: owner.createdAt
           ? new Date(owner.createdAt).toISOString().split("T")[0]
           : "N/A",
+        createdAt: owner.createdAt,
+        updatedAt: owner.updatedAt,
       };
     });
 

@@ -978,14 +978,14 @@ export default function SuppliersScreen() {
             </div>
 
             {/* Payment summary */}
-            {voucherForm.amountDue && Number(voucherForm.amountDue) > 0 && (
+            {Number(voucherForm.amountDue) > 0 ? (
               <div className="p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300">
                 <div className="flex justify-between gap-3 font-semibold">
                   <span>Remaining Balance</span>
                   <span className="font-mono">{fmt(Math.max(0, Number(voucherForm.amountDue) - Number(voucherForm.amountPaid || 0)))}</span>
                 </div>
               </div>
-            )}
+            ) : null}
 
             {/* Account Head */}
             <div>

@@ -199,11 +199,11 @@ function ProductSelectDropdown({
                     </div>
 
                     <div className="flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400 flex-wrap font-mono">
-                      {p.sku && (
+                      {p.sku && p.sku !== "0" && p.sku !== 0 ? (
                         <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-[10px] font-bold">
                           SKU: {p.sku}
                         </span>
-                      )}
+                      ) : null}
                       <span
                         className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
                           (p.stock || 0) > 0
@@ -213,11 +213,11 @@ function ProductSelectDropdown({
                       >
                         Stock: {p.stock ?? 0} {p.unit || "Piece"}
                       </span>
-                      {p.gst !== undefined && (
+                      {p.gst !== undefined && p.gst !== null && Number(p.gst) > 0 ? (
                         <span className="text-slate-400 text-[10px]">
                           GST: {p.gst}%
                         </span>
-                      )}
+                      ) : null}
                     </div>
                   </button>
                 );
