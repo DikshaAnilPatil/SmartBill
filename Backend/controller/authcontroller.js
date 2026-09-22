@@ -971,7 +971,15 @@ export const forgotPassword = async (req, res) => {
     if (!user) {
       const label = identifier.type === "email" ? "email address" : "mobile number";
       return res.status(404).json({
-        message: `No account found with this ${label}. Please check and try again.`,
+        message: `No account found with this ${label}. Please enter the same ${label} that was entered during registration.`,
+      });
+    }
+
+    if (user.status === "Suspended") {
+      return res.status(403).json({
+        message: user.suspensionReason
+          ? `Your account is suspended: ${user.suspensionReason}. Password reset is disabled.`
+          : "Your account has been suspended by administration. Please contact support.",
       });
     }
 
@@ -1027,6 +1035,7 @@ export const forgotPassword = async (req, res) => {
     return res.status(200).json({
       message: `Verification code has been sent to your registered ${identifier.type === "email" ? "email" : "mobile"}. Please check your inbox.`,
       identifier: targetKey,
+      email: user.email,
       type: identifier.type,
     });
   } catch (error) {
@@ -1076,7 +1085,7 @@ export const verifyResetOtp = async (req, res) => {
 
     if (!user) {
       return res.status(404).json({
-        message: "No account found with this email/mobile number.",
+        message: "No account found. Please enter the same registered email/phone used during registration.",
       });
     }
 

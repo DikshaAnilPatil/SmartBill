@@ -99,12 +99,24 @@ export default function AuthScreen({ view, onNav, onLogin, fixedRole }) {
           const cleanEmail = decodeURIComponent(emailParam).trim();
           setForgotMethod("email");
           setForgotEmail(cleanEmail);
+          try { localStorage.setItem("smartbill_last_registered_email", cleanEmail); } catch {}
           setForgotStep(2); // Automatically advance to Step 2 so user enters the OTP they received!
         } else if (phoneParam) {
           const cleanPhone = decodeURIComponent(phoneParam).trim();
           setForgotMethod("phone");
           setForgotPhone(cleanPhone);
           setForgotStep(2);
+        } else if (!forgotEmail) {
+          // Pre-fill initial email if empty, but allow typing any registered email
+          const savedEmail = (email && email.trim()) || localStorage.getItem("smartbill_last_registered_email") || localStorage.getItem("smartbill_last_email") || "";
+          if (savedEmail) {
+            setForgotEmail(savedEmail.trim());
+            setForgotMethod("email");
+          }
+          const savedPhone = (phone && phone !== PHONE_PREFIX) ? phone : (localStorage.getItem("smartbill_last_registered_phone") || "");
+          if (savedPhone) {
+            setForgotPhone(savedPhone);
+          }
         }
 
         if (otpParam) {
@@ -136,7 +148,7 @@ export default function AuthScreen({ view, onNav, onLogin, fixedRole }) {
     } catch (e) {
       console.warn("Failed to parse URL search params:", e);
     }
-  }, [view]);
+  }, [view, email, phone]);
 
   // Resend cooldown timer
   useEffect(() => {
@@ -394,6 +406,8 @@ export default function AuthScreen({ view, onNav, onLogin, fixedRole }) {
       }
       try {
         localStorage.removeItem("smartbill_applied_coupon");
+        localStorage.setItem("smartbill_last_registered_email", email.trim());
+        localStorage.setItem("smartbill_last_registered_phone", phone);
       } catch {}
 
       localStorage.setItem("smartbill_token", data.token);
@@ -553,12 +567,25 @@ export default function AuthScreen({ view, onNav, onLogin, fixedRole }) {
         : { phone: forgotPhone.replace(PHONE_PREFIX, "").replace(/\D/g, "") };
 
       const data = await forgotPassword(payload);
+      if (data?.email) {
+        setForgotEmail(data.email);
+        try { localStorage.setItem("smartbill_last_registered_email", data.email); } catch {}
+      }
       setForgotOtp("");
       setForgotStep(2);
       setResendCooldown(60);
       showToast(data.message || "Reset OTP sent successfully. Please check your inbox.", "success");
     } catch (err) {
-      setFormError(err.response?.data?.message || err.message || "Failed to process request. Please check and try again.");
+      const errMsg =
+        err.response?.data?.message ||
+        err.message ||
+        "No registered account found with this email. Please enter the same email address that was entered during registration.";
+      setFormError(errMsg);
+      if (isEmail) {
+        setForgotEmailError(errMsg);
+      } else {
+        setForgotPhoneError(errMsg);
+      }
     } finally {
       setResetLoading(false);
     }
@@ -788,8 +815,16 @@ export default function AuthScreen({ view, onNav, onLogin, fixedRole }) {
                     Remember me
                   </label>
                   <button
-                    onClick={() => onNav("forgot")}
-                    className="text-blue-600 hover:underline"
+                    type="button"
+                    onClick={() => {
+                      if (email && email.trim()) {
+                        setForgotEmail(email.trim());
+                        setForgotMethod("email");
+                        try { localStorage.setItem("smartbill_last_registered_email", email.trim()); } catch {}
+                      }
+                      onNav("forgot");
+                    }}
+                    className="text-blue-600 hover:underline cursor-pointer"
                   >
                     Forgot password?
                   </button>
@@ -1244,20 +1279,25 @@ export default function AuthScreen({ view, onNav, onLogin, fixedRole }) {
                   </div>
 
                   {forgotMethod === "email" ? (
-                    <Input
-                      label="Registered Email Address"
-                      value={forgotEmail}
-                      onChange={(v) => {
-                        const trimmed = String(v ?? "").trimStart();
-                        setForgotEmail(trimmed);
-                        if (trimmed && isValidEmail(trimmed))
-                          setForgotEmailError("");
-                        else setForgotEmailError(getLoginEmailError(trimmed));
-                      }}
-                      placeholder="name@business.com"
-                      icon={<Mail className="w-4 h-4" />}
-                      error={forgotEmailError}
-                    />
+                    <div>
+                      <Input
+                        label="Registered Email Address"
+                        value={forgotEmail}
+                        onChange={(v) => {
+                          const trimmed = String(v ?? "").trimStart();
+                          setForgotEmail(trimmed);
+                          if (trimmed && isValidEmail(trimmed))
+                            setForgotEmailError("");
+                          else setForgotEmailError(getLoginEmailError(trimmed));
+                        }}
+                        placeholder="name@business.com"
+                        icon={<Mail className="w-4 h-4" />}
+                        error={forgotEmailError}
+                      />
+                      <p className="text-[11px] text-slate-500 mt-1">
+                        Must match the registered email address used during account registration.
+                      </p>
+                    </div>
                   ) : (
                     <div className="flex flex-col gap-1.5">
                       <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">

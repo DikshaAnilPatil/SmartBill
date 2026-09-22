@@ -307,6 +307,8 @@ export function FixedPhoneInput({
 }
 
 export function Input({
+  id,
+  inputRef,
   label,
   value,
   onChange,
@@ -316,6 +318,13 @@ export function Input({
   className = "",
   inputClassName = "",
   error,
+  onKeyDown,
+  autoFocus,
+  disabled,
+  min,
+  max,
+  step,
+  ...rest
 }) {
   const [showPassword, setShowPassword] = useState(false);
   const isPassword = type === "password";
@@ -335,6 +344,8 @@ export function Input({
           </span>
         )}
         <input
+          id={id}
+          ref={inputRef}
           type={actualType}
           value={value ?? ""}
           onChange={(e) => {
@@ -342,8 +353,15 @@ export function Input({
               onChange(e.target.value);
             }
           }}
+          onKeyDown={onKeyDown}
+          autoFocus={autoFocus}
+          disabled={disabled}
+          min={min}
+          max={max}
+          step={step}
           placeholder={placeholder}
           className={`w-full border border-gray-300 rounded-md bg-white text-sm text-gray-900 placeholder:text-gray-400 outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-colors py-2 ${icon ? "pl-9" : "px-3"} ${isPassword ? "pr-10" : "pr-3"} ${error ? "border-red-500 focus:ring-red-500 focus:border-red-500" : ""} ${inputClassName}`}
+          {...rest}
         />
         {isPassword && (
           <button

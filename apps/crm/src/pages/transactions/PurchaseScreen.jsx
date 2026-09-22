@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   Check,
   Plus,
@@ -23,6 +23,7 @@ import {
   ChevronDown,
   ChevronUp,
   SlidersHorizontal,
+  Sparkles,
 } from "lucide-react";
 import {
   createPurchase,
@@ -70,6 +71,164 @@ const SETTLEMENT_TYPES = [
   "Direct Cash / Bank Refund",
   "Replacement Expected",
 ];
+
+function ProductSelectDropdown({
+  value,
+  onChange,
+  onSelectProduct,
+  productList = [],
+  placeholder = "Type or select product...",
+  className = "",
+  autoFocus = false,
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [filterText, setFilterText] = useState("");
+  const dropdownRef = useRef(null);
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const filteredProducts = useMemo(() => {
+    const q = (filterText !== "" ? filterText : value || "").trim().toLowerCase();
+    if (!q) return productList;
+    return productList.filter((p) => {
+      const name = String(p.name || "").toLowerCase();
+      const sku = String(p.sku || "").toLowerCase();
+      const barcode = String(p.barcode || "").toLowerCase();
+      return name.includes(q) || sku.includes(q) || barcode.includes(q);
+    });
+  }, [productList, filterText, value]);
+
+  const handleSelect = (product) => {
+    if (onSelectProduct) {
+      onSelectProduct(product);
+    } else if (onChange) {
+      onChange(product.name);
+    }
+    setIsOpen(false);
+    setFilterText("");
+  };
+
+  return (
+    <div className="relative w-full" ref={dropdownRef}>
+      <div className="relative flex items-center">
+        <input
+          ref={inputRef}
+          type="text"
+          value={value || ""}
+          autoFocus={autoFocus}
+          onChange={(e) => {
+            onChange(e.target.value);
+            setFilterText(e.target.value);
+            setIsOpen(true);
+          }}
+          onFocus={() => {
+            setFilterText("");
+            setIsOpen(true);
+          }}
+          placeholder={placeholder}
+          className={`w-full bg-white dark:bg-slate-850 border border-slate-300 dark:border-slate-700 rounded-lg pl-3 pr-8 py-2 text-xs text-slate-900 dark:text-white outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 font-medium placeholder-slate-400 shadow-2xs transition-all ${className}`}
+        />
+        <button
+          type="button"
+          tabIndex="-1"
+          onClick={() => {
+            setFilterText("");
+            setIsOpen((prev) => !prev);
+            if (!isOpen) {
+              inputRef.current?.focus();
+            }
+          }}
+          className="absolute right-1.5 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer transition-colors"
+          title="Toggle product suggestions list"
+        >
+          <ChevronDown
+            className={`w-3.5 h-3.5 transition-transform duration-150 ${
+              isOpen ? "rotate-180 text-blue-500" : ""
+            }`}
+          />
+        </button>
+      </div>
+
+      {isOpen && (
+        <div className="absolute left-0 top-full mt-1.5 w-full min-w-[280px] sm:min-w-[340px] bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 border border-slate-200 dark:border-slate-700 rounded-xl shadow-2xl z-50 max-h-60 overflow-y-auto py-1 animate-in fade-in slide-in-from-top-1 duration-150">
+          {filteredProducts.length === 0 ? (
+            <div className="px-4 py-3.5 text-center text-xs">
+              <p className="font-bold text-slate-700 dark:text-slate-200">No matching product found</p>
+              <p className="text-[11px] text-purple-600 dark:text-purple-400 mt-1 font-medium">
+                "{value || filterText}" will be auto-cataloged as a new item
+              </p>
+            </div>
+          ) : (
+            <div className="divide-y divide-slate-100 dark:divide-slate-800">
+              {filteredProducts.map((p) => {
+                const isSelected =
+                  value &&
+                  (p.name?.toLowerCase() === value.toLowerCase() ||
+                    p.sku?.toLowerCase() === value.toLowerCase());
+                const pCost =
+                  p.cost !== undefined && Number(p.cost) > 0
+                    ? p.cost
+                    : p.price || 0;
+                return (
+                  <button
+                    key={p._id || p.id}
+                    type="button"
+                    onClick={() => handleSelect(p)}
+                    className={`w-full text-left px-3.5 py-2.5 text-xs transition-all cursor-pointer flex flex-col gap-1 ${
+                      isSelected
+                        ? "bg-blue-50/80 dark:bg-blue-950/60 text-blue-900 dark:text-blue-100 font-semibold"
+                        : "hover:bg-slate-50 dark:hover:bg-slate-800/80 text-slate-800 dark:text-slate-200"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-bold text-slate-900 dark:text-white text-xs truncate">
+                        {p.name}
+                      </span>
+                      <span className="font-mono font-extrabold text-blue-600 dark:text-blue-400 text-xs flex-shrink-0">
+                        ₹{Number(pCost).toLocaleString("en-IN")}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400 flex-wrap font-mono">
+                      {p.sku && (
+                        <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-[10px] font-bold">
+                          SKU: {p.sku}
+                        </span>
+                      )}
+                      <span
+                        className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                          (p.stock || 0) > 0
+                            ? "bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-400 border border-emerald-200/60 dark:border-emerald-800/60"
+                            : "bg-rose-50 dark:bg-rose-950/50 text-rose-700 dark:text-rose-400 border border-rose-200/60 dark:border-rose-800/60"
+                        }`}
+                      >
+                        Stock: {p.stock ?? 0} {p.unit || "Piece"}
+                      </span>
+                      {p.gst !== undefined && (
+                        <span className="text-slate-400 text-[10px]">
+                          GST: {p.gst}%
+                        </span>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function PurchaseScreen() {
   const [productList, setProductList] = useState([]);
@@ -1389,7 +1548,7 @@ export default function PurchaseScreen() {
                 </div>
               </div>
 
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto min-h-[280px] pb-16">
                 <table className="w-full text-xs text-left">
                   <thead>
                     <tr className="border-b border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 font-semibold">
@@ -1414,25 +1573,13 @@ export default function PurchaseScreen() {
                       <tr key={i} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40 align-top">
                         {/* Product Search & WAC Impact Preview */}
                         <td className="py-2.5 pr-2">
-                          <div className="relative">
-                            <input
-                              type="text"
-                              list={`purchase-prod-datalist-${i}`}
-                              value={item.product}
-                              onChange={(e) =>
-                                updateItem(i, "product", e.target.value)
-                              }
-                              placeholder="Type or select product..."
-                              className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md px-2.5 py-1.5 text-xs text-slate-900 dark:text-white outline-none focus:border-blue-500 font-medium placeholder-slate-400"
-                            />
-                            <datalist id={`purchase-prod-datalist-${i}`}>
-                              {productList.map((p) => (
-                                <option key={p._id || p.id} value={p.name}>
-                                  {p.sku ? `[${p.sku}] ` : ""}(Stock: {p.stock} {p.unit || "pcs"}) - ₹{p.cost || p.price || 0}
-                                </option>
-                              ))}
-                            </datalist>
-                          </div>
+                          <ProductSelectDropdown
+                            value={item.product}
+                            productList={productList}
+                            onChange={(val) => updateItem(i, "product", val)}
+                            onSelectProduct={(p) => updateItem(i, "product", p.name)}
+                            placeholder="Type or select product..."
+                          />
                           {(() => {
                             const trimmedName = String(item.product || "").trim();
                             if (!trimmedName) return null;
@@ -2604,23 +2751,23 @@ export default function PurchaseScreen() {
                           className="hover:bg-slate-50 dark:hover:bg-slate-800/40"
                         >
                           <td className="p-2.5">
-                            <input
-                              type="text"
+                            <ProductSelectDropdown
                               value={item.productName}
-                              onChange={(e) =>
-                                updateReturnItem(i, "productName", e.target.value)
-                              }
-                              list={`return-products-${i}`}
+                              productList={productList}
+                              onChange={(val) => updateReturnItem(i, "productName", val)}
+                              onSelectProduct={(p) => {
+                                updateReturnItem(i, "productName", p.name);
+                                if (p._id || p.id) {
+                                  updateReturnItem(i, "productId", p._id || p.id);
+                                }
+                                if (p.cost !== undefined && Number(p.cost) > 0) {
+                                  updateReturnItem(i, "purchaseRate", String(p.cost));
+                                } else if (p.price) {
+                                  updateReturnItem(i, "purchaseRate", String(p.price));
+                                }
+                              }}
                               placeholder="Type or select product..."
-                              className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded px-2.5 py-1.5 text-xs text-slate-900 dark:text-white outline-none focus:border-amber-500 font-medium"
                             />
-                            <datalist id={`return-products-${i}`}>
-                              {productList.map((p) => (
-                                <option key={p._id || p.id} value={p.name}>
-                                  Stock: {p.stock} | Cost: ₹{p.cost || p.price}
-                                </option>
-                              ))}
-                            </datalist>
                           </td>
 
                           <td className="p-2.5">
