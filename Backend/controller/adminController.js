@@ -133,13 +133,19 @@ export const updateBusinessStatus = async (req, res) => {
     const cleanReason = status === "Suspended" ? String(reason || "").trim() : "";
     owner.status = status;
     owner.suspensionReason = cleanReason;
+    if (status === "Suspended") {
+      owner.tokenVersion = (owner.tokenVersion || 0) + 1;
+    }
     await owner.save();
 
-    // Sync suspensionReason to sub-users/employees under this owner
+    // Sync suspensionReason to sub-users/employees under this owner and revoke their tokens if suspended
     try {
       await User.updateMany(
         { ownerId: owner._id },
-        { $set: { suspensionReason: cleanReason } }
+        {
+          $set: { suspensionReason: cleanReason },
+          ...(status === "Suspended" ? { $inc: { tokenVersion: 1 } } : {}),
+        }
       );
     } catch (syncErr) {
       console.warn("Sub-user suspensionReason sync notice:", syncErr.message);

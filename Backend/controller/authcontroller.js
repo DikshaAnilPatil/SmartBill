@@ -26,6 +26,7 @@ const buildAuthPayload = (user, ownerUser = null) => {
       role: user.role,
       businessType: effectiveBusinessType,
       permissions: user.permissions || {},
+      tokenVersion: user.tokenVersion || 0,
     },
     process.env.JWT_SECRET,
     { expiresIn: "7d" }
@@ -1237,6 +1238,7 @@ export const resetPassword = async (req, res) => {
     user.password = await bcrypt.hash(newPassword, salt);
     user.failedLoginAttempts = 0;
     user.lockoutUntil = null;
+    user.tokenVersion = (user.tokenVersion || 0) + 1;
     await user.save();
 
     // Clean up all used OTPs for this user
@@ -1299,6 +1301,7 @@ export const changePassword = async (req, res) => {
     // Hash new password
     const salt = await bcrypt.genSalt(10);
     user.password = await bcrypt.hash(newPassword, salt);
+    user.tokenVersion = (user.tokenVersion || 0) + 1;
     await user.save();
 
     return res.status(200).json({

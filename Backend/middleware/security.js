@@ -40,12 +40,21 @@ export const authLimiter = rateLimit({
   },
 });
 
-// General API limiter for standard operations
+// General API limiter for standard operations (Tenant-aware for multi-counter retail stores on shared Wi-Fi)
 export const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: process.env.NODE_ENV === "production" ? 1000 : 50000,
   standardHeaders: true,
   legacyHeaders: false,
+  validate: false,
+  keyGenerator: (req) => {
+    // If request contains an Authorization token, key by the token/tenant so multiple POS counters on one store Wi-Fi don't collide
+    const authHeader = req.headers.authorization || "";
+    if (authHeader.startsWith("Bearer ") && authHeader.length > 20) {
+      return `auth_${authHeader.slice(-16)}`;
+    }
+    return req.ip || req.connection?.remoteAddress || "global_ip";
+  },
   skip: (req) => {
     if (process.env.NODE_ENV !== "production") return true;
     const ip = req.ip || req.connection?.remoteAddress || "";

@@ -41,6 +41,8 @@ import {
   MapPin,
   ShoppingBag,
   Sparkles,
+  Wifi,
+  WifiOff,
 } from "lucide-react";
 import { fmt } from "@shared/utils/format";
 import { Badge, Btn, Card, Input, Select, Modal, StepperInput, GST_RATES } from "@shared/components/common/ui";
@@ -52,6 +54,13 @@ import { fetchPartySettings } from "@shared/api/partySettingsAPI";
 import { useTransactionSettings } from "@shared/hooks/useTransactionSettings";
 import CameraBarcodeScanner from "@shared/components/common/CameraBarcodeScanner";
 import { getProductCategoriesForIndustry } from "@shared/utils/businessCategories";
+import {
+  saveOfflineOrder,
+  getPendingOfflineOrders,
+  removeOfflineOrder,
+  cacheProductsForOffline,
+  getCachedProducts,
+} from "@shared/utils/offlineDb";
 import POSInvoiceModal from "./pos/POSInvoiceModal";
 
 export default function POSScreen() {
@@ -286,20 +295,90 @@ export default function POSScreen() {
     }
   }, [selectedCustomer]);
 
-  // Load products from backend API with fallback
+  // Offline connectivity tracking & automatic queue sync
+  const [isOnline, setIsOnline] = useState(typeof window !== "undefined" ? window.navigator.onLine : true);
+  const [pendingOfflineCount, setPendingOfflineCount] = useState(0);
+
+  const refreshPendingOfflineCount = useCallback(async () => {
+    try {
+      const pending = await getPendingOfflineOrders();
+      setPendingOfflineCount(pending.length);
+    } catch {
+      setPendingOfflineCount(0);
+    }
+  }, []);
+
+  // Load products from backend API with fallback to local IndexedDB cache
   const loadProductsList = useCallback(async () => {
     setLoadingProducts(true);
     try {
       const res = await getProducts();
       if (res && Array.isArray(res.products)) {
-        setProductList(res.products.filter((p) => p && (p.status === "Active" || !p.status)));
+        const activeProds = res.products.filter((p) => p && (p.status === "Active" || !p.status));
+        setProductList(activeProds);
+        cacheProductsForOffline(activeProds);
       }
     } catch (err) {
-      console.warn("Failed to load POS products:", err);
+      console.warn("Failed to load POS products online, falling back to local cache:", err);
+      const cached = await getCachedProducts();
+      if (cached && cached.length > 0) {
+        setProductList(cached);
+      }
     } finally {
       setLoadingProducts(false);
     }
   }, []);
+
+  const syncOfflineOrdersToBackend = useCallback(async () => {
+    try {
+      const pending = await getPendingOfflineOrders();
+      if (pending.length === 0) return;
+
+      let syncedCount = 0;
+      for (const offOrder of pending) {
+        try {
+          const { offlineId, isOfflineOrder, offlineCreatedAt, offlineInvoiceNo, ...cleanPayload } = offOrder;
+          await createOrder(cleanPayload);
+          await removeOfflineOrder(offlineId);
+          syncedCount++;
+        } catch (syncErr) {
+          console.error("Failed to sync offline order:", offOrder.offlineInvoiceNo, syncErr.message);
+        }
+      }
+
+      if (syncedCount > 0) {
+        showToast(`✓ Auto-synced ${syncedCount} offline bill${syncedCount > 1 ? "s" : ""} to the server!`, "success");
+        loadPastOrders();
+        loadProductsList();
+      }
+      refreshPendingOfflineCount();
+    } catch (e) {
+      console.warn("Offline sync notice:", e);
+    }
+  }, [loadPastOrders, loadProductsList, refreshPendingOfflineCount]);
+
+  useEffect(() => {
+    refreshPendingOfflineCount();
+
+    const handleOnline = () => {
+      setIsOnline(true);
+      showToast("🌐 Internet connection restored. Syncing offline orders...", "info");
+      syncOfflineOrdersToBackend();
+    };
+
+    const handleOffline = () => {
+      setIsOnline(false);
+      showToast("📴 Offline Mode Active. Invoices will be saved locally in IndexedDB.", "warning");
+    };
+
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
+  }, [syncOfflineOrdersToBackend, refreshPendingOfflineCount]);
 
   // Load initial data on mount
   useEffect(() => {
@@ -1167,7 +1246,43 @@ export default function POSScreen() {
 
     setSaving(true);
     try {
-      const res = await createOrder(payload);
+      let res;
+      if (typeof window !== "undefined" && !window.navigator.onLine) {
+        // Direct offline creation
+        const offlineRecord = await saveOfflineOrder(payload);
+        res = {
+          order: {
+            ...offlineRecord,
+            _id: offlineRecord.offlineId,
+            invoiceNo: offlineRecord.offlineInvoiceNo,
+            createdAt: offlineRecord.offlineCreatedAt,
+          },
+        };
+        showToast(`📴 Saved to Offline Queue! Receipt ${offlineRecord.offlineInvoiceNo} ready.`, "warning");
+        refreshPendingOfflineCount();
+      } else {
+        try {
+          res = await createOrder(payload);
+        } catch (apiErr) {
+          // If network failure during submission, fallback to offline DB
+          if (apiErr?.code === "ERR_NETWORK" || !window.navigator.onLine || apiErr?.message?.includes("Network")) {
+            const offlineRecord = await saveOfflineOrder(payload);
+            res = {
+              order: {
+                ...offlineRecord,
+                _id: offlineRecord.offlineId,
+                invoiceNo: offlineRecord.offlineInvoiceNo,
+                createdAt: offlineRecord.offlineCreatedAt,
+              },
+            };
+            showToast(`📴 Network offline. Saved to Offline Queue (${offlineRecord.offlineInvoiceNo})!`, "warning");
+            refreshPendingOfflineCount();
+          } else {
+            throw apiErr;
+          }
+        }
+      }
+
       setLastOrder(res.order);
       setPaymentModalOpen(false);
 
@@ -1182,7 +1297,9 @@ export default function POSScreen() {
 
       // Show Print Preview
       setShowInvoice(true);
-      showToast(`✓ Invoice ${res.order?.invoiceNo || ""} generated successfully!`);
+      if (!res.order?.isOfflineOrder) {
+        showToast(`✓ Invoice ${res.order?.invoiceNo || ""} generated successfully!`);
+      }
       loadPastOrders();
       loadProductsList();
     } catch (err) {
@@ -1256,30 +1373,52 @@ export default function POSScreen() {
       <div className="flex-1 flex flex-col gap-3.5 min-w-0">
         {/* Top Bar: Mode Switcher & Search */}
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
-          {/* Mode Switcher Buttons */}
-          <div className="flex items-center p-1 bg-slate-100 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 flex-shrink-0">
-            <button
-              type="button"
-              onClick={() => handleTogglePosMode("Retail")}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
-                posMode === "Retail"
-                  ? "bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-2xs font-extrabold ring-1 ring-blue-500/20"
-                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900"
-              }`}
-            >
-              <span>🛒 Retail B2C</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => handleTogglePosMode("Wholesale")}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
-                posMode === "Wholesale"
-                  ? "bg-white dark:bg-slate-900 text-purple-600 dark:text-purple-400 shadow-2xs font-extrabold ring-1 ring-purple-500/20"
-                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900"
-              }`}
-            >
-              <span>🏢 Wholesale B2B</span>
-            </button>
+          {/* Mode Switcher Buttons & Online Status */}
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <div className="flex items-center p-1 bg-slate-100 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700">
+              <button
+                type="button"
+                onClick={() => handleTogglePosMode("Retail")}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                  posMode === "Retail"
+                    ? "bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-2xs font-extrabold ring-1 ring-blue-500/20"
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900"
+                }`}
+              >
+                <span>🛒 Retail B2C</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleTogglePosMode("Wholesale")}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                  posMode === "Wholesale"
+                    ? "bg-white dark:bg-slate-900 text-purple-600 dark:text-purple-400 shadow-2xs font-extrabold ring-1 ring-purple-500/20"
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900"
+                }`}
+              >
+                <span>🏢 Wholesale B2B</span>
+              </button>
+            </div>
+
+            {/* Live Online / Offline Sync Badge */}
+            {isOnline ? (
+              <div
+                className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/60 rounded-xl text-xs font-semibold"
+                title="POS is connected to cloud server"
+              >
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                <Wifi className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                <span>Online</span>
+              </div>
+            ) : (
+              <div
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-amber-50 dark:bg-amber-950/50 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700 rounded-xl text-xs font-bold shadow-xs"
+                title="POS is operating offline using IndexedDB"
+              >
+                <WifiOff className="w-3.5 h-3.5 text-amber-600 animate-bounce" />
+                <span>Offline Queue ({pendingOfflineCount})</span>
+              </div>
+            )}
           </div>
 
           <div className="flex-1 flex items-center gap-2">

@@ -40,7 +40,12 @@ axiosClient.interceptors.response.use(
             ? "http://127.0.0.1:5000/api"
             : "/api";
         originalRequest.baseURL = fallbackBase;
-        return await axios(originalRequest);
+        const token = typeof localStorage !== "undefined" ? localStorage.getItem("smartbill_token") : null;
+        if (token) {
+          originalRequest.headers = originalRequest.headers || {};
+          originalRequest.headers.Authorization = `Bearer ${token}`;
+        }
+        return await axiosClient.request(originalRequest);
       } catch (fallbackError) {
         if (fallbackError.response) {
           const status = fallbackError.response.status;

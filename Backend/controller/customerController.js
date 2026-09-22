@@ -150,16 +150,19 @@ export const getCustomerDetails = async (req, res) => {
       0
     );
 
+    const effectiveDue = customer.balance !== undefined ? Math.max(0, customer.balance) : amountLeftToBePaid;
+
     return res.status(200).json({
       message: "OK",
       customer,
       summary: {
         totalOrderValue,
-        totalPaidValue,
-        amountLeftToBePaid: customer.balance !== undefined ? customer.balance : amountLeftToBePaid,
+        totalPaidValue: customer.totalPaid || totalPaidValue,
+        amountLeftToBePaid: effectiveDue,
         invoicesCount: orders.length,
       },
       orders,
+      paymentHistory: customer.paymentHistory || [],
     });
   } catch (error) {
     console.error("GET CUSTOMER DETAILS ERROR:", error.message);
@@ -270,6 +273,7 @@ export const createCustomer = async (req, res) => {
 export const recordCustomerPayment = async (req, res) => {
   try {
     const ownerId = req.user.ownerId || req.user._id;
+    const actualUserId = req.user.actualUserId || req.user._id;
     const customer = await Customer.findOne({ _id: req.params.id, ownerId });
 
     if (!customer) {
@@ -290,7 +294,7 @@ export const recordCustomerPayment = async (req, res) => {
       return res.status(400).json({ message: "Payment amount must be a positive number." });
     }
 
-    customer.balance = Math.round(((customer.balance || 0) - payAmount) * 100) / 100;
+    customer.balance = Math.max(0, Math.round(((customer.balance || 0) - payAmount) * 100) / 100);
     customer.totalPaid = Math.round(((customer.totalPaid || 0) + payAmount) * 100) / 100;
 
     if (!Array.isArray(customer.paymentHistory)) {
@@ -308,9 +312,54 @@ export const recordCustomerPayment = async (req, res) => {
 
     await customer.save();
 
+    // Settle against oldest unpaid invoices for this customer
+    try {
+      let remaining = payAmount;
+      const unpaidOrders = await Order.find({
+        ownerId,
+        $or: [{ customerId: customer._id }, { customerName: customer.name }],
+        balanceDue: { $gt: 0 },
+      }).sort({ createdAt: 1 });
+
+      for (const ord of unpaidOrders) {
+        if (remaining <= 0) break;
+        const currentDue = Number(ord.balanceDue || 0);
+        const settledPortion = Math.min(remaining, currentDue);
+
+        ord.balanceDue = Math.max(0, Math.round((currentDue - settledPortion) * 100) / 100);
+        ord.amountPaid = Math.round(((ord.amountPaid || 0) + settledPortion) * 100) / 100;
+        ord.status = ord.balanceDue <= 0 ? "Paid" : "Partial";
+        if (!Array.isArray(ord.paymentHistory)) ord.paymentHistory = [];
+        ord.paymentHistory.push({
+          amount: settledPortion,
+          paymentMode,
+          date: new Date(date),
+          referenceNo: String(referenceNo || "").trim(),
+          notes: notes ? `Credit payment: ${notes}` : "Credit settlement payment",
+        });
+        await ord.save();
+        remaining -= settledPortion;
+      }
+    } catch (settleErr) {
+      console.warn("Auto-settle unpaid order warning:", settleErr.message);
+    }
+
+    try {
+      await createNotification({
+        ownerId,
+        userId: actualUserId,
+        title: "Credit Payment Received",
+        message: `₹${payAmount.toLocaleString("en-IN")} received from ${customer.name} (${paymentMode}). Outstanding Balance Due: ₹${customer.balance.toLocaleString("en-IN")}.`,
+        type: "success",
+        category: "customer",
+        link: "customers",
+        metadata: { customerId: customer._id, customerName: customer.name, amount: payAmount },
+      });
+    } catch (nErr) {}
+
     return res.status(200).json({
       success: true,
-      message: `Payment of ₹${payAmount.toLocaleString("en-IN")} received from ${customer.name}. New Balance: ₹${customer.balance.toLocaleString("en-IN")}.`,
+      message: `Payment of ₹${payAmount.toLocaleString("en-IN")} received from ${customer.name}. New Balance Due: ₹${customer.balance.toLocaleString("en-IN")}.`,
       customer,
     });
   } catch (error) {

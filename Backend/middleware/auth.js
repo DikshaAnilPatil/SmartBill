@@ -44,6 +44,18 @@ export const authMiddleware = async (req, res, next) => {
       });
     }
 
+    // Instant multi-device token revocation check
+    if (
+      decoded.tokenVersion !== undefined &&
+      dbUser.tokenVersion !== undefined &&
+      decoded.tokenVersion !== dbUser.tokenVersion
+    ) {
+      return res.status(401).json({
+        code: "TOKEN_REVOKED",
+        message: "Session expired or revoked. Please log in again with your updated credentials.",
+      });
+    }
+
     if (dbUser.role !== "superadmin") {
       const systemSettings = await SystemSettings.findOne({ key: "global_system_settings" }).lean();
       if (systemSettings?.maintenanceMode) {

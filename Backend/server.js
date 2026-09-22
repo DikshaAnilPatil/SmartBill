@@ -53,18 +53,6 @@ try {
   console.warn("Could not set custom DNS servers:", err.message);
 }
 
-// Connect to MongoDB
-await connectDB();
-
-// Seed the default Super Admin account (idempotent).
-await seedAdmin();
-
-// Seed default subscription plans (idempotent).
-await seedSubscriptionPlans();
-
-// Migrate existing user accounts to 14-day trial status (idempotent)
-await migrateExistingUserTrials();
-
 // 1. Apply Helmet Security Headers
 app.use(securityHeaders);
 
@@ -77,12 +65,17 @@ app.use("/api", apiLimiter);
 // 4. Production Cloud Health Check Endpoints (K8s / Render / Railway / AWS ALB)
 const healthHandler = (req, res) => {
   const isDbConnected = mongoose.connection.readyState === 1;
-  const statusCode = isDbConnected ? 200 : 503;
-  res.status(statusCode).json({
+  const isDbConnecting = mongoose.connection.readyState === 2;
+  const dbStatus = isDbConnected ? "connected" : isDbConnecting ? "connecting" : "disconnected";
+
+  res.status(200).json({
+    success: true,
+    message: "Backend server is running",
+    port: Number(port),
     status: isDbConnected ? "healthy" : "degraded",
     uptime: Math.floor(process.uptime()),
     timestamp: new Date().toISOString(),
-    database: isDbConnected ? "connected" : "disconnected",
+    database: dbStatus,
     version: "1.0.0",
     environment: process.env.NODE_ENV || "development",
   });
@@ -91,11 +84,12 @@ const healthHandler = (req, res) => {
 app.get("/health", healthHandler);
 app.get("/api/health", healthHandler);
 
-// Public routes
-app.use("/api/subscription-plans", subscriptionPublicRoutes);
-
+// Body parsers
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
+
+// Public routes
+app.use("/api/subscription-plans", subscriptionPublicRoutes);
 
 // Routes (with dedicated Auth Limiter for login/register protection)
 app.use("/api/auth", authLimiter, authRoutes);
@@ -124,12 +118,13 @@ app.use("/api/admin/subscription-plans", subscriptionPlanRoutes);
 app.use("/api/cash-vouchers", cashVoucherRoutes);
 
 app.get("/", (req, res) => {
-  res.json({ message: "SmartBill API is operating normally.", status: "running" });
+  res.json({ success: true, message: "SmartBill API is operating normally.", status: "running" });
 });
 
 // 404 handler for unknown API routes
 app.use((req, res) => {
   res.status(404).json({
+    success: false,
     message: `Route not found: ${req.method} ${req.originalUrl}`,
   });
 });
@@ -137,9 +132,23 @@ app.use((req, res) => {
 // Global error handler
 app.use(errorHandler);
 
-const server = app.listen(port, () => {
-  console.log(`Server started on port ${port} (http://localhost:${port} and http://127.0.0.1:${port})`);
+// Start HTTP server immediately so port 5000 is listening and responsive
+const server = app.listen(port, "0.0.0.0", () => {
+  console.log(`Backend server successfully listening on port ${port} (http://0.0.0.0:${port}, http://localhost:${port}, http://127.0.0.1:${port})`);
 });
+
+// Initialize MongoDB connection and idempotent seeds asynchronously
+(async () => {
+  try {
+    await connectDB();
+    await seedAdmin();
+    await seedSubscriptionPlans();
+    await migrateExistingUserTrials();
+    console.log("[INIT] Database connected and bootstrap seeds completed successfully.");
+  } catch (err) {
+    console.error("[INIT] Database initialization warning:", err.message);
+  }
+})();
 
 // Graceful shutdown handling for container termination
 const gracefulShutdown = (signal) => {
@@ -147,8 +156,10 @@ const gracefulShutdown = (signal) => {
   server.close(async () => {
     console.log("HTTP server closed.");
     try {
-      await mongoose.connection.close(false);
-      console.log("MongoDB connection closed.");
+      if (mongoose.connection.readyState === 1) {
+        await mongoose.connection.close(false);
+        console.log("MongoDB connection closed.");
+      }
       process.exit(0);
     } catch (err) {
       console.error("Error closing MongoDB connection:", err);

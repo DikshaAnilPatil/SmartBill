@@ -92,6 +92,11 @@ const userSchema = new mongoose.Schema(
       default: null,
     },
 
+    tokenVersion: {
+      type: Number,
+      default: 0,
+    },
+
     // Business Profile & Invoice Customization Fields
     tagline: { type: String, default: "" },
     address: { type: String, default: "" },

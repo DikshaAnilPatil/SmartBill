@@ -15,11 +15,18 @@ import {
   CheckCircle2,
   Clock,
   X,
+  CreditCard,
+  Wallet,
+  ArrowDownLeft,
+  Banknote,
+  History,
+  AlertCircle,
+  Check,
 } from "lucide-react";
 
 import { fmt, fmtK } from "@shared/utils/format";
 import {
-  Btn,  
+  Btn,
   Card,
   ConfirmDialog,
   EmptyState,
@@ -36,6 +43,7 @@ import {
   createCustomer,
   updateCustomer,
   deleteCustomer,
+  recordCustomerPayment,
 } from "@shared/api/customerAPI";
 import { fetchOrder } from "@shared/api/orderAPI";
 import { fetchPartySettings } from "@shared/api/partySettingsAPI";
@@ -68,9 +76,22 @@ export default function CustomersScreen() {
   const [detailsCustomer, setDetailsCustomer] = useState(null);
   const [detailsData, setDetailsData] = useState(null);
   const [detailsLoading, setDetailsLoading] = useState(false);
+  const [activeDetailTab, setActiveDetailTab] = useState("invoices"); // "invoices" | "payments"
 
   // Invoice view modal (clicked from invoice number)
-  const [invoiceModal, setInvoiceModal] = useState(null);   // { order } or { loading: true }
+  const [invoiceModal, setInvoiceModal] = useState(null); // { order } or { loading: true }
+
+  // Receive Payment / Settle Credit Modal state
+  const [paymentCustomer, setPaymentCustomer] = useState(null);
+  const [paymentForm, setPaymentForm] = useState({
+    amount: "",
+    paymentMode: "Cash",
+    referenceNo: "",
+    notes: "",
+    date: new Date().toISOString().split("T")[0],
+  });
+  const [paymentSubmitting, setPaymentSubmitting] = useState(false);
+  const [paymentError, setPaymentError] = useState("");
 
   const initialFormState = {
     name: "",
@@ -144,29 +165,29 @@ export default function CustomersScreen() {
   // LOAD CUSTOMERS
   // =========================
 
+  const loadCustomers = async () => {
+    try {
+      setLoading(true);
+      const response = await fetchCustomers();
+
+      const customers = Array.isArray(response)
+        ? response
+        : response?.customers || [];
+
+      setCustomerList(customers);
+    } catch (error) {
+      console.error("LOAD CUSTOMERS ERROR:", error);
+      showToast(
+        error?.message || "Unable to load customers.",
+        "error"
+      );
+      setCustomerList([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    const loadCustomers = async () => {
-      try {
-        setLoading(true);
-        const response = await fetchCustomers();
-
-        const customers = Array.isArray(response)
-          ? response
-          : response?.customers || [];
-
-        setCustomerList(customers);
-      } catch (error) {
-        console.error("LOAD CUSTOMERS ERROR:", error);
-        showToast(
-          error?.message || "Unable to load customers.",
-          "error"
-        );
-        setCustomerList([]);
-      } finally {
-        setLoading(false);
-      }
-    };
-
     loadCustomers();
   }, []);
 
@@ -193,17 +214,21 @@ export default function CustomersScreen() {
   // SUMMARY CALCULATIONS
   // =========================
 
-  const totalReceivable = customerList.reduce(
+  const totalBalanceDue = customerList.reduce(
     (sum, customer) =>
       sum + Math.max(0, Number(customer?.balance || 0)),
     0
   );
 
-  const totalPayable = customerList.reduce(
+  const totalPaidByCustomers = customerList.reduce(
     (sum, customer) =>
-      sum + Math.max(0, -Number(customer?.balance || 0)),
+      sum + Math.max(0, Number(customer?.totalPaid || 0)),
     0
   );
+
+  const customersWithDue = customerList.filter(
+    (c) => Number(c?.balance || 0) > 0
+  ).length;
 
   // =========================
   // CREATE CUSTOMER
@@ -226,7 +251,7 @@ export default function CustomersScreen() {
         category: partySettings.enableGrouping ? form.category : "Retailer",
         creditLimit: partySettings.trackBalance ? Number(form.creditLimit || 0) : 0,
         gst: isWholesale ? form.gst : "",
-        openingBalance: isWholesale ? Number(form.openingBalance || 0) : 0,
+        openingBalance: Number(form.openingBalance || 0),
       });
 
       const createdCustomer = response?.customer || response;
@@ -347,6 +372,7 @@ export default function CustomersScreen() {
     setDetailsCustomer(customer);
     setDetailsData(null);
     setDetailsLoading(true);
+    setActiveDetailTab("invoices");
     try {
       const customerId = customer._id || customer.id;
       const data = await fetchCustomerDetails(customerId);
@@ -384,6 +410,93 @@ export default function CustomersScreen() {
   };
 
   // =========================
+  // RECORD PAYMENT (SETTLE CREDIT)
+  // =========================
+
+  const handleOpenPayment = (customer) => {
+    const dueAmount = Math.max(0, Number(customer.balance || 0));
+    setPaymentCustomer(customer);
+    setPaymentForm({
+      amount: dueAmount > 0 ? String(dueAmount) : "",
+      paymentMode: "Cash",
+      referenceNo: "",
+      notes: "Credit settlement payment",
+      date: new Date().toISOString().split("T")[0],
+    });
+    setPaymentError("");
+  };
+
+  const handleRecordPaymentSubmit = async () => {
+    if (!paymentCustomer) return;
+    const amountNum = Number(paymentForm.amount);
+    if (!Number.isFinite(amountNum) || amountNum <= 0) {
+      setPaymentError("Please enter a valid positive payment amount.");
+      return;
+    }
+
+    setPaymentSubmitting(true);
+    setPaymentError("");
+    try {
+      const customerId = paymentCustomer._id || paymentCustomer.id;
+      const res = await recordCustomerPayment(customerId, {
+        amount: amountNum,
+        paymentMode: paymentForm.paymentMode,
+        referenceNo: paymentForm.referenceNo,
+        notes: paymentForm.notes,
+        date: paymentForm.date,
+      });
+
+      const updatedCustomer = res.customer || res;
+
+      // Update state in customerList
+      setCustomerList((prev) =>
+        prev.map((c) =>
+          String(c._id || c.id) === String(customerId)
+            ? {
+                ...c,
+                balance: updatedCustomer.balance,
+                totalPaid: updatedCustomer.totalPaid,
+                paymentHistory: updatedCustomer.paymentHistory,
+              }
+            : c
+        )
+      );
+
+      // Update details data if open
+      if (detailsCustomer && String(detailsCustomer._id || detailsCustomer.id) === String(customerId)) {
+        setDetailsCustomer((prev) => ({
+          ...prev,
+          balance: updatedCustomer.balance,
+          totalPaid: updatedCustomer.totalPaid,
+        }));
+        if (detailsData) {
+          setDetailsData((prev) => ({
+            ...prev,
+            customer: updatedCustomer,
+            summary: {
+              ...prev.summary,
+              totalPaidValue: updatedCustomer.totalPaid,
+              amountLeftToBePaid: Math.max(0, updatedCustomer.balance),
+            },
+            paymentHistory: updatedCustomer.paymentHistory || prev.paymentHistory || [],
+          }));
+        }
+      }
+
+      showToast(
+        `Payment of ₹${amountNum.toLocaleString("en-IN")} recorded successfully for ${paymentCustomer.name}! New Balance Due: ₹${Math.max(0, updatedCustomer.balance).toLocaleString("en-IN")}.`,
+        "success"
+      );
+      setPaymentCustomer(null);
+    } catch (err) {
+      console.error("RECORD PAYMENT ERROR:", err);
+      setPaymentError(err?.response?.data?.message || err?.message || "Failed to record payment.");
+    } finally {
+      setPaymentSubmitting(false);
+    }
+  };
+
+  // =========================
   // EXPORT CUSTOMERS
   // =========================
   const handleExportCustomers = () => {
@@ -392,7 +505,7 @@ export default function CustomersScreen() {
       return;
     }
     const columns = [
-      { key: "name", label: "Customer Name" },
+      { key: "name", label: isWholesale ? "Business Name" : "Customer Name" },
       { key: "phone", label: "Phone Number" },
       { key: "email", label: "Email" },
       { key: "city", label: "City" },
@@ -401,7 +514,8 @@ export default function CustomersScreen() {
       { key: "category", label: "Category" },
       { key: "gst", label: "GST Number" },
       { key: "creditLimit", label: "Credit Limit (₹)" },
-      { key: "balance", label: "Balance (₹)" },
+      { key: "balance", label: "Balance Due (Credit Left) (₹)" },
+      { key: "totalPaid", label: "Total Paid (₹)" },
       { key: "invoices", label: "Total Invoices" },
     ];
     exportToCsv("SmartBill_Customers.csv", columns, customerList);
@@ -416,6 +530,119 @@ export default function CustomersScreen() {
     <div className="space-y-5">
 
       {/* =========================
+          RECEIVE PAYMENT / PAY DUE MODAL
+      ========================= */}
+      {paymentCustomer && (
+        <Modal
+          title={`Receive Credit Payment - ${paymentCustomer.name}`}
+          onClose={() => setPaymentCustomer(null)}
+        >
+          <div className="space-y-4">
+            {/* Customer Due Banner */}
+            <div className="bg-rose-50/70 border border-rose-200/80 rounded-xl p-3.5 flex items-center justify-between">
+              <div>
+                <p className="text-xs text-rose-700 font-medium">Current Balance Due (Credit Left)</p>
+                <p className="text-lg font-bold font-mono text-rose-600 mt-0.5">
+                  ₹{fmt(Math.max(0, Number(paymentCustomer.balance || 0)))}
+                </p>
+              </div>
+              {Number(paymentCustomer.balance || 0) > 0 && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setPaymentForm((f) => ({
+                      ...f,
+                      amount: String(Math.max(0, Number(paymentCustomer.balance || 0))),
+                    }))
+                  }
+                  className="text-xs font-semibold text-rose-700 hover:text-rose-900 bg-white border border-rose-300 px-2.5 py-1 rounded-lg transition shadow-xs cursor-pointer"
+                >
+                  Pay Full Due (₹{fmt(Math.max(0, Number(paymentCustomer.balance || 0)))})
+                </button>
+              )}
+            </div>
+
+            {paymentError && (
+              <div className="flex items-center gap-2 bg-red-50 border border-red-200 text-red-600 text-xs rounded-lg px-3 py-2">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                {paymentError}
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-3">
+              <Input
+                label="Amount Received (₹)"
+                type="number"
+                value={paymentForm.amount}
+                onChange={(val) => {
+                  setPaymentForm((f) => ({ ...f, amount: val }));
+                  setPaymentError("");
+                }}
+                placeholder="Enter amount"
+                icon={<IndianRupee className="w-4 h-4" />}
+                required
+              />
+
+              <Select
+                label="Payment Mode"
+                value={paymentForm.paymentMode}
+                onChange={(val) => setPaymentForm((f) => ({ ...f, paymentMode: val }))}
+                options={["Cash", "UPI", "Bank Transfer", "Cheque", "Card"]}
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <Input
+                label="Payment Date"
+                type="date"
+                value={paymentForm.date}
+                onChange={(val) => setPaymentForm((f) => ({ ...f, date: val }))}
+              />
+
+              <Input
+                label="Reference / Trx ID"
+                value={paymentForm.referenceNo}
+                onChange={(val) => setPaymentForm((f) => ({ ...f, referenceNo: val }))}
+                placeholder="e.g. UPI-987654"
+              />
+            </div>
+
+            <Input
+              label="Notes / Remarks"
+              value={paymentForm.notes}
+              onChange={(val) => setPaymentForm((f) => ({ ...f, notes: val }))}
+              placeholder="e.g. Cleared pending invoice credit"
+            />
+
+            <div className="flex gap-3 pt-2">
+              <Btn
+                variant="outline"
+                onClick={() => setPaymentCustomer(null)}
+                className="flex-1 justify-center"
+              >
+                Cancel
+              </Btn>
+              <Btn
+                variant="primary"
+                onClick={handleRecordPaymentSubmit}
+                disabled={paymentSubmitting || !paymentForm.amount}
+                className="flex-1 justify-center bg-emerald-600 hover:bg-emerald-700 text-white"
+                icon={
+                  paymentSubmitting ? (
+                    <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  ) : (
+                    <CheckCircle2 className="w-4 h-4" />
+                  )
+                }
+              >
+                {paymentSubmitting ? "Recording..." : "Record Payment & Update Balance"}
+              </Btn>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* =========================
           CUSTOMER CLICKED – DETAILED MODAL
       ========================= */}
       {detailsCustomer && (
@@ -428,9 +655,10 @@ export default function CustomersScreen() {
             <div className="flex items-center justify-between px-6 py-5 border-b border-slate-100 bg-gradient-to-r from-blue-600 to-blue-700">
               <div>
                 <h2 className="text-lg font-bold text-white">{detailsCustomer.name}</h2>
-                {detailsCustomer.phone && (
-                  <p className="text-blue-200 text-sm mt-0.5">{detailsCustomer.phone}</p>
-                )}
+                <div className="flex items-center gap-3 text-blue-200 text-xs mt-0.5">
+                  {detailsCustomer.phone && <span>{detailsCustomer.phone}</span>}
+                  {detailsCustomer.email && <span>• {detailsCustomer.email}</span>}
+                </div>
               </div>
               <button
                 onClick={closeDetails}
@@ -445,7 +673,7 @@ export default function CustomersScreen() {
               {detailsLoading ? (
                 <div className="flex flex-col items-center justify-center py-24">
                   <div className="w-10 h-10 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mb-4" />
-                  <p className="text-sm text-slate-500">Loading customer details...</p>
+                  <p className="text-sm text-slate-500">Loading customer ledger...</p>
                 </div>
               ) : detailsData ? (
                 <>
@@ -458,7 +686,7 @@ export default function CustomersScreen() {
                         </div>
                         <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Total Value</p>
                       </div>
-                      <p className="text-xl font-bold text-slate-900">
+                      <p className="text-xl font-bold text-slate-900 font-mono">
                         {fmt(detailsData.summary?.totalOrderValue ?? 0)}
                       </p>
                     </div>
@@ -470,7 +698,7 @@ export default function CustomersScreen() {
                         </div>
                         <p className="text-xs font-semibold text-emerald-600 uppercase tracking-wide">Total Paid</p>
                       </div>
-                      <p className="text-xl font-bold text-emerald-700">
+                      <p className="text-xl font-bold text-emerald-700 font-mono">
                         {fmt(detailsData.summary?.totalPaidValue ?? 0)}
                       </p>
                     </div>
@@ -480,84 +708,194 @@ export default function CustomersScreen() {
                         <div className="w-7 h-7 bg-rose-200 rounded-lg flex items-center justify-center">
                           <Clock className="w-3.5 h-3.5 text-rose-700" />
                         </div>
-                        <p className="text-xs font-semibold text-rose-600 uppercase tracking-wide">Left to Pay</p>
+                        <p className="text-xs font-semibold text-rose-600 uppercase tracking-wide">Balance Due</p>
                       </div>
-                      <p className="text-xl font-bold text-rose-700">
-                        {fmt(detailsData.summary?.amountLeftToBePaid ?? 0)}
+                      <p className="text-xl font-bold text-rose-700 font-mono">
+                        {fmt(detailsData.summary?.amountLeftToBePaid ?? detailsCustomer.balance ?? 0)}
                       </p>
                     </div>
                   </div>
 
-                  {/* Invoices / Orders Table */}
-                  <div>
-                    <div className="flex items-center gap-2 mb-3">
-                      <FileText className="w-4 h-4 text-slate-500" />
-                      <h3 className="text-sm font-semibold text-slate-700">
-                        Invoices
-                        <span className="ml-1.5 text-xs font-normal text-slate-400">
-                          ({detailsData.summary?.invoicesCount ?? 0})
-                        </span>
-                      </h3>
+                  {/* Settle Due Action Banner */}
+                  <div className="flex items-center justify-between bg-slate-50 border border-slate-200 rounded-xl p-4">
+                    <div>
+                      <span className="text-xs text-slate-500 block font-medium">Customer Credit Status:</span>
+                      <span className="text-sm font-bold text-slate-900 flex items-center gap-1.5 mt-0.5">
+                        {Number(detailsCustomer.balance || 0) > 0 ? (
+                          <span className="text-rose-600 font-mono">
+                            ₹{fmt(detailsCustomer.balance)} Outstanding Credit Left
+                          </span>
+                        ) : (
+                          <span className="text-emerald-700 font-semibold flex items-center gap-1">
+                            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                            All Accounts Settled (₹0 Due)
+                          </span>
+                        )}
+                      </span>
                     </div>
 
-                    {(!detailsData.orders || detailsData.orders.length === 0) ? (
-                      <div className="rounded-xl border border-slate-200 py-12 flex flex-col items-center text-center">
-                        <div className="w-12 h-12 bg-slate-100 rounded-2xl flex items-center justify-center mb-3 text-slate-400">
-                          <FileText className="w-6 h-6" />
-                        </div>
-                        <p className="text-sm font-medium text-slate-600">No invoices yet</p>
-                        <p className="text-xs text-slate-400 mt-1">Invoices for this customer will appear here</p>
-                      </div>
-                    ) : (
-                      <div className="rounded-xl border border-slate-200 overflow-hidden">
-                        <table className="w-full text-sm">
-                          <thead>
-                            <tr className="bg-slate-50 border-b border-slate-200">
-                              {["Invoice #", "Date", "Total", "Paid", "Balance", "Status"].map((h) => (
-                                <th key={h} className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">
-                                  {h}
-                                </th>
-                              ))}
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-100">
-                            {detailsData.orders.map((order) => {
-                              const orderId = order._id || order.id;
-                              const balanceDue = Number(order.balanceDue ?? 0);
-                              const amtPaid = Number(order.amountPaid ?? 0);
-                              const total = Number(order.totalOrderValue ?? 0);
-                              const invoiceNo = order.invoiceNo || order.invoiceNumber || order.orderNumber || `#${String(orderId).slice(-6).toUpperCase()}`;
-                              const createdAt = order.createdAt ? new Date(order.createdAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—";
-                              const status = order.paymentStatus || (balanceDue <= 0 ? "Paid" : balanceDue < total ? "Partial" : "Pending");
+                    <Btn
+                      variant="primary"
+                      size="sm"
+                      onClick={() => handleOpenPayment(detailsCustomer)}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                      icon={<ArrowDownLeft className="w-3.5 h-3.5" />}
+                    >
+                      Receive Payment / Settle Due
+                    </Btn>
+                  </div>
 
-                              return (
-                                <tr key={orderId} className="hover:bg-blue-50/50 transition-colors">
-                                  <td className="px-4 py-3">
-                                    <button
-                                      onClick={() => handleOpenInvoice(orderId)}
-                                      className="font-mono text-xs font-bold text-blue-600 hover:text-blue-800 hover:underline underline-offset-2 transition-colors"
-                                    >
-                                      {invoiceNo}
-                                    </button>
-                                  </td>
-                                  <td className="px-4 py-3 text-slate-500 text-xs">{createdAt}</td>
-                                  <td className="px-4 py-3 font-medium text-slate-900">{fmt(total)}</td>
-                                  <td className="px-4 py-3 text-emerald-700 font-medium">{fmt(amtPaid)}</td>
-                                  <td className="px-4 py-3 text-rose-600 font-semibold">{fmt(balanceDue)}</td>
-                                  <td className="px-4 py-3">
-                                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                                      status === "Paid" ? "bg-emerald-100 text-emerald-700" :
-                                      status === "Partial" ? "bg-amber-100 text-amber-700" :
-                                      "bg-rose-100 text-rose-700"
-                                    }`}>
-                                      {status}
-                                    </span>
-                                  </td>
+                  {/* Tabs: Invoices vs Payment History */}
+                  <div>
+                    <div className="flex items-center gap-2 border-b border-slate-200 pb-2 mb-4">
+                      <button
+                        type="button"
+                        onClick={() => setActiveDetailTab("invoices")}
+                        className={`text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 ${
+                          activeDetailTab === "invoices"
+                            ? "bg-blue-50 text-blue-600 font-bold"
+                            : "text-slate-500 hover:text-slate-800"
+                        }`}
+                      >
+                        <FileText className="w-3.5 h-3.5" />
+                        Invoices ({detailsData.summary?.invoicesCount ?? 0})
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setActiveDetailTab("payments")}
+                        className={`text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 ${
+                          activeDetailTab === "payments"
+                            ? "bg-blue-50 text-blue-600 font-bold"
+                            : "text-slate-500 hover:text-slate-800"
+                        }`}
+                      >
+                        <History className="w-3.5 h-3.5" />
+                        Payment Receipts ({(detailsData.paymentHistory || []).length})
+                      </button>
+                    </div>
+
+                    {/* INVOICES TAB */}
+                    {activeDetailTab === "invoices" && (
+                      <div>
+                        {(!detailsData.orders || detailsData.orders.length === 0) ? (
+                          <div className="rounded-xl border border-slate-200 py-12 flex flex-col items-center text-center">
+                            <div className="w-12 h-12 bg-slate-100 rounded-2xl flex items-center justify-center mb-3 text-slate-400">
+                              <FileText className="w-6 h-6" />
+                            </div>
+                            <p className="text-sm font-medium text-slate-600">No invoices yet</p>
+                            <p className="text-xs text-slate-400 mt-1">Invoices for this customer will appear here</p>
+                          </div>
+                        ) : (
+                          <div className="rounded-xl border border-slate-200 overflow-hidden">
+                            <table className="w-full text-sm">
+                              <thead>
+                                <tr className="bg-slate-50 border-b border-slate-200">
+                                  {["Invoice #", "Date", "Total", "Paid", "Balance Due", "Status"].map((h) => (
+                                    <th key={h} className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                                      {h}
+                                    </th>
+                                  ))}
                                 </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
+                              </thead>
+                              <tbody className="divide-y divide-slate-100">
+                                {detailsData.orders.map((order) => {
+                                  const orderId = order._id || order.id;
+                                  const balanceDue = Number(order.balanceDue ?? 0);
+                                  const amtPaid = Number(order.amountPaid ?? 0);
+                                  const total = Number(order.totalOrderValue ?? 0);
+                                  const invoiceNo = order.invoiceNo || order.invoiceNumber || order.orderNumber || `#${String(orderId).slice(-6).toUpperCase()}`;
+                                  const createdAt = order.createdAt ? new Date(order.createdAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—";
+                                  const status = order.status || (balanceDue <= 0 ? "Paid" : balanceDue < total ? "Partial" : "Due");
+
+                                  return (
+                                    <tr key={orderId} className="hover:bg-blue-50/50 transition-colors">
+                                      <td className="px-4 py-3">
+                                        <button
+                                          onClick={() => handleOpenInvoice(orderId)}
+                                          className="font-mono text-xs font-bold text-blue-600 hover:text-blue-800 hover:underline underline-offset-2 transition-colors cursor-pointer"
+                                        >
+                                          {invoiceNo}
+                                        </button>
+                                      </td>
+                                      <td className="px-4 py-3 text-slate-500 text-xs">{createdAt}</td>
+                                      <td className="px-4 py-3 font-medium text-slate-900 font-mono">{fmt(total)}</td>
+                                      <td className="px-4 py-3 text-emerald-700 font-medium font-mono">{fmt(amtPaid)}</td>
+                                      <td className="px-4 py-3 text-rose-600 font-semibold font-mono">
+                                        {balanceDue > 0 ? `₹${fmt(balanceDue)}` : "₹0"}
+                                      </td>
+                                      <td className="px-4 py-3">
+                                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                                          status === "Paid" ? "bg-emerald-100 text-emerald-700" :
+                                          status === "Partial" ? "bg-amber-100 text-amber-700" :
+                                          "bg-rose-100 text-rose-700"
+                                        }`}>
+                                          {status}
+                                        </span>
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* PAYMENT HISTORY TAB */}
+                    {activeDetailTab === "payments" && (
+                      <div>
+                        {(!detailsData.paymentHistory || detailsData.paymentHistory.length === 0) ? (
+                          <div className="rounded-xl border border-slate-200 py-12 flex flex-col items-center text-center">
+                            <div className="w-12 h-12 bg-slate-100 rounded-2xl flex items-center justify-center mb-3 text-slate-400">
+                              <History className="w-6 h-6" />
+                            </div>
+                            <p className="text-sm font-medium text-slate-600">No payment receipts recorded</p>
+                            <p className="text-xs text-slate-400 mt-1">Payments recorded for credit settlement will appear here</p>
+                          </div>
+                        ) : (
+                          <div className="rounded-xl border border-slate-200 overflow-hidden">
+                            <table className="w-full text-sm">
+                              <thead>
+                                <tr className="bg-slate-50 border-b border-slate-200">
+                                  {["Date", "Amount", "Mode", "Reference", "Notes"].map((h) => (
+                                    <th key={h} className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                                      {h}
+                                    </th>
+                                  ))}
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-100">
+                                {detailsData.paymentHistory.map((pmt, idx) => {
+                                  const pDate = pmt.date
+                                    ? new Date(pmt.date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
+                                    : "—";
+
+                                  return (
+                                    <tr key={idx} className="hover:bg-slate-50 transition-colors">
+                                      <td className="px-4 py-3 text-slate-500 text-xs">{pDate}</td>
+                                      <td className="px-4 py-3 font-mono font-bold text-emerald-700">
+                                        +₹{fmt(pmt.amount)}
+                                      </td>
+                                      <td className="px-4 py-3">
+                                        <span className="inline-flex items-center gap-1 bg-slate-100 text-slate-700 text-xs px-2 py-0.5 rounded font-medium">
+                                          {pmt.paymentMode || "Cash"}
+                                        </span>
+                                      </td>
+                                      <td className="px-4 py-3 text-slate-600 text-xs font-mono">
+                                        {pmt.referenceNo || "—"}
+                                      </td>
+                                      <td className="px-4 py-3 text-slate-500 text-xs">
+                                        {pmt.notes || "—"}
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -572,7 +910,7 @@ export default function CustomersScreen() {
                 <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-slate-50">
                   <button
                     onClick={() => setInvoiceModal(null)}
-                    className="flex items-center gap-2 text-sm text-slate-500 hover:text-slate-900 transition-colors"
+                    className="flex items-center gap-2 text-sm text-slate-500 hover:text-slate-900 transition-colors cursor-pointer"
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
@@ -582,7 +920,7 @@ export default function CustomersScreen() {
                   {!invoiceModal.loading && (
                     <button
                       onClick={() => window.print()}
-                      className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-xs font-semibold rounded-lg hover:bg-blue-700 transition-colors"
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-xs font-semibold rounded-lg hover:bg-blue-700 transition-colors cursor-pointer"
                     >
                       <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
@@ -716,7 +1054,7 @@ export default function CustomersScreen() {
           CUSTOMER DETAILS MODAL (eye icon)
       ========================= */}
       {viewCustomer && (
-        <Modal title="Customer Details" onClose={() => setViewCustomer(null)}>
+        <Modal title="Customer Profile & Balance" onClose={() => setViewCustomer(null)}>
           <div className="space-y-5">
             <div>
               <p className="text-lg font-semibold text-slate-900">
@@ -765,19 +1103,22 @@ export default function CustomersScreen() {
               )}
 
               <div>
-                <p className="text-xs text-slate-500 mb-1">Balance</p>
-                <p className="text-sm font-semibold text-slate-900">
-                  {fmt(Math.abs(Number(viewCustomer.balance || 0)))}
-                  {Number(viewCustomer.balance) > 0
-                    ? " (To Receive)"
-                    : Number(viewCustomer.balance) < 0
-                    ? " (To Pay)"
-                    : " (Balanced)"}
+                <p className="text-xs text-slate-500 mb-1">Balance Due (Credit Left)</p>
+                <p className="text-sm font-semibold font-mono">
+                  {Number(viewCustomer.balance || 0) > 0 ? (
+                    <span className="text-rose-600 font-bold">
+                      ₹{fmt(viewCustomer.balance)} (Pending Credit)
+                    </span>
+                  ) : (
+                    <span className="text-emerald-600 font-bold">
+                      ₹0 (All Settled)
+                    </span>
+                  )}
                 </p>
               </div>
 
               <div>
-                <p className="text-xs text-slate-500 mb-1">Invoices</p>
+                <p className="text-xs text-slate-500 mb-1">Total Invoices</p>
                 <p className="text-sm text-slate-900">
                   {viewCustomer.invoices ?? 0}
                 </p>
@@ -793,7 +1134,22 @@ export default function CustomersScreen() {
               )}
             </div>
 
-            <div className="flex justify-end pt-2">
+            <div className="flex justify-between items-center pt-2">
+              {Number(viewCustomer.balance || 0) > 0 && (
+                <Btn
+                  variant="primary"
+                  size="sm"
+                  onClick={() => {
+                    const c = viewCustomer;
+                    setViewCustomer(null);
+                    handleOpenPayment(c);
+                  }}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                  icon={<ArrowDownLeft className="w-3.5 h-3.5" />}
+                >
+                  Pay Balance Due
+                </Btn>
+              )}
               <Btn variant="outline" onClick={() => setViewCustomer(null)}>
                 Close
               </Btn>
@@ -886,6 +1242,7 @@ export default function CustomersScreen() {
               onChange={(value) =>
                 setForm((f) => ({ ...f, name: value }))
               }
+              required
             />
 
             <div className="grid grid-cols-2 gap-3">
@@ -907,25 +1264,36 @@ export default function CustomersScreen() {
               />
             </div>
 
-            <Input
-              label="City"
-              icon={<MapPin className="w-4 h-4" />}
-              value={form.city}
-              onChange={(value) =>
-                setForm((f) => ({ ...f, city: value }))
-              }
-            />
+            <div className="grid grid-cols-2 gap-3">
+              <Input
+                label="City"
+                icon={<MapPin className="w-4 h-4" />}
+                value={form.city}
+                onChange={(value) =>
+                  setForm((f) => ({ ...f, city: value }))
+                }
+              />
+
+              <Input
+                label="Opening Balance Due (Credit Left)"
+                type="number"
+                icon={<IndianRupee className="w-4 h-4" />}
+                value={form.openingBalance}
+                onChange={(value) =>
+                  setForm((f) => ({ ...f, openingBalance: value }))
+                }
+                placeholder="Initial due amount (0 if none)"
+              />
+            </div>
 
             {isWholesale && (
-              <>
-                <Input
-                  label="GST Number"
-                  value={form.gst}
-                  onChange={(value) =>
-                    setForm((f) => ({ ...f, gst: value }))
-                  }
-                />
-              </>
+              <Input
+                label="GST Number"
+                value={form.gst}
+                onChange={(value) =>
+                  setForm((f) => ({ ...f, gst: value }))
+                }
+              />
             )}
 
             <div className="flex gap-3 pt-2">
@@ -967,6 +1335,7 @@ export default function CustomersScreen() {
           <Input
             value={search}
             onChange={setSearch}
+            placeholder="Search by customer name, phone, email, city..."
             icon={<Search className="w-4 h-4" />}
           />
         </div>
@@ -995,17 +1364,38 @@ export default function CustomersScreen() {
       {/* =========================
           SUMMARY CARDS
       ========================= */}
-      <div className="grid grid-cols-3 gap-4">
-        {[
-          [customerList.length, "Total Customers"],
-          [fmtK(totalReceivable), "Total Receivable"],
-          [fmtK(totalPayable), "Total Payable"],
-        ].map(([value, label]) => (
-          <Card key={label} className="p-4 text-center">
-            <p className="text-xl font-bold text-slate-900">{value}</p>
-            <p className="text-xs text-slate-500 mt-0.5">{label}</p>
-          </Card>
-        ))}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <Card className="p-4 flex items-center gap-3.5">
+          <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
+            <Users className="w-5 h-5" />
+          </div>
+          <div>
+            <p className="text-xl font-bold text-slate-900">{customerList.length}</p>
+            <p className="text-xs text-slate-500 font-medium">Total Customers</p>
+          </div>
+        </Card>
+
+        <Card className="p-4 flex items-center gap-3.5 bg-gradient-to-br from-rose-50/40 via-white to-white border-rose-200/80">
+          <div className="w-10 h-10 rounded-xl bg-rose-100/80 text-rose-600 flex items-center justify-center shrink-0">
+            <Wallet className="w-5 h-5" />
+          </div>
+          <div>
+            <p className="text-xl font-bold text-rose-600 font-mono">₹{fmt(totalBalanceDue)}</p>
+            <p className="text-xs text-slate-500 font-medium">
+              Total Balance Due ({customersWithDue} with credit)
+            </p>
+          </div>
+        </Card>
+
+        <Card className="p-4 flex items-center gap-3.5 bg-gradient-to-br from-emerald-50/40 via-white to-white border-emerald-200/80">
+          <div className="w-10 h-10 rounded-xl bg-emerald-100/80 text-emerald-600 flex items-center justify-center shrink-0">
+            <CheckCircle2 className="w-5 h-5" />
+          </div>
+          <div>
+            <p className="text-xl font-bold text-emerald-700 font-mono">₹{fmt(totalPaidByCustomers)}</p>
+            <p className="text-xs text-slate-500 font-medium">Total Paid / Cleared</p>
+          </div>
+        </Card>
       </div>
 
       {/* =========================
@@ -1015,18 +1405,18 @@ export default function CustomersScreen() {
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-slate-100">
+              <tr className="border-b border-slate-100 bg-slate-50/60">
                 {[
-                  isWholesale ? "Business" : "Customer Name",
-                  "Email",
+                  isWholesale ? "Business Name" : "Customer Name",
                   "Phone",
+                  "Email",
                   "City",
-                  "Balance",
+                  "Balance Due (Credit Left)",
                   "Actions",
                 ].map((heading) => (
                   <th
                     key={heading}
-                    className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide"
+                    className="text-left px-5 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wide"
                   >
                     {heading}
                   </th>
@@ -1049,14 +1439,14 @@ export default function CustomersScreen() {
                     <EmptyState
                       icon={<Users className="w-6 h-6" />}
                       title="No customers found"
-                      sub="Try adjusting your search query"
+                      sub="Try adjusting your search query or add a new customer"
                     />
                   </td>
                 </tr>
               ) : (
                 filtered.map((customer) => {
                   const customerId = customer._id || customer.id;
-                  const balance = Number(customer.balance || 0);
+                  const balanceDue = Number(customer.balance || 0);
 
                   return (
                     <tr
@@ -1078,14 +1468,14 @@ export default function CustomersScreen() {
                         </button>
                       </td>
 
-                      {/* EMAIL */}
-                      <td className="px-5 py-4 text-slate-600">
-                        {customer.email || "—"}
-                      </td>
-
                       {/* PHONE */}
                       <td className="px-5 py-4 text-slate-600 font-mono text-xs">
                         {customer.phone || "—"}
+                      </td>
+
+                      {/* EMAIL */}
+                      <td className="px-5 py-4 text-slate-600">
+                        {customer.email || "—"}
                       </td>
 
                       {/* CITY */}
@@ -1093,38 +1483,59 @@ export default function CustomersScreen() {
                         {customer.city || "—"}
                       </td>
 
-                      {/* BALANCE */}
+                      {/* BALANCE DUE */}
                       <td className="px-5 py-4">
-                        <div className="flex flex-col">
-                          <span
-                            className={`font-semibold font-mono text-sm ${
-                              balance > 0
-                                ? "text-emerald-600"
-                                : balance < 0
-                                ? "text-red-500"
-                                : "text-slate-500"
-                            }`}
-                          >
-                            {balance > 0 ? "+" : ""}
-                            {fmt(Math.abs(balance))}
-                          </span>
-                          <p className="text-[10px] text-slate-400">
-                            {balance > 0
-                              ? "To Receive"
-                              : balance < 0
-                              ? "To Pay"
-                              : "Balanced"}
-                          </p>
+                        <div className="flex items-center gap-2.5">
+                          <div className="flex flex-col">
+                            {balanceDue > 0 ? (
+                              <span className="font-bold font-mono text-sm text-rose-600 bg-rose-50 border border-rose-200/80 px-2 py-0.5 rounded-md inline-block">
+                                ₹{fmt(balanceDue)}
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200/80 px-2 py-0.5 rounded-md">
+                                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                                ₹0 (All Cleared)
+                              </span>
+                            )}
+                            <p className="text-[10px] text-slate-400 mt-0.5">
+                              {balanceDue > 0 ? "Credit Outstanding" : "No Pending Dues"}
+                            </p>
+                          </div>
+
+                          {balanceDue > 0 && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleOpenPayment(customer);
+                              }}
+                              className="px-2.5 py-1 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg shadow-xs transition flex items-center gap-1 cursor-pointer shrink-0"
+                              title="Record payment to clear customer balance due"
+                            >
+                              <ArrowDownLeft className="w-3 h-3" />
+                              Pay Due
+                            </button>
+                          )}
                         </div>
                       </td>
 
                       {/* ACTIONS */}
                       <td className="px-5 py-4">
                         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-
                           <Btn
                             variant="ghost"
                             size="sm"
+                            title="View Customer Profile"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              handleOpenDetails(customer);
+                            }}
+                            icon={<Eye className="w-3.5 h-3.5 text-blue-600" />}
+                          />
+                          <Btn
+                            variant="ghost"
+                            size="sm"
+                            title="Edit Customer"
                             onClick={(event) => {
                               event.stopPropagation();
                               handleEdit(customer);
@@ -1134,6 +1545,7 @@ export default function CustomersScreen() {
                           <Btn
                             variant="ghost"
                             size="sm"
+                            title="Delete Customer"
                             onClick={(event) => {
                               event.stopPropagation();
                               setDeleteId(customerId);
@@ -1173,6 +1585,3 @@ export default function CustomersScreen() {
     </div>
   );
 }
-
-
-

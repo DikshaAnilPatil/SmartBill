@@ -1,5 +1,6 @@
 import { CustomizationProvider } from "@shared/context/CustomizationContext.jsx";
 import { BrowserRouter, Routes, Route, useNavigate } from "react-router-dom";
+import ErrorBoundary from "@shared/components/common/ErrorBoundary.jsx";
 import LandingPage from "./pages/LandingPage";
 import {
   FeaturesPage, PricingPage, AboutPage, BlogPage, 
@@ -40,11 +41,13 @@ function AppRoutes() {
 
 export default function App() {
   return (
-    <CustomizationProvider>
-      <BrowserRouter>
-        <AppRoutes />
-      </BrowserRouter>
-    </CustomizationProvider>
+    <ErrorBoundary>
+      <CustomizationProvider>
+        <BrowserRouter>
+          <AppRoutes />
+        </BrowserRouter>
+      </CustomizationProvider>
+    </ErrorBoundary>
   );
 }
 

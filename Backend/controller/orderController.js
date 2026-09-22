@@ -217,7 +217,11 @@ export const createOrder = async (req, res) => {
 
         if (!allowNegativeStock) {
           const updatedProduct = await Product.findOneAndUpdate(
-            { _id: product._id, stock: { $gte: quantity } },
+            {
+              _id: product._id,
+              $or: [{ userId: effectiveOwnerId }, { ownerId: effectiveOwnerId }],
+              stock: { $gte: quantity },
+            },
             { 
               $inc: { stock: -quantity },
               $push: {
@@ -243,7 +247,7 @@ export const createOrder = async (req, res) => {
           }
         } else {
           await Product.findOneAndUpdate(
-            { _id: product._id },
+            { _id: product._id, $or: [{ userId: effectiveOwnerId }, { ownerId: effectiveOwnerId }] },
             { 
               $inc: { stock: -quantity },
               $push: {

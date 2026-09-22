@@ -35,10 +35,6 @@ import {
 import { Avatar, AvatarFallback } from "@shared/components/ui/avatar";
 import { Tabs, TabsList, TabsTrigger } from "@shared/components/ui/tabs";
 import adminAPI from "@shared/api/adminAPI";
-import { PERMISSION_CATEGORIES } from "../settings/components/UserPermissionsSettings";
-
-const API_BASE = "http://localhost:5000/api";
-
 const fmt = (n) => `₹${Number(n).toLocaleString("en-IN")}`;
 
 function Badge({ label, variant }) {

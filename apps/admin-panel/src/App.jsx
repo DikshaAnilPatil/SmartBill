@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect } from "react";
 import { BrowserRouter, Routes, Route, useLocation, useNavigate, Navigate } from "react-router-dom";
 import AdminLogin from "./pages/AdminLogin";
 import AppShell from "./AppShell";
+import ErrorBoundary from "@shared/components/common/ErrorBoundary.jsx";
 import { CustomizationProvider, applyDOMCustomization } from "@shared/context/CustomizationContext.jsx";
 import { NotificationProvider } from "@shared/context/NotificationContext.jsx";
 import { useCustomization } from "@shared/hooks/useCustomization.js";
@@ -130,13 +131,15 @@ function AppRoutes() {
 
 export default function App() {
   return (
-    <CustomizationProvider>
-      <AccountingProvider>
-        <BrowserRouter>
-          <AppRoutes />
-        </BrowserRouter>
-      </AccountingProvider>
-    </CustomizationProvider>
+    <ErrorBoundary>
+      <CustomizationProvider>
+        <AccountingProvider>
+          <BrowserRouter>
+            <AppRoutes />
+          </BrowserRouter>
+        </AccountingProvider>
+      </CustomizationProvider>
+    </ErrorBoundary>
   );
 }
 
