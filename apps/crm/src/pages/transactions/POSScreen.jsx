@@ -348,14 +348,13 @@ export default function POSScreen() {
 
       if (syncedCount > 0) {
         showToast(`✓ Auto-synced ${syncedCount} offline bill${syncedCount > 1 ? "s" : ""} to the server!`, "success");
-        loadPastOrders();
         loadProductsList();
       }
       refreshPendingOfflineCount();
     } catch (e) {
       console.warn("Offline sync notice:", e);
     }
-  }, [loadPastOrders, loadProductsList, refreshPendingOfflineCount]);
+  }, [loadProductsList, refreshPendingOfflineCount]);
 
   useEffect(() => {
     refreshPendingOfflineCount();
@@ -1300,7 +1299,6 @@ export default function POSScreen() {
       if (!res.order?.isOfflineOrder) {
         showToast(`✓ Invoice ${res.order?.invoiceNo || ""} generated successfully!`);
       }
-      loadPastOrders();
       loadProductsList();
     } catch (err) {
       setError(err?.message || "Failed to save order. Please try again.");
