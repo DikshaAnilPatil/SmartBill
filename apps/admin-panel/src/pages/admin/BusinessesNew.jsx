@@ -271,32 +271,15 @@ export default function BusinessesNew() {
         console.warn("Notice: vendor settings fetch fallback:", sysErr.message);
       }
 
-      const token = localStorage.getItem("smartbill_token");
-      if (!token) {
-        setError("Not logged in. Please log out and log back in.");
-        return;
-      }
-
-      const response = await fetch(`${API_BASE}/admin/businesses`, {
-        method: "GET",
-        signal,
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-      });
-
+      const res = await adminAPI.getAllBusinesses();
       if (signal?.aborted) return;
 
-      const json = await response.json();
-
-      if (!response.ok) {
-        setError(`Server error ${response.status}: ${json.message || "Unknown error"}`);
-        return;
-      }
-
-      const rawData = json.data || [];
-      const data = rawData.map((b) => ({ ...b, status: "Active", suspensionReason: "" }));
+      const rawData = res?.data || (Array.isArray(res) ? res : []);
+      const data = rawData.map((b) => ({
+        ...b,
+        status: b.status || "Active",
+        suspensionReason: b.suspensionReason || "",
+      }));
       setRows(data);
 
       try {
@@ -412,17 +395,7 @@ export default function BusinessesNew() {
     }
 
     try {
-      const token = localStorage.getItem("smartbill_token");
-      const response = await fetch(`${API_BASE}/admin/businesses/${suspendBusinessId}/status`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ status: "Suspended", reason }),
-      });
-      if (!response.ok) {
-        const json = await response.json();
-        setSuspendReasonError(json.message || "Failed to update business status.");
-        return;
-      }
+      await adminAPI.updateBusinessStatus(suspendBusinessId, "Suspended", reason);
       setRows((prev) =>
         prev.map((b) =>
           b.id === suspendBusinessId || b._id === suspendBusinessId
@@ -433,23 +406,13 @@ export default function BusinessesNew() {
       setSuspendModalOpen(false);
       setSuspendBusinessId(null);
     } catch (err) {
-      setSuspendReasonError(err.message || "Failed to update business status.");
+      setSuspendReasonError(err.response?.data?.message || err.message || "Failed to update business status.");
     }
   };
 
   const resumeBusiness = async (businessId) => {
     try {
-      const token = localStorage.getItem("smartbill_token");
-      const response = await fetch(`${API_BASE}/admin/businesses/${businessId}/status`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ status: "Active", reason: "" }),
-      });
-      if (!response.ok) {
-        const json = await response.json();
-        alert(json.message || "Failed to reactivate business.");
-        return;
-      }
+      await adminAPI.updateBusinessStatus(businessId, "Active", "");
       setRows((prev) =>
         prev.map((b) =>
           b.id === businessId || b._id === businessId
@@ -458,7 +421,7 @@ export default function BusinessesNew() {
         )
       );
     } catch (err) {
-      alert(err.message || "Failed to reactivate business.");
+      alert(err.response?.data?.message || err.message || "Failed to reactivate business.");
     }
   };
 
