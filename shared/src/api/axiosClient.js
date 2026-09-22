@@ -35,9 +35,10 @@ axiosClient.interceptors.response.use(
     if (!error.response && originalRequest && !originalRequest._retryFallback) {
       originalRequest._retryFallback = true;
       try {
+        const currentHost = typeof window !== "undefined" && window.location && window.location.hostname ? window.location.hostname : "127.0.0.1";
         const fallbackBase =
           originalRequest.baseURL === "/api" || !originalRequest.baseURL
-            ? "http://127.0.0.1:5000/api"
+            ? `${window.location.protocol}//${currentHost}:5000/api`
             : "/api";
         originalRequest.baseURL = fallbackBase;
         const token = typeof localStorage !== "undefined" ? localStorage.getItem("smartbill_token") : null;
@@ -121,9 +122,9 @@ axiosClient.interceptors.response.use(
         } catch {}
       }
     } else if (error.request) {
-      // Request was made but no response received (server offline / CORS / proxy).
+      const hostName = typeof window !== "undefined" && window.location && window.location.hostname ? window.location.hostname : "localhost";
       message =
-        "Cannot reach the server. Make sure the backend is running on port 5000.";
+        `Cannot reach the backend server at ${hostName}:5000. Please ensure the backend server is running and accessible.`;
     }
 
     return Promise.reject({
