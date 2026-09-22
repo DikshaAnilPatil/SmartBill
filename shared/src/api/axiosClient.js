@@ -110,6 +110,15 @@ axiosClient.interceptors.response.use(
             window.location.href = "/login";
           }
         } catch {}
+      } else if (status === 401 && !originalRequest?.url?.includes("/auth/login")) {
+        try {
+          localStorage.removeItem("smartbill_token");
+          localStorage.removeItem("smartbill_user");
+          window.dispatchEvent(new Event("userUpdated"));
+          if (!window.location.pathname.includes("/login")) {
+            window.location.href = "/login";
+          }
+        } catch {}
       }
     } else if (error.request) {
       // Request was made but no response received (server offline / CORS / proxy).
