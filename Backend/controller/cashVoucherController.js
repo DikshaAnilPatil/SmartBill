@@ -1,6 +1,24 @@
 import CashVoucher from "../models/CashVoucher.js";
 import Supplier from "../models/Supplier.js";
 
+export function getVoucherBalanceDelta(voucher) {
+  const amountDue = Number(voucher.amountDue);
+  const amountPaid = Number(voucher.amountPaid ?? voucher.amount) || 0;
+
+  // Legacy vouchers already reduced the supplier balance by their paid amount.
+  if (!Number.isFinite(amountDue)) return amountPaid;
+  return Math.round((amountDue - amountPaid) * 100) / 100;
+}
+
+function getAppliedBalanceDelta(voucher) {
+  if (voucher.balanceAdjustmentApplied === true) {
+    return getVoucherBalanceDelta(voucher);
+  }
+
+  // Vouchers created before net-delta accounting reduced the balance by paid amount.
+  return -(Number(voucher.amountPaid ?? voucher.amount) || 0);
+}
+
 /**
  * Generate next sequence voucher number for the business e.g. CV-2026-0001
  */
@@ -131,10 +149,6 @@ export const createCashVoucher = async (req, res) => {
     if (!Number.isFinite(numAmountPaid) || numAmountPaid < 0) {
       return res.status(400).json({ message: "Amount Paid must be 0 or greater." });
     }
-    if (numAmountPaid > numAmountDue) {
-      return res.status(400).json({ message: "Amount Paid cannot be greater than Amount Due." });
-    }
-
     const voucherNo = await generateNextVoucherNo(userId);
 
     const voucher = await CashVoucher.create({
@@ -150,6 +164,7 @@ export const createCashVoucher = async (req, res) => {
       amountDue: numAmountDue,
       amountPaid: numAmountPaid,
       remainingBalance: Math.round((numAmountDue - numAmountPaid) * 100) / 100,
+      balanceAdjustmentApplied: false,
       paymentMode: "Cash",
       accountHead: accountHead || "Vendor Payment",
       referenceNo: referenceNo || "",
@@ -160,13 +175,17 @@ export const createCashVoucher = async (req, res) => {
       status: "Paid",
     });
 
-    // If linked to a registered Supplier and adjustSupplierBalance is true, reduce supplier balance
+    // Only a registered supplier receives the bill's net balance delta. Custom payees do not.
     if (supplierId && voucher.adjustSupplierBalance) {
-      const supplier = await Supplier.findOne({ _id: supplierId, ownerId });
+      const balanceDelta = getVoucherBalanceDelta(voucher);
+      const supplier = await Supplier.findOneAndUpdate(
+        { _id: supplierId, ownerId },
+        { $inc: { balance: balanceDelta } },
+        { new: true }
+      );
       if (supplier) {
-        const currentBal = Number(supplier.balance) || 0;
-        supplier.balance = Math.max(0, currentBal - numAmountPaid);
-        await supplier.save();
+        voucher.balanceAdjustmentApplied = true;
+        await voucher.save();
       }
     }
 
@@ -194,7 +213,7 @@ export const updateCashVoucher = async (req, res) => {
       return res.status(404).json({ message: "Cash Voucher not found." });
     }
 
-    const oldAmountPaid = Number(existing.amountPaid ?? existing.amount) || 0;
+    const oldBalanceDelta = getAppliedBalanceDelta(existing);
     const oldAdjust = existing.adjustSupplierBalance;
     const oldSupplierId = existing.supplierId;
 
@@ -208,10 +227,6 @@ export const updateCashVoucher = async (req, res) => {
     if (!Number.isFinite(newAmountPaid) || newAmountPaid < 0) {
       return res.status(400).json({ message: "Amount Paid must be 0 or greater." });
     }
-    if (newAmountPaid > newAmountDue) {
-      return res.status(400).json({ message: "Amount Paid cannot be greater than Amount Due." });
-    }
-
     const allowedFields = [
       "voucherDate", "supplierId", "supplierName", "vendorPhone", "vendorAddress",
       "vendorGst", "accountHead", "referenceNo", "paidBy", "receivedBy", "narration",
@@ -238,21 +253,24 @@ export const updateCashVoucher = async (req, res) => {
     const newAdjust = updated.adjustSupplierBalance;
     const newSupplierId = updated.supplierId;
 
-    // Handle Supplier Balance adjustments
-    if (oldSupplierId && oldAdjust) {
-      // Revert old adjustment
+    const newBalanceDelta = getVoucherBalanceDelta(updated);
+    const ownerId = req.user.ownerId || req.user._id;
+
+    // Revert the old net delta, then apply the updated voucher's net delta.
+    if (oldSupplierId && oldAdjust && (existing.balanceAdjustmentApplied === true || existing.balanceAdjustmentApplied === undefined)) {
       await Supplier.findOneAndUpdate(
-        { _id: oldSupplierId, ownerId: req.user.ownerId || req.user._id },
-        { $inc: { balance: oldAmountPaid } }
+        { _id: oldSupplierId, ownerId },
+        { $inc: { balance: -oldBalanceDelta } }
       );
     }
 
     if (newSupplierId && newAdjust) {
-      // Apply new adjustment
       await Supplier.findOneAndUpdate(
-        { _id: newSupplierId, ownerId: req.user.ownerId || req.user._id },
-        { $inc: { balance: -newAmountPaid } }
+        { _id: newSupplierId, ownerId },
+        { $inc: { balance: newBalanceDelta } }
       );
+      updated.balanceAdjustmentApplied = true;
+      await updated.save();
     }
 
     res.status(200).json({
@@ -280,11 +298,15 @@ export const deleteCashVoucher = async (req, res) => {
     }
 
     // Revert balance on supplier if it was adjusted
-    if (voucher.supplierId && voucher.adjustSupplierBalance) {
-      const amount = Number(voucher.amountPaid ?? voucher.amount) || 0;
+    if (
+      voucher.supplierId &&
+      voucher.adjustSupplierBalance &&
+      voucher.balanceAdjustmentApplied !== false
+    ) {
+      const balanceDelta = getAppliedBalanceDelta(voucher);
       await Supplier.findOneAndUpdate(
         { _id: voucher.supplierId, ownerId: req.user.ownerId || req.user._id },
-        { $inc: { balance: amount } }
+        { $inc: { balance: -balanceDelta } }
       );
     }
 

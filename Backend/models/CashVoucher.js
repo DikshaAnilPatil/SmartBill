@@ -53,7 +53,9 @@ const cashVoucherSchema = new mongoose.Schema(
     },
     remainingBalance: {
       type: Number,
-      min: 0,
+    },
+    balanceAdjustmentApplied: {
+      type: Boolean,
     },
     paymentMode: {
       type: String,

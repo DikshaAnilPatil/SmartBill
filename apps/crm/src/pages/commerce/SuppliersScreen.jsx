@@ -272,11 +272,6 @@ export default function SuppliersScreen() {
       showToast("Amount Paid must be 0 or greater.", "error");
       return;
     }
-    if (numAmountPaid > numAmountDue) {
-      showToast("Amount Paid cannot be greater than Amount Due.", "error");
-      return;
-    }
-
     setSubmittingVoucher(true);
     try {
       const payload = {
@@ -958,7 +953,6 @@ export default function SuppliersScreen() {
                 <input
                   type="number"
                   min="0"
-                  max={voucherForm.amountDue || undefined}
                   value={voucherForm.amountPaid}
                   onChange={(e) =>
                     setVoucherForm((f) => ({ ...f, amountPaid: e.target.value }))
